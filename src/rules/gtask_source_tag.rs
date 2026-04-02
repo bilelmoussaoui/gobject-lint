@@ -1,31 +1,11 @@
-use super::{Rule, Violation};
+use super::Violation;
+use crate::ast_context::AstContext;
 use crate::config::Config;
-use std::path::Path;
-use tree_sitter::Node;
+use tree_sitter::{Node, Parser};
 
 pub struct GTaskSourceTag;
 
 impl GTaskSourceTag {
-    fn check_function(&self, node: Node, source: &[u8]) -> Option<(String, usize, usize)> {
-        if node.kind() != "function_definition" {
-            return None;
-        }
-
-        let body = node.child_by_field_name("body")?;
-
-        // Find g_task_new calls and their assigned variables
-        let task_vars = self.find_gtask_new_calls(body, source);
-
-        for (var_name, line, col) in task_vars {
-            // Check if g_task_set_source_tag is called on this variable
-            if !self.has_set_source_tag_call(body, &var_name, source) {
-                return Some((var_name, line, col));
-            }
-        }
-
-        None
-    }
-
     fn find_gtask_new_calls(&self, node: Node, source: &[u8]) -> Vec<(String, usize, usize)> {
         let mut results = Vec::new();
 
@@ -128,34 +108,69 @@ impl GTaskSourceTag {
         let text = &source[node.byte_range()];
         std::str::from_utf8(text).unwrap_or("").to_string()
     }
-}
 
-impl Rule for GTaskSourceTag {
-    fn name(&self) -> &str {
-        "gtask_source_tag"
-    }
+    pub fn check_all(&self, ast_context: &AstContext, config: &Config) -> Vec<Violation> {
+        if !config.rules.gtask_source_tag {
+            return vec![];
+        }
 
-    fn check(&self, node: Node, source: &[u8], file_path: &Path) -> Vec<Violation> {
         let mut violations = Vec::new();
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_c::LANGUAGE.into()).ok();
 
-        if let Some((var_name, line, col)) = self.check_function(node, source) {
-            violations.push(Violation {
-                file: file_path.display().to_string(),
-                line,
-                column: col,
-                message: format!(
-                    "GTask {} created without g_task_set_source_tag. Add: g_task_set_source_tag ({}, <function_name>);",
-                    var_name, var_name
-                ),
-                rule: self.name().to_string(),
-                snippet: None,
-            });
+        for (path, file) in ast_context.project.files.iter() {
+            if path.extension().is_none_or(|ext| ext != "c") {
+                continue;
+            }
+
+            for func in &file.functions {
+                if !func.is_definition {
+                    continue;
+                }
+
+                if let Some(func_source) = ast_context.get_function_source(path, func) {
+                    if let Some(tree) = parser.parse(func_source, None) {
+                        let root = tree.root_node();
+
+                        if let Some(body) = self.find_body(root) {
+                            let task_vars = self.find_gtask_new_calls(body, func_source);
+
+                            for (var_name, line_offset, col) in task_vars {
+                                if !self.has_set_source_tag_call(body, &var_name, func_source) {
+                                    violations.push(Violation {
+                                        file: path.display().to_string(),
+                                        line: func.line + line_offset - 1,
+                                        column: col,
+                                        message: format!(
+                                            "GTask {} created without g_task_set_source_tag. Add: g_task_set_source_tag ({}, <function_name>);",
+                                            var_name, var_name
+                                        ),
+                                        rule: "gtask_source_tag".to_string(),
+                                        snippet: None,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         violations
     }
 
-    fn is_enabled(&self, config: &Config) -> bool {
-        config.rules.gtask_source_tag
+    fn find_body<'a>(&self, node: Node<'a>) -> Option<Node<'a>> {
+        if node.kind() == "compound_statement" {
+            return Some(node);
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(result) = self.find_body(child) {
+                return Some(result);
+            }
+        }
+
+        None
     }
 }

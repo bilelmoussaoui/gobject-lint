@@ -1,7 +1,7 @@
-use super::{Rule, Violation};
+use super::Violation;
+use crate::ast_context::AstContext;
 use crate::config::Config;
-use std::path::Path;
-use tree_sitter::Node;
+use tree_sitter::{Node, Parser};
 
 pub struct UseClearFunctions;
 
@@ -210,25 +210,60 @@ impl UseClearFunctions {
         let text = &source[node.byte_range()];
         std::str::from_utf8(text).unwrap_or("").to_string()
     }
-}
 
-impl Rule for UseClearFunctions {
-    fn name(&self) -> &str {
-        "use_clear_functions"
-    }
+    pub fn check_all(&self, ast_context: &AstContext, config: &Config) -> Vec<Violation> {
+        if !config.rules.use_clear_functions {
+            return vec![];
+        }
 
-    fn check(&self, node: Node, source: &[u8], file_path: &Path) -> Vec<Violation> {
         let mut violations = Vec::new();
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_c::LANGUAGE.into()).ok();
 
-        if let Some(mut violation) = self.is_manual_clear_pattern(node, source) {
-            violation.file = file_path.display().to_string();
-            violations.push(violation);
+        for (path, file) in ast_context.project.files.iter() {
+            if path.extension().is_none_or(|ext| ext != "c") {
+                continue;
+            }
+
+            for func in &file.functions {
+                if !func.is_definition {
+                    continue;
+                }
+
+                if let Some(func_source) = ast_context.get_function_source(path, func) {
+                    if let Some(tree) = parser.parse(func_source, None) {
+                        self.check_node(
+                            tree.root_node(),
+                            func_source,
+                            path,
+                            func.line,
+                            &mut violations,
+                        );
+                    }
+                }
+            }
         }
 
         violations
     }
 
-    fn is_enabled(&self, config: &Config) -> bool {
-        config.rules.use_clear_functions
+    fn check_node(
+        &self,
+        node: Node,
+        source: &[u8],
+        file_path: &std::path::Path,
+        base_line: usize,
+        violations: &mut Vec<Violation>,
+    ) {
+        if let Some(mut violation) = self.is_manual_clear_pattern(node, source) {
+            violation.file = file_path.display().to_string();
+            violation.line = base_line + violation.line - 1;
+            violations.push(violation);
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.check_node(child, source, file_path, base_line, violations);
+        }
     }
 }

@@ -49,6 +49,9 @@ pub struct RulesConfig {
 
     #[serde(default = "default_true")]
     pub unnecessary_null_check: bool,
+
+    #[serde(default = "default_true")]
+    pub function_visibility: bool,
 }
 
 fn default_true() -> bool {

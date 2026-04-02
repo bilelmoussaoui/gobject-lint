@@ -1,146 +1,77 @@
+use crate::ast_context::AstContext;
 use crate::config::Config;
-use crate::rules::{get_all_rules, Violation};
-use anyhow::{Context, Result};
-use globset::GlobSet;
-use indicatif::{ProgressBar, ProgressStyle};
-use std::fs;
-use std::path::Path;
-use tree_sitter::Parser;
-use walkdir::WalkDir;
+use crate::rules::chainup::DisposeFinalizeChainsUp;
+use crate::rules::deprecated_add_private::DeprecatedAddPrivate;
+use crate::rules::function_visibility_ast::FunctionVisibilityAst;
+use crate::rules::g_param_spec::GParamSpecNullNickBlurb;
+use crate::rules::gdeclare_semicolon::GDeclareSemicolon;
+use crate::rules::gerror_init::GErrorInit;
+use crate::rules::gtask_source_tag::GTaskSourceTag;
+use crate::rules::property_enum_zero::PropertyEnumZero;
+use crate::rules::unnecessary_null_check::UnnecessaryNullCheck;
+use crate::rules::use_clear_functions::UseClearFunctions;
+use crate::rules::use_g_strcmp0::UseGStrcmp0;
+use crate::rules::Violation;
+use anyhow::Result;
+use indicatif::ProgressBar;
 
-pub fn scan_directory(
-    directory: &Path,
+/// New AST-based scanner - much simpler than the old one!
+pub fn scan_with_ast(
+    ast_context: &AstContext,
     config: &Config,
-    show_progress: bool,
+    spinner: Option<&ProgressBar>,
 ) -> Result<Vec<Violation>> {
     let mut violations = Vec::new();
-    let rules = get_all_rules();
 
-    // Filter enabled rules
-    let enabled_rules: Vec<_> = rules
-        .into_iter()
-        .filter(|rule| rule.is_enabled(config))
-        .collect();
-
-    // Build ignore matcher
-    let ignore_matcher = config.build_ignore_matcher()?;
-
-    // Collect all files first to get count
-    let files: Vec<_> = WalkDir::new(directory)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .is_some_and(|ext| ext == "c" || ext == "h")
-        })
-        .filter(|e| !should_ignore(e.path(), directory, &ignore_matcher))
-        .collect();
-
-    let total_files = files.len();
-
-    // Create progress bar
-    let progress = if show_progress && total_files > 0 {
-        let pb = ProgressBar::new(total_files as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-                .unwrap()
-                .progress_chars("#>-"),
-        );
-        Some(pb)
-    } else {
-        None
-    };
-
-    // Scan each file
-    for entry in files {
-        let path = entry.path();
-
-        if let Some(ref pb) = progress {
-            pb.set_message(format!("{}", path.display()));
-        }
-
-        match scan_file(path, &enabled_rules) {
-            Ok(mut file_violations) => violations.append(&mut file_violations),
-            Err(e) => eprintln!("Warning: Failed to scan {}: {}", path.display(), e),
-        }
-
-        if let Some(ref pb) = progress {
-            pb.inc(1);
-        }
+    if let Some(sp) = spinner {
+        sp.set_message("Running linter rules...");
     }
 
-    if let Some(pb) = progress {
-        pb.finish_with_message("Scan complete");
+    // Run function visibility checks
+    if config.rules.function_visibility {
+        let rule = FunctionVisibilityAst;
+        violations.extend(rule.check_all(ast_context, config));
     }
+
+    // Run G_DECLARE semicolon checks
+    let rule = GDeclareSemicolon;
+    violations.extend(rule.check_all(ast_context, config));
+
+    // Run deprecated API checks
+    let rule = DeprecatedAddPrivate;
+    violations.extend(rule.check_all(ast_context, config));
+
+    // Run string comparison checks
+    let rule = UseGStrcmp0;
+    violations.extend(rule.check_all(ast_context, config));
+
+    // Run g_param_spec checks
+    let rule = GParamSpecNullNickBlurb;
+    violations.extend(rule.check_all(ast_context, config));
+
+    // Run GError initialization checks
+    let rule = GErrorInit;
+    violations.extend(rule.check_all(ast_context, config));
+
+    // Run property enum checks
+    let rule = PropertyEnumZero;
+    violations.extend(rule.check_all(ast_context, config));
+
+    // Run dispose/finalize chain-up checks
+    let rule = DisposeFinalizeChainsUp;
+    violations.extend(rule.check_all(ast_context, config));
+
+    // Run GTask source tag checks
+    let rule = GTaskSourceTag;
+    violations.extend(rule.check_all(ast_context, config));
+
+    // Run unnecessary NULL check detection
+    let rule = UnnecessaryNullCheck;
+    violations.extend(rule.check_all(ast_context, config));
+
+    // Run use clear functions checks
+    let rule = UseClearFunctions;
+    violations.extend(rule.check_all(ast_context, config));
 
     Ok(violations)
-}
-
-fn should_ignore(path: &Path, base_dir: &Path, matcher: &GlobSet) -> bool {
-    // Get relative path from base directory
-    let relative_path = match path.strip_prefix(base_dir) {
-        Ok(rel) => rel,
-        Err(_) => path,
-    };
-
-    matcher.is_match(relative_path)
-}
-
-fn scan_file(path: &Path, rules: &[Box<dyn crate::rules::Rule>]) -> Result<Vec<Violation>> {
-    let mut violations = Vec::new();
-
-    let source_code =
-        fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))?;
-
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_c::LANGUAGE.into())
-        .context("Failed to load C grammar")?;
-
-    let tree = parser
-        .parse(&source_code, None)
-        .context("Failed to parse C code")?;
-
-    let root_node = tree.root_node();
-
-    // Traverse the tree and check each node against all rules
-    traverse_tree(root_node, &source_code, path, rules, &mut violations);
-
-    // Add code snippets to violations
-    add_snippets_to_violations(&mut violations, &source_code);
-
-    Ok(violations)
-}
-
-fn add_snippets_to_violations(violations: &mut [Violation], source_code: &[u8]) {
-    let source_str = String::from_utf8_lossy(source_code);
-    let lines: Vec<&str> = source_str.lines().collect();
-
-    for violation in violations.iter_mut() {
-        if violation.line > 0 && violation.line <= lines.len() {
-            let line_content = lines[violation.line - 1].trim();
-            violation.snippet = Some(line_content.to_string());
-        }
-    }
-}
-
-fn traverse_tree(
-    node: tree_sitter::Node,
-    source: &[u8],
-    path: &Path,
-    rules: &[Box<dyn crate::rules::Rule>],
-    violations: &mut Vec<Violation>,
-) {
-    // Check current node against all rules
-    for rule in rules {
-        violations.extend(rule.check(node, source, path));
-    }
-
-    // Recursively traverse children
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        traverse_tree(child, source, path, rules, violations);
-    }
 }

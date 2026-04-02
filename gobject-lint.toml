@@ -34,7 +34,7 @@ dispose_finalize_chains_up = true
 use_clear_functions = true
 
 # Use g_strcmp0 instead of strcmp (NULL-safe)
-use_g_strcmp0 = true
+use_g_strcmp0 = false
 
 # Ensure property enums start with PROP_0, not PROP_NAME = 0
 property_enum_zero = true
@@ -46,7 +46,13 @@ deprecated_add_private = true
 gerror_init = true
 
 # Ensure g_task_set_source_tag is called after g_task_new
-gtask_source_tag = true
+gtask_source_tag = false
 
 # Detect unnecessary NULL checks before g_free/g_clear_pointer
 unnecessary_null_check = true
+
+# Suggest making non-static, non-public functions static
+function_visibility = false
+
+# Enforce semicolons after G_DECLARE_* macros
+gdeclare_semicolon = true

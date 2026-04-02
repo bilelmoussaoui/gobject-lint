@@ -1,58 +1,11 @@
-use super::{Rule, Violation};
+use super::Violation;
+use crate::ast_context::AstContext;
 use crate::config::Config;
-use std::path::Path;
-use tree_sitter::Node;
+use tree_sitter::{Node, Parser};
 
 pub struct DisposeFinalizeChainsUp;
 
 impl DisposeFinalizeChainsUp {
-    fn is_dispose_or_finalize_function(&self, node: Node, source: &[u8]) -> Option<String> {
-        if node.kind() != "function_definition" {
-            return None;
-        }
-
-        let declarator = node.child_by_field_name("declarator")?;
-        let function_name = self.extract_function_name(declarator, source)?;
-
-        // Check if function name ends with _dispose or _finalize
-        let method_type = if function_name.ends_with("_dispose") {
-            "dispose"
-        } else if function_name.ends_with("_finalize") {
-            "finalize"
-        } else {
-            return None;
-        };
-
-        // Verify this is actually a GObject virtual method by checking the parameter type
-        if !self.is_gobject_virtual_method(declarator, source) {
-            return None;
-        }
-
-        Some(method_type.to_string())
-    }
-
-    fn is_gobject_virtual_method(&self, declarator: Node, source: &[u8]) -> bool {
-        // Find the function_declarator which contains parameters
-        let Some(function_declarator) = self.find_function_declarator(declarator) else {
-            return false;
-        };
-
-        // Get the parameter list
-        let Some(parameters) = function_declarator.child_by_field_name("parameters") else {
-            return false;
-        };
-
-        // Check the first parameter - should be GObject* or similar
-        let mut cursor = parameters.walk();
-        for child in parameters.children(&mut cursor) {
-            if child.kind() == "parameter_declaration" {
-                return self.is_gobject_parameter(child, source);
-            }
-        }
-
-        false
-    }
-
     fn find_function_declarator<'a>(&self, node: Node<'a>) -> Option<Node<'a>> {
         if node.kind() == "function_declarator" {
             return Some(node);
@@ -82,27 +35,6 @@ impl DisposeFinalizeChainsUp {
             || (param_text.contains("Object") && param_text.contains('*'))
             || param_text.contains("* object")
             || param_text.contains("*object")
-    }
-
-    fn extract_function_name(&self, declarator: Node, source: &[u8]) -> Option<String> {
-        // Handle function_declarator -> identifier
-        if declarator.kind() == "function_declarator" {
-            if let Some(inner_declarator) = declarator.child_by_field_name("declarator") {
-                if inner_declarator.kind() == "identifier" {
-                    let name = &source[inner_declarator.byte_range()];
-                    return Some(std::str::from_utf8(name).ok()?.to_string());
-                }
-            }
-        }
-
-        // Handle pointer_declarator -> function_declarator -> identifier
-        if declarator.kind() == "pointer_declarator" {
-            if let Some(inner) = declarator.child_by_field_name("declarator") {
-                return self.extract_function_name(inner, source);
-            }
-        }
-
-        None
     }
 
     fn has_chainup_call(&self, node: Node, source: &[u8], method_type: &str) -> bool {
@@ -183,54 +115,94 @@ impl DisposeFinalizeChainsUp {
         let text = &source[node.byte_range()];
         std::str::from_utf8(text).unwrap_or("").to_string()
     }
-}
 
-impl Rule for DisposeFinalizeChainsUp {
-    fn name(&self) -> &str {
-        "dispose_finalize_chains_up"
-    }
+    pub fn check_all(&self, ast_context: &AstContext, config: &Config) -> Vec<Violation> {
+        if !config.rules.dispose_finalize_chains_up {
+            return vec![];
+        }
 
-    fn check(&self, node: Node, source: &[u8], file_path: &Path) -> Vec<Violation> {
         let mut violations = Vec::new();
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_c::LANGUAGE.into()).ok();
 
-        let Some(method_type) = self.is_dispose_or_finalize_function(node, source) else {
-            return violations;
-        };
+        for (path, file) in ast_context.project.files.iter() {
+            if path.extension().is_none_or(|ext| ext != "c") {
+                continue;
+            }
 
-        // Get the function body
-        let Some(body) = node.child_by_field_name("body") else {
-            return violations;
-        };
+            for func in &file.functions {
+                if !func.is_definition {
+                    continue;
+                }
 
-        // Check if there's a chain-up call in the function body
-        if !self.has_chainup_call(body, source, &method_type) {
-            let position = node.start_position();
+                // Check if function name ends with _dispose or _finalize
+                let method_type = if func.name.ends_with("_dispose") {
+                    "dispose"
+                } else if func.name.ends_with("_finalize") {
+                    "finalize"
+                } else {
+                    continue;
+                };
 
-            // Try to get function name for better error message
-            let function_name = if let Some(declarator) = node.child_by_field_name("declarator") {
-                self.extract_function_name(declarator, source)
-                    .unwrap_or_else(|| format!("{}()", method_type))
-            } else {
-                format!("{}()", method_type)
-            };
+                if let Some(func_source) = ast_context.get_function_source(path, func) {
+                    if let Some(tree) = parser.parse(func_source, None) {
+                        let root = tree.root_node();
 
-            violations.push(Violation {
-                file: file_path.display().to_string(),
-                line: position.row + 1,
-                column: position.column + 1,
-                message: format!(
-                    "{} must chain up to parent class (e.g., G_OBJECT_CLASS (parent_class)->{} (object))",
-                    function_name, method_type
-                ),
-                rule: self.name().to_string(),
-                snippet: None,
-            });
+                        // Verify it's a GObject virtual method
+                        if !self.is_gobject_virtual_method_from_source(root, func_source) {
+                            continue;
+                        }
+
+                        // Find the body
+                        if let Some(body) = self.find_body(root) {
+                            if !self.has_chainup_call(body, func_source, method_type) {
+                                violations.push(Violation {
+                                    file: path.display().to_string(),
+                                    line: func.line,
+                                    column: 1,
+                                    message: format!(
+                                        "{} must chain up to parent class (e.g., G_OBJECT_CLASS (parent_class)->{} (object))",
+                                        func.name, method_type
+                                    ),
+                                    rule: "dispose_finalize_chains_up".to_string(),
+                                    snippet: None,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         violations
     }
 
-    fn is_enabled(&self, config: &Config) -> bool {
-        config.rules.dispose_finalize_chains_up
+    fn find_body<'a>(&self, node: Node<'a>) -> Option<Node<'a>> {
+        if node.kind() == "compound_statement" {
+            return Some(node);
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(result) = self.find_body(child) {
+                return Some(result);
+            }
+        }
+
+        None
+    }
+
+    fn is_gobject_virtual_method_from_source(&self, node: Node, source: &[u8]) -> bool {
+        if let Some(func_decl) = self.find_function_declarator(node) {
+            if let Some(parameters) = func_decl.child_by_field_name("parameters") {
+                let mut cursor = parameters.walk();
+                for child in parameters.children(&mut cursor) {
+                    if child.kind() == "parameter_declaration" {
+                        return self.is_gobject_parameter(child, source);
+                    }
+                }
+            }
+        }
+        false
     }
 }

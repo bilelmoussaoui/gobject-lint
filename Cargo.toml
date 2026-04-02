@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+gobject-ast = { path = "gobject-ast" }
 tree-sitter = "0.26"
 tree-sitter-c = "0.24"
 clap = { version = "4.6", features = ["derive"] }

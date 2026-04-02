@@ -1,67 +1,85 @@
-use super::{Rule, Violation};
+use super::Violation;
+use crate::ast_context::AstContext;
 use crate::config::Config;
-use std::path::Path;
-use tree_sitter::Node;
+use tree_sitter::{Node, Parser};
 
 pub struct UseGStrcmp0;
 
 impl UseGStrcmp0 {
-    fn is_strcmp_call(&self, node: Node, source: &[u8]) -> bool {
-        if node.kind() != "call_expression" {
-            return false;
+    pub fn check_all(&self, ast_context: &AstContext, config: &Config) -> Vec<Violation> {
+        if !config.rules.use_g_strcmp0 {
+            return vec![];
         }
 
-        let Some(function) = node.child_by_field_name("function") else {
-            return false;
-        };
-
-        let func_text = self.get_node_text(function, source);
-
-        // Check for strcmp, but not g_strcmp0
-        func_text == "strcmp" || func_text == "strncmp"
-    }
-
-    fn get_node_text(&self, node: Node, source: &[u8]) -> String {
-        let text = &source[node.byte_range()];
-        std::str::from_utf8(text).unwrap_or("").to_string()
-    }
-}
-
-impl Rule for UseGStrcmp0 {
-    fn name(&self) -> &str {
-        "use_g_strcmp0"
-    }
-
-    fn check(&self, node: Node, source: &[u8], file_path: &Path) -> Vec<Violation> {
         let mut violations = Vec::new();
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_c::LANGUAGE.into()).ok();
 
-        if !self.is_strcmp_call(node, source) {
-            return violations;
+        for (path, file) in ast_context.project.files.iter() {
+            if path.extension().is_none_or(|ext| ext != "c") {
+                continue;
+            }
+
+            for func in &file.functions {
+                if !func.is_definition {
+                    continue;
+                }
+
+                if let Some(func_source) = ast_context.get_function_source(path, func) {
+                    if let Some(tree) = parser.parse(func_source, None) {
+                        self.check_node(
+                            tree.root_node(),
+                            func_source,
+                            path,
+                            func.line,
+                            &mut violations,
+                        );
+                    }
+                }
+            }
         }
-
-        let position = node.start_position();
-        let function = node.child_by_field_name("function").unwrap();
-        let func_name = self.get_node_text(function, source);
-
-        let suggestion = if func_name == "strcmp" {
-            "g_strcmp0"
-        } else {
-            "g_strcmp0 or check for NULL first"
-        };
-
-        violations.push(Violation {
-            file: file_path.display().to_string(),
-            line: position.row + 1,
-            column: position.column + 1,
-            message: format!("Use {} instead of {} (NULL-safe)", suggestion, func_name),
-            rule: self.name().to_string(),
-            snippet: None,
-        });
 
         violations
     }
 
-    fn is_enabled(&self, config: &Config) -> bool {
-        config.rules.use_g_strcmp0
+    fn check_node(
+        &self,
+        node: Node,
+        source: &[u8],
+        file_path: &std::path::Path,
+        base_line: usize,
+        violations: &mut Vec<Violation>,
+    ) {
+        if node.kind() == "call_expression" {
+            if let Some(function) = node.child_by_field_name("function") {
+                let func_text = &source[function.byte_range()];
+                if let Ok(func_name) = std::str::from_utf8(func_text) {
+                    if func_name == "strcmp" || func_name == "strncmp" {
+                        let suggestion = if func_name == "strcmp" {
+                            "g_strcmp0"
+                        } else {
+                            "g_strcmp0 or check for NULL first"
+                        };
+
+                        violations.push(Violation {
+                            file: file_path.display().to_string(),
+                            line: base_line + node.start_position().row,
+                            column: node.start_position().column + 1,
+                            message: format!(
+                                "Use {} instead of {} (NULL-safe)",
+                                suggestion, func_name
+                            ),
+                            rule: "use_g_strcmp0".to_string(),
+                            snippet: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.check_node(child, source, file_path, base_line, violations);
+        }
     }
 }

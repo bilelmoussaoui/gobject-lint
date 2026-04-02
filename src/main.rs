@@ -1,3 +1,4 @@
+mod ast_context;
 mod config;
 mod reporter;
 mod rules;
@@ -5,6 +6,7 @@ mod scanner;
 
 use anyhow::Result;
 use clap::Parser;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -37,16 +39,60 @@ fn main() -> Result<()> {
     // Merge CLI ignore patterns with config
     config.ignore.extend(args.ignore.clone());
 
-    if args.verbose {
-        println!("Loaded configuration from: {}", args.config.display());
-        println!("Scanning directory: {}", args.directory.display());
-        if !config.ignore.is_empty() {
-            println!("Ignore patterns: {:?}", config.ignore);
-        }
+    // Build ignore matcher
+    let ignore_matcher = config.build_ignore_matcher()?;
+
+    // Create spinner for progress
+    let spinner = if args.verbose {
+        let sp = ProgressBar::new_spinner();
+        sp.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.green} {msg}")
+                .unwrap(),
+        );
+        sp.enable_steady_tick(std::time::Duration::from_millis(100));
+        Some(sp)
+    } else {
+        None
+    };
+
+    // Build AST-based context
+    if let Some(ref sp) = spinner {
+        sp.set_message("Parsing files...");
+    }
+    let ast_context = ast_context::AstContext::build_with_ignore(
+        &args.directory,
+        &ignore_matcher,
+        spinner.as_ref(),
+    )?;
+
+    // Run AST-based rules
+    let violations = scanner::scan_with_ast(&ast_context, &config, spinner.as_ref())?;
+
+    if let Some(sp) = spinner {
+        sp.finish_and_clear();
     }
 
-    // Scan files and run rules
-    let violations = scanner::scan_directory(&args.directory, &config, args.verbose)?;
+    if args.verbose {
+        let total_functions: usize = ast_context
+            .project
+            .files
+            .values()
+            .map(|f| f.functions.len())
+            .sum();
+        let total_gobject_types: usize = ast_context
+            .project
+            .files
+            .values()
+            .map(|f| f.gobject_types.len())
+            .sum();
+        println!(
+            "Parsed {} files, {} functions, {} GObject types",
+            ast_context.project.files.len(),
+            total_functions,
+            total_gobject_types
+        );
+    }
 
     // Report violations
     reporter::report_violations(&violations, args.verbose, &config);
