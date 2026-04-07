@@ -1,13 +1,9 @@
-mod ast_context;
-mod config;
-mod reporter;
-mod rules;
-mod scanner;
-
 use anyhow::Result;
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
+
+use gobject_lint::{ast_context, config, reporter, scanner};
 
 #[derive(Parser, Debug)]
 #[command(name = "gobject-lint")]
