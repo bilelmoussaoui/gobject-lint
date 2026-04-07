@@ -127,6 +127,9 @@ pub struct RulesConfig {
 
     #[serde(default)]
     pub gdeclare_semicolon: RuleConfig,
+
+    #[serde(default)]
+    pub strcmp_for_string_equal: RuleConfig,
 }
 
 impl Config {

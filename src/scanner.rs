@@ -8,13 +8,34 @@ use crate::rules::gerror_init::GErrorInit;
 use crate::rules::gtask_source_tag::GTaskSourceTag;
 use crate::rules::missing_implementation::MissingImplementation;
 use crate::rules::property_enum_zero::PropertyEnumZero;
+use crate::rules::strcmp_equal::StrcmpForStringEqual;
 use crate::rules::unnecessary_null_check::UnnecessaryNullCheck;
 use crate::rules::use_clear_functions::UseClearFunctions;
 use crate::rules::use_g_strcmp0::UseGStrcmp0;
 use crate::rules::Violation;
 use anyhow::Result;
 use indicatif::ProgressBar;
+use std::fs;
 use std::path::Path;
+
+/// Extract a source snippet from a file at the given line
+fn get_source_snippet(file_path: &Path, line: usize) -> Option<String> {
+    let content = fs::read_to_string(file_path).ok()?;
+    content
+        .lines()
+        .nth(line.saturating_sub(1))
+        .map(|s| s.trim().to_string())
+}
+
+/// Populate snippets for violations that don't have them
+fn populate_snippets(violations: &mut [Violation], start_index: usize) {
+    for violation in violations.iter_mut().skip(start_index) {
+        if violation.snippet.is_none() {
+            let path = Path::new(&violation.file);
+            violation.snippet = get_source_snippet(path, violation.line);
+        }
+    }
+}
 
 /// Filter violations in-place based on per-rule ignore patterns
 /// Only filters violations added after `start_index`
@@ -63,6 +84,7 @@ pub fn scan_with_ast(
         let start = violations.len();
         let rule = GDeclareSemicolon;
         rule.check_all(ast_context, config, &mut violations);
+        populate_snippets(&mut violations, start);
         filter_violations_in_place(
             &mut violations,
             start,
@@ -77,6 +99,7 @@ pub fn scan_with_ast(
         let start = violations.len();
         let rule = MissingImplementation;
         rule.check_all(ast_context, config, &mut violations);
+        populate_snippets(&mut violations, start);
         filter_violations_in_place(
             &mut violations,
             start,
@@ -91,6 +114,7 @@ pub fn scan_with_ast(
         let start = violations.len();
         let rule = DeprecatedAddPrivate;
         rule.check_all(ast_context, config, &mut violations);
+        populate_snippets(&mut violations, start);
         filter_violations_in_place(
             &mut violations,
             start,
@@ -105,6 +129,7 @@ pub fn scan_with_ast(
         let start = violations.len();
         let rule = UseGStrcmp0;
         rule.check_all(ast_context, config, &mut violations);
+        populate_snippets(&mut violations, start);
         filter_violations_in_place(
             &mut violations,
             start,
@@ -119,6 +144,7 @@ pub fn scan_with_ast(
         let start = violations.len();
         let rule = GParamSpecNullNickBlurb;
         rule.check_all(ast_context, config, &mut violations);
+        populate_snippets(&mut violations, start);
         filter_violations_in_place(
             &mut violations,
             start,
@@ -133,6 +159,7 @@ pub fn scan_with_ast(
         let start = violations.len();
         let rule = GErrorInit;
         rule.check_all(ast_context, config, &mut violations);
+        populate_snippets(&mut violations, start);
         filter_violations_in_place(
             &mut violations,
             start,
@@ -147,6 +174,7 @@ pub fn scan_with_ast(
         let start = violations.len();
         let rule = PropertyEnumZero;
         rule.check_all(ast_context, config, &mut violations);
+        populate_snippets(&mut violations, start);
         filter_violations_in_place(
             &mut violations,
             start,
@@ -161,6 +189,7 @@ pub fn scan_with_ast(
         let start = violations.len();
         let rule = DisposeFinalizeChainsUp;
         rule.check_all(ast_context, config, &mut violations);
+        populate_snippets(&mut violations, start);
         filter_violations_in_place(
             &mut violations,
             start,
@@ -175,6 +204,7 @@ pub fn scan_with_ast(
         let start = violations.len();
         let rule = GTaskSourceTag;
         rule.check_all(ast_context, config, &mut violations);
+        populate_snippets(&mut violations, start);
         filter_violations_in_place(
             &mut violations,
             start,
@@ -189,6 +219,7 @@ pub fn scan_with_ast(
         let start = violations.len();
         let rule = UnnecessaryNullCheck;
         rule.check_all(ast_context, config, &mut violations);
+        populate_snippets(&mut violations, start);
         filter_violations_in_place(
             &mut violations,
             start,
@@ -203,12 +234,28 @@ pub fn scan_with_ast(
         let start = violations.len();
         let rule = UseClearFunctions;
         rule.check_all(ast_context, config, &mut violations);
+        populate_snippets(&mut violations, start);
         filter_violations_in_place(
             &mut violations,
             start,
             project_root,
             config,
             &config.rules.use_clear_functions,
+        )?;
+    }
+
+    // Run strcmp for string equal checks
+    if config.rules.strcmp_for_string_equal.enabled {
+        let start = violations.len();
+        let rule = StrcmpForStringEqual;
+        rule.check_all(ast_context, config, &mut violations);
+        populate_snippets(&mut violations, start);
+        filter_violations_in_place(
+            &mut violations,
+            start,
+            project_root,
+            config,
+            &config.rules.strcmp_for_string_equal,
         )?;
     }
 

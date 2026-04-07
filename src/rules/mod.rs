@@ -8,6 +8,7 @@ pub mod gerror_init;
 pub mod gtask_source_tag;
 pub mod missing_implementation;
 pub mod property_enum_zero;
+pub mod strcmp_equal;
 pub mod unnecessary_null_check;
 pub mod use_clear_functions;
 pub mod use_g_strcmp0;
