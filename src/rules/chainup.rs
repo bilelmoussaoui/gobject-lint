@@ -116,11 +116,7 @@ impl DisposeFinalizeChainsUp {
         std::str::from_utf8(text).unwrap_or("").to_string()
     }
 
-    pub fn check_all(&self, ast_context: &AstContext, config: &Config) -> Vec<Violation> {
-        if !config.rules.dispose_finalize_chains_up {
-            return vec![];
-        }
-
+    pub fn check_all(&self, ast_context: &AstContext, _config: &Config) -> Vec<Violation> {
         let mut violations = Vec::new();
         let mut parser = Parser::new();
         parser.set_language(&tree_sitter_c::LANGUAGE.into()).ok();

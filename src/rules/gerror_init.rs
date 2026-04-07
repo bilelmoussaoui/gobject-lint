@@ -6,11 +6,7 @@ use tree_sitter::{Node, Parser};
 pub struct GErrorInit;
 
 impl GErrorInit {
-    pub fn check_all(&self, ast_context: &AstContext, config: &Config) -> Vec<Violation> {
-        if !config.rules.gerror_init {
-            return vec![];
-        }
-
+    pub fn check_all(&self, ast_context: &AstContext, _config: &Config) -> Vec<Violation> {
         let mut violations = Vec::new();
         let mut parser = Parser::new();
         parser.set_language(&tree_sitter_c::LANGUAGE.into()).ok();

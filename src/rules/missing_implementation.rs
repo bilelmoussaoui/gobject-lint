@@ -6,11 +6,7 @@ use crate::config::Config;
 pub struct MissingImplementation;
 
 impl MissingImplementation {
-    pub fn check_all(&self, ast_context: &AstContext, config: &Config) -> Vec<Violation> {
-        if !config.rules.missing_implementation {
-            return vec![];
-        }
-
+    pub fn check_all(&self, ast_context: &AstContext, _config: &Config) -> Vec<Violation> {
         let mut violations = Vec::new();
 
         // Find all declared but not defined functions

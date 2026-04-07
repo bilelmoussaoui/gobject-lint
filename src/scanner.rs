@@ -1,5 +1,5 @@
 use crate::ast_context::AstContext;
-use crate::config::Config;
+use crate::config::{Config, RuleConfig};
 use crate::rules::chainup::DisposeFinalizeChainsUp;
 use crate::rules::deprecated_add_private::DeprecatedAddPrivate;
 use crate::rules::g_param_spec::GParamSpecNullNickBlurb;
@@ -14,6 +14,24 @@ use crate::rules::use_g_strcmp0::UseGStrcmp0;
 use crate::rules::Violation;
 use anyhow::Result;
 use indicatif::ProgressBar;
+use std::path::Path;
+
+/// Filter violations based on per-rule ignore patterns
+fn filter_violations(
+    violations: Vec<Violation>,
+    config: &Config,
+    rule_config: &RuleConfig,
+) -> Result<Vec<Violation>> {
+    let ignore_matcher = config.build_rule_ignore_matcher(rule_config)?;
+
+    Ok(violations
+        .into_iter()
+        .filter(|v| {
+            let path = Path::new(&v.file);
+            !ignore_matcher.is_match(path)
+        })
+        .collect())
+}
 
 /// New AST-based scanner - much simpler than the old one!
 pub fn scan_with_ast(
@@ -28,48 +46,125 @@ pub fn scan_with_ast(
     }
 
     // Run G_DECLARE semicolon checks
-    let rule = GDeclareSemicolon;
-    violations.extend(rule.check_all(ast_context, config));
+    if config.rules.gdeclare_semicolon.enabled {
+        let rule = GDeclareSemicolon;
+        let rule_violations = rule.check_all(ast_context, config);
+        violations.extend(filter_violations(
+            rule_violations,
+            config,
+            &config.rules.gdeclare_semicolon,
+        )?);
+    }
 
     // Run missing implementation checks
-    let rule = MissingImplementation;
-    violations.extend(rule.check_all(ast_context, config));
+    if config.rules.missing_implementation.enabled {
+        let rule = MissingImplementation;
+        let rule_violations = rule.check_all(ast_context, config);
+        violations.extend(filter_violations(
+            rule_violations,
+            config,
+            &config.rules.missing_implementation,
+        )?);
+    }
 
     // Run deprecated API checks
-    let rule = DeprecatedAddPrivate;
-    violations.extend(rule.check_all(ast_context, config));
+    if config.rules.deprecated_add_private.enabled {
+        let rule = DeprecatedAddPrivate;
+        let rule_violations = rule.check_all(ast_context, config);
+        violations.extend(filter_violations(
+            rule_violations,
+            config,
+            &config.rules.deprecated_add_private,
+        )?);
+    }
 
     // Run string comparison checks
-    let rule = UseGStrcmp0;
-    violations.extend(rule.check_all(ast_context, config));
+    if config.rules.use_g_strcmp0.enabled {
+        let rule = UseGStrcmp0;
+        let rule_violations = rule.check_all(ast_context, config);
+        violations.extend(filter_violations(
+            rule_violations,
+            config,
+            &config.rules.use_g_strcmp0,
+        )?);
+    }
 
     // Run g_param_spec checks
-    let rule = GParamSpecNullNickBlurb;
-    violations.extend(rule.check_all(ast_context, config));
+    if config.rules.g_param_spec_null_nick_blurb.enabled {
+        let rule = GParamSpecNullNickBlurb;
+        let rule_violations = rule.check_all(ast_context, config);
+        violations.extend(filter_violations(
+            rule_violations,
+            config,
+            &config.rules.g_param_spec_null_nick_blurb,
+        )?);
+    }
 
     // Run GError initialization checks
-    let rule = GErrorInit;
-    violations.extend(rule.check_all(ast_context, config));
+    if config.rules.gerror_init.enabled {
+        let rule = GErrorInit;
+        let rule_violations = rule.check_all(ast_context, config);
+        violations.extend(filter_violations(
+            rule_violations,
+            config,
+            &config.rules.gerror_init,
+        )?);
+    }
 
     // Run property enum checks
-    let rule = PropertyEnumZero;
-    violations.extend(rule.check_all(ast_context, config));
+    if config.rules.property_enum_zero.enabled {
+        let rule = PropertyEnumZero;
+        let rule_violations = rule.check_all(ast_context, config);
+        violations.extend(filter_violations(
+            rule_violations,
+            config,
+            &config.rules.property_enum_zero,
+        )?);
+    }
 
     // Run dispose/finalize chain-up checks
-    let rule = DisposeFinalizeChainsUp;
-    violations.extend(rule.check_all(ast_context, config));
+    if config.rules.dispose_finalize_chains_up.enabled {
+        let rule = DisposeFinalizeChainsUp;
+        let rule_violations = rule.check_all(ast_context, config);
+        violations.extend(filter_violations(
+            rule_violations,
+            config,
+            &config.rules.dispose_finalize_chains_up,
+        )?);
+    }
 
     // Run GTask source tag checks
-    let rule = GTaskSourceTag;
-    violations.extend(rule.check_all(ast_context, config));
+    if config.rules.gtask_source_tag.enabled {
+        let rule = GTaskSourceTag;
+        let rule_violations = rule.check_all(ast_context, config);
+        violations.extend(filter_violations(
+            rule_violations,
+            config,
+            &config.rules.gtask_source_tag,
+        )?);
+    }
 
     // Run unnecessary NULL check detection
-    let rule = UnnecessaryNullCheck;
-    violations.extend(rule.check_all(ast_context, config));
+    if config.rules.unnecessary_null_check.enabled {
+        let rule = UnnecessaryNullCheck;
+        let rule_violations = rule.check_all(ast_context, config);
+        violations.extend(filter_violations(
+            rule_violations,
+            config,
+            &config.rules.unnecessary_null_check,
+        )?);
+    }
 
     // Run use clear functions checks
-    let rule = UseClearFunctions;
-    violations.extend(rule.check_all(ast_context, config));
+    if config.rules.use_clear_functions.enabled {
+        let rule = UseClearFunctions;
+        let rule_violations = rule.check_all(ast_context, config);
+        violations.extend(filter_violations(
+            rule_violations,
+            config,
+            &config.rules.use_clear_functions,
+        )?);
+    }
 
     Ok(violations)
 }
