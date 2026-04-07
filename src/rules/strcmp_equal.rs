@@ -7,7 +7,9 @@ use tree_sitter::Node;
 pub struct StrcmpForStringEqual;
 
 impl Rule for StrcmpForStringEqual {
-    const NAME: &'static str = "strcmp_for_string_equal";
+    fn name(&self) -> &'static str {
+        "strcmp_for_string_equal"
+    }
     fn check_all(
         &self,
         ast_context: &AstContext,

@@ -7,7 +7,9 @@ use tree_sitter::Node;
 pub struct UnnecessaryNullCheck;
 
 impl Rule for UnnecessaryNullCheck {
-    const NAME: &'static str = "unnecessary_null_check";
+    fn name(&self) -> &'static str {
+        "unnecessary_null_check"
+    }
 
     fn check_all(
         &self,

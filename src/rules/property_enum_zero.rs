@@ -7,7 +7,9 @@ use tree_sitter::Node;
 pub struct PropertyEnumZero;
 
 impl Rule for PropertyEnumZero {
-    const NAME: &'static str = "property_enum_zero";
+    fn name(&self) -> &'static str {
+        "property_enum_zero"
+    }
     fn check_all(
         &self,
         ast_context: &AstContext,

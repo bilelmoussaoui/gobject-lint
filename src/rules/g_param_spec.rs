@@ -7,7 +7,9 @@ use tree_sitter::Node;
 pub struct GParamSpecNullNickBlurb;
 
 impl Rule for GParamSpecNullNickBlurb {
-    const NAME: &'static str = "g_param_spec_null_nick_blurb";
+    fn name(&self) -> &'static str {
+        "g_param_spec_null_nick_blurb"
+    }
     fn check_all(
         &self,
         ast_context: &AstContext,

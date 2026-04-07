@@ -7,7 +7,9 @@ use tree_sitter::Node;
 pub struct GTaskSourceTag;
 
 impl Rule for GTaskSourceTag {
-    const NAME: &'static str = "gtask_source_tag";
+    fn name(&self) -> &'static str {
+        "gtask_source_tag"
+    }
 
     fn check_all(
         &self,

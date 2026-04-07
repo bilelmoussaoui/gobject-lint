@@ -7,7 +7,9 @@ use tree_sitter::Node;
 pub struct UseGStrcmp0;
 
 impl Rule for UseGStrcmp0 {
-    const NAME: &'static str = "use_g_strcmp0";
+    fn name(&self) -> &'static str {
+        "use_g_strcmp0"
+    }
     fn check_all(
         &self,
         ast_context: &AstContext,

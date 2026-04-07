@@ -10,7 +10,9 @@ use crate::rules::Violation;
 pub struct GDeclareSemicolon;
 
 impl Rule for GDeclareSemicolon {
-    const NAME: &'static str = "gdeclare_semicolon";
+    fn name(&self) -> &'static str {
+        "gdeclare_semicolon"
+    }
     fn check_all(
         &self,
         ast_context: &AstContext,

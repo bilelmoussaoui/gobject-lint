@@ -66,6 +66,12 @@ fn filter_violations_in_place(
     Ok(())
 }
 
+struct RuleEntry {
+    rule: Box<dyn Rule>,
+    enabled: bool,
+    rule_config: RuleConfig,
+}
+
 /// New AST-based scanner - much simpler than the old one!
 pub fn scan_with_ast(
     ast_context: &AstContext,
@@ -75,189 +81,131 @@ pub fn scan_with_ast(
 ) -> Result<Vec<Violation>> {
     let mut violations = Vec::new();
 
+    // Register all rules in execution order
+    let rules: Vec<RuleEntry> = vec![
+        RuleEntry {
+            rule: Box::new(GDeclareSemicolon),
+            enabled: config.rules.gdeclare_semicolon.enabled,
+            rule_config: config.rules.gdeclare_semicolon.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(MissingImplementation),
+            enabled: config.rules.missing_implementation.enabled,
+            rule_config: config.rules.missing_implementation.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(DeprecatedAddPrivate),
+            enabled: config.rules.deprecated_add_private.enabled,
+            rule_config: config.rules.deprecated_add_private.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(UseGStrcmp0),
+            enabled: config.rules.use_g_strcmp0.enabled,
+            rule_config: config.rules.use_g_strcmp0.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(UseClearFunctions),
+            enabled: config.rules.use_clear_functions.enabled,
+            rule_config: config.rules.use_clear_functions.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(GParamSpecNullNickBlurb),
+            enabled: config.rules.g_param_spec_null_nick_blurb.enabled,
+            rule_config: config.rules.g_param_spec_null_nick_blurb.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(GErrorInit),
+            enabled: config.rules.gerror_init.enabled,
+            rule_config: config.rules.gerror_init.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(PropertyEnumZero),
+            enabled: config.rules.property_enum_zero.enabled,
+            rule_config: config.rules.property_enum_zero.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(DisposeFinalizeChainsUp),
+            enabled: config.rules.dispose_finalize_chains_up.enabled,
+            rule_config: config.rules.dispose_finalize_chains_up.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(GTaskSourceTag),
+            enabled: config.rules.gtask_source_tag.enabled,
+            rule_config: config.rules.gtask_source_tag.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(UnnecessaryNullCheck),
+            enabled: config.rules.unnecessary_null_check.enabled,
+            rule_config: config.rules.unnecessary_null_check.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(StrcmpForStringEqual),
+            enabled: config.rules.strcmp_for_string_equal.enabled,
+            rule_config: config.rules.strcmp_for_string_equal.clone(),
+        },
+    ];
+
     if let Some(sp) = spinner {
         sp.set_message("Running linter rules...");
     }
 
-    // Run G_DECLARE semicolon checks
-    if config.rules.gdeclare_semicolon.enabled {
+    // Run all registered rules
+    for (rule_index, entry) in rules.iter().enumerate() {
+        if !entry.enabled {
+            continue;
+        }
+
         let start = violations.len();
-        let rule = GDeclareSemicolon;
-        rule.check_all(ast_context, config, &mut violations);
+        entry.rule.check_all(ast_context, config, &mut violations);
+
+        // Set rule index for precedence
+        for violation in violations.iter_mut().skip(start) {
+            violation.rule_index = rule_index;
+        }
+
         populate_snippets(&mut violations, start);
         filter_violations_in_place(
             &mut violations,
             start,
             project_root,
             config,
-            &config.rules.gdeclare_semicolon,
+            &entry.rule_config,
         )?;
     }
 
-    // Run missing implementation checks
-    if config.rules.missing_implementation.enabled {
-        let start = violations.len();
-        let rule = MissingImplementation;
-        rule.check_all(ast_context, config, &mut violations);
-        populate_snippets(&mut violations, start);
-        filter_violations_in_place(
-            &mut violations,
-            start,
-            project_root,
-            config,
-            &config.rules.missing_implementation,
-        )?;
-    }
-
-    // Run deprecated API checks
-    if config.rules.deprecated_add_private.enabled {
-        let start = violations.len();
-        let rule = DeprecatedAddPrivate;
-        rule.check_all(ast_context, config, &mut violations);
-        populate_snippets(&mut violations, start);
-        filter_violations_in_place(
-            &mut violations,
-            start,
-            project_root,
-            config,
-            &config.rules.deprecated_add_private,
-        )?;
-    }
-
-    // Run string comparison checks
-    if config.rules.use_g_strcmp0.enabled {
-        let start = violations.len();
-        let rule = UseGStrcmp0;
-        rule.check_all(ast_context, config, &mut violations);
-        populate_snippets(&mut violations, start);
-        filter_violations_in_place(
-            &mut violations,
-            start,
-            project_root,
-            config,
-            &config.rules.use_g_strcmp0,
-        )?;
-    }
-
-    // Run g_param_spec checks
-    if config.rules.g_param_spec_null_nick_blurb.enabled {
-        let start = violations.len();
-        let rule = GParamSpecNullNickBlurb;
-        rule.check_all(ast_context, config, &mut violations);
-        populate_snippets(&mut violations, start);
-        filter_violations_in_place(
-            &mut violations,
-            start,
-            project_root,
-            config,
-            &config.rules.g_param_spec_null_nick_blurb,
-        )?;
-    }
-
-    // Run GError initialization checks
-    if config.rules.gerror_init.enabled {
-        let start = violations.len();
-        let rule = GErrorInit;
-        rule.check_all(ast_context, config, &mut violations);
-        populate_snippets(&mut violations, start);
-        filter_violations_in_place(
-            &mut violations,
-            start,
-            project_root,
-            config,
-            &config.rules.gerror_init,
-        )?;
-    }
-
-    // Run property enum checks
-    if config.rules.property_enum_zero.enabled {
-        let start = violations.len();
-        let rule = PropertyEnumZero;
-        rule.check_all(ast_context, config, &mut violations);
-        populate_snippets(&mut violations, start);
-        filter_violations_in_place(
-            &mut violations,
-            start,
-            project_root,
-            config,
-            &config.rules.property_enum_zero,
-        )?;
-    }
-
-    // Run dispose/finalize chain-up checks
-    if config.rules.dispose_finalize_chains_up.enabled {
-        let start = violations.len();
-        let rule = DisposeFinalizeChainsUp;
-        rule.check_all(ast_context, config, &mut violations);
-        populate_snippets(&mut violations, start);
-        filter_violations_in_place(
-            &mut violations,
-            start,
-            project_root,
-            config,
-            &config.rules.dispose_finalize_chains_up,
-        )?;
-    }
-
-    // Run GTask source tag checks
-    if config.rules.gtask_source_tag.enabled {
-        let start = violations.len();
-        let rule = GTaskSourceTag;
-        rule.check_all(ast_context, config, &mut violations);
-        populate_snippets(&mut violations, start);
-        filter_violations_in_place(
-            &mut violations,
-            start,
-            project_root,
-            config,
-            &config.rules.gtask_source_tag,
-        )?;
-    }
-
-    // Run unnecessary NULL check detection
-    if config.rules.unnecessary_null_check.enabled {
-        let start = violations.len();
-        let rule = UnnecessaryNullCheck;
-        rule.check_all(ast_context, config, &mut violations);
-        populate_snippets(&mut violations, start);
-        filter_violations_in_place(
-            &mut violations,
-            start,
-            project_root,
-            config,
-            &config.rules.unnecessary_null_check,
-        )?;
-    }
-
-    // Run use clear functions checks
-    if config.rules.use_clear_functions.enabled {
-        let start = violations.len();
-        let rule = UseClearFunctions;
-        rule.check_all(ast_context, config, &mut violations);
-        populate_snippets(&mut violations, start);
-        filter_violations_in_place(
-            &mut violations,
-            start,
-            project_root,
-            config,
-            &config.rules.use_clear_functions,
-        )?;
-    }
-
-    // Run strcmp for string equal checks
-    if config.rules.strcmp_for_string_equal.enabled {
-        let start = violations.len();
-        let rule = StrcmpForStringEqual;
-        rule.check_all(ast_context, config, &mut violations);
-        populate_snippets(&mut violations, start);
-        filter_violations_in_place(
-            &mut violations,
-            start,
-            project_root,
-            config,
-            &config.rules.strcmp_for_string_equal,
-        )?;
-    }
+    // Deduplicate: keep only violations from later rules (higher index) when multiple rules fire on same line
+    deduplicate_by_rule_precedence(&mut violations);
 
     Ok(violations)
+}
+
+/// Keep only the violation with the highest rule_index for each (file, line) pair
+fn deduplicate_by_rule_precedence(violations: &mut Vec<Violation>) {
+    use std::collections::HashMap;
+
+    // Group violations by (file, line), keeping the one with highest rule_index
+    let mut best: HashMap<(std::path::PathBuf, usize), usize> = HashMap::new();
+
+    for (i, v) in violations.iter().enumerate() {
+        let key = (v.file.clone(), v.line);
+        match best.get(&key) {
+            Some(&existing_idx) => {
+                if v.rule_index > violations[existing_idx].rule_index {
+                    best.insert(key, i);
+                }
+            }
+            None => {
+                best.insert(key, i);
+            }
+        }
+    }
+
+    // Keep only the violations that are in best
+    let best_indices: std::collections::HashSet<_> = best.values().copied().collect();
+    let mut i = 0;
+    violations.retain(|_| {
+        let keep = best_indices.contains(&i);
+        i += 1;
+        keep
+    });
 }

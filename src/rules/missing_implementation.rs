@@ -6,7 +6,9 @@ use crate::config::Config;
 pub struct MissingImplementation;
 
 impl Rule for MissingImplementation {
-    const NAME: &'static str = "missing_implementation";
+    fn name(&self) -> &'static str {
+        "missing_implementation"
+    }
 
     fn check_all(
         &self,

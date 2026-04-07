@@ -7,7 +7,9 @@ use tree_sitter::Node;
 pub struct GErrorInit;
 
 impl Rule for GErrorInit {
-    const NAME: &'static str = "gerror_init";
+    fn name(&self) -> &'static str {
+        "gerror_init"
+    }
     fn check_all(
         &self,
         ast_context: &AstContext,

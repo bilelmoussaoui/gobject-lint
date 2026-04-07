@@ -7,7 +7,9 @@ use tree_sitter::Node;
 pub struct UseClearFunctions;
 
 impl Rule for UseClearFunctions {
-    const NAME: &'static str = "use_clear_functions";
+    fn name(&self) -> &'static str {
+        "use_clear_functions"
+    }
 
     fn check_all(
         &self,
@@ -72,17 +74,15 @@ impl UseClearFunctions {
             let position = node.start_position();
             let suggested_function = self.suggest_clear_function(&unref_function);
 
-            return Some(Violation {
-                file: Default::default(), // Will be filled by caller
-                line: position.row + 1,
-                column: position.column + 1,
-                message: format!(
+            return Some(self.violation(
+                &std::path::PathBuf::default(),
+                position.row + 1,
+                position.column + 1,
+                format!(
                     "Use {} (&{}) instead of manual NULL check, unref, and assignment",
                     suggested_function, checked_var
                 ),
-                rule: "use_clear_functions",
-                snippet: None,
-            });
+            ));
         }
 
         None

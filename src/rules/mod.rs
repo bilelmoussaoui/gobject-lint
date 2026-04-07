@@ -23,12 +23,14 @@ pub struct Violation {
     pub message: String,
     pub rule: &'static str,
     pub snippet: Option<String>,
+    /// Rule execution order - higher means more specific/later rules take precedence
+    pub rule_index: usize,
 }
 
 /// Trait that all linting rules must implement
 pub trait Rule {
     /// The unique identifier for this rule (e.g., "missing_implementation")
-    const NAME: &'static str;
+    fn name(&self) -> &'static str;
 
     /// Check the AST and add violations to the provided vector
     fn check_all(&self, ast_context: &AstContext, config: &Config, violations: &mut Vec<Violation>);
@@ -36,18 +38,19 @@ pub trait Rule {
     /// Helper to create a violation with the rule name automatically filled in
     fn violation(
         &self,
-        file: impl AsRef<std::path::Path>,
+        file: &std::path::Path,
         line: usize,
         column: usize,
         message: String,
     ) -> Violation {
         Violation {
-            file: file.as_ref().to_path_buf(),
+            file: file.to_path_buf(),
             line,
             column,
             message,
-            rule: Self::NAME,
+            rule: self.name(),
             snippet: None,
+            rule_index: 0, // Will be set by scanner based on execution order
         }
     }
 }

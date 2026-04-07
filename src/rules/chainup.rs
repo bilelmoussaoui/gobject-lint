@@ -7,7 +7,9 @@ use tree_sitter::Node;
 pub struct DisposeFinalizeChainsUp;
 
 impl Rule for DisposeFinalizeChainsUp {
-    const NAME: &'static str = "dispose_finalize_chains_up";
+    fn name(&self) -> &'static str {
+        "dispose_finalize_chains_up"
+    }
 
     fn check_all(
         &self,

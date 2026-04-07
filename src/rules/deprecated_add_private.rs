@@ -7,7 +7,9 @@ use tree_sitter::Node;
 pub struct DeprecatedAddPrivate;
 
 impl Rule for DeprecatedAddPrivate {
-    const NAME: &'static str = "deprecated_add_private";
+    fn name(&self) -> &'static str {
+        "deprecated_add_private"
+    }
 
     fn check_all(
         &self,
