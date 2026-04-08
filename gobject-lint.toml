@@ -64,3 +64,6 @@ strcmp_for_string_equal = false
 
 # Suggest g_set_str() instead of manual strcmp, g_free, and g_strdup
 use_g_set_str = true
+
+# Suggest g_autoptr(GError) instead of manual g_error_free
+suggest_g_autoptr_error = true

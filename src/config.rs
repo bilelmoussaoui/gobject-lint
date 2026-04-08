@@ -133,6 +133,9 @@ pub struct RulesConfig {
 
     #[serde(default)]
     pub use_g_set_str: RuleConfig,
+
+    #[serde(default)]
+    pub suggest_g_autoptr_error: RuleConfig,
 }
 
 impl Config {

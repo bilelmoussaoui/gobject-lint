@@ -11,6 +11,7 @@ use crate::rules::property_enum_zero::PropertyEnumZero;
 use crate::rules::strcmp_equal::StrcmpForStringEqual;
 use crate::rules::unnecessary_null_check::UnnecessaryNullCheck;
 use crate::rules::use_clear_functions::UseClearFunctions;
+use crate::rules::use_g_clear_error::SuggestGAutoptrError;
 use crate::rules::use_g_set_str::UseGSetStr;
 use crate::rules::use_g_strcmp0::UseGStrcmp0;
 use crate::rules::{Rule, Violation};
@@ -148,6 +149,11 @@ pub fn scan_with_ast(
             rule: Box::new(UseGSetStr),
             enabled: config.rules.use_g_set_str.enabled,
             rule_config: config.rules.use_g_set_str.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(SuggestGAutoptrError),
+            enabled: config.rules.suggest_g_autoptr_error.enabled,
+            rule_config: config.rules.suggest_g_autoptr_error.clone(),
         },
     ];
 
