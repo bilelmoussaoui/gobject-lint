@@ -60,6 +60,9 @@ unnecessary_null_check = true
 # Enforce semicolons after G_DECLARE_* macros
 gdeclare_semicolon = true
 
+# Suggest g_new/g_new0 instead of g_malloc/g_malloc0 with sizeof for type safety
+prefer_g_new = true
+
 # Report functions declared in headers but not implemented
 # Can also be configured with per-rule ignore patterns:
 # missing_implementation = { enabled = true, ignore = ["src/backends/**"] }
