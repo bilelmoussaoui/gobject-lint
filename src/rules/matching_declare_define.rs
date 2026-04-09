@@ -20,11 +20,11 @@ impl Rule for MatchingDeclareDefine {
         _config: &Config,
         violations: &mut Vec<Violation>,
     ) {
-        // Build a map of type_name -> declaration_type from headers
+        // Build a map of type_name -> declaration_type from all files
         let mut declared_types: HashMap<String, String> = HashMap::new();
 
-        // Scan header files for G_DECLARE_* macros
-        for (_path, file) in ast_context.iter_header_files() {
+        // Scan all files for G_DECLARE_* macros (can be in headers or C files)
+        for (_path, file) in ast_context.iter_all_files() {
             self.collect_declare_macros(&file.source, &mut declared_types);
         }
 
