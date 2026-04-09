@@ -1,6 +1,6 @@
 use tree_sitter::Node;
 
-use super::Rule;
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct PropertyEnumZero;
@@ -13,6 +13,11 @@ impl Rule for PropertyEnumZero {
     fn description(&self) -> &'static str {
         "Ensure property enums start with PROP_0, not PROP_NAME = 0"
     }
+
+    fn fixable(&self) -> bool {
+        true
+    }
+
     fn check_all(
         &self,
         ast_context: &AstContext,
@@ -47,17 +52,24 @@ impl PropertyEnumZero {
         violations: &mut Vec<Violation>,
     ) {
         if self.is_property_enum(ast_context, node, source) {
-            if let Some((prop_name, line_offset)) =
+            if let Some((prop_name, name_node)) =
                 self.check_first_enumerator(ast_context, node, source)
             {
-                violations.push(self.violation(
+                let fix = Fix {
+                    start_byte: name_node.start_byte(),
+                    end_byte: name_node.end_byte(),
+                    replacement: "PROP_0".to_string(),
+                };
+
+                violations.push(self.violation_with_fix(
                     file_path,
-                    base_line + line_offset,
-                    1,
+                    base_line + name_node.start_position().row,
+                    name_node.start_position().column + 1,
                     format!(
                         "Property enum should start with PROP_0, not {} = 0. First property should be PROP_0, second should be {}",
                         prop_name, prop_name
                     ),
+                    fix,
                 ));
             }
         }
@@ -92,12 +104,12 @@ impl PropertyEnumZero {
         false
     }
 
-    fn check_first_enumerator(
+    fn check_first_enumerator<'a>(
         &self,
         ast_context: &AstContext,
-        node: Node,
+        node: Node<'a>,
         source: &[u8],
-    ) -> Option<(String, usize)> {
+    ) -> Option<(String, Node<'a>)> {
         let body = node.child_by_field_name("body")?;
 
         let mut cursor = body.walk();
@@ -114,13 +126,11 @@ impl PropertyEnumZero {
                             && !name_text.ends_with("_0")
                             && value_text == "0"
                         {
-                            let position = child.start_position();
-                            return Some((name_text, position.row + 1));
+                            return Some((name_text, name));
                         }
                     } else {
                         if name_text.starts_with("PROP_") && !name_text.ends_with("_0") {
-                            let position = child.start_position();
-                            return Some((name_text, position.row + 1));
+                            return Some((name_text, name));
                         }
                     }
 
