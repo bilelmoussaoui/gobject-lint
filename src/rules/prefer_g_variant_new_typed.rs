@@ -153,6 +153,7 @@ impl PreferGVariantNewTyped {
             "d" => "g_variant_new_double",
             "o" => "g_variant_new_object_path",
             "g" => "g_variant_new_signature",
+            "v" => "g_variant_new_variant",
             _ => return None, // Not a simple type we can convert
         };
 
