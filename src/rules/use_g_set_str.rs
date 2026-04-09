@@ -11,6 +11,10 @@ impl Rule for UseGSetStr {
         "use_g_set_str"
     }
 
+    fn description(&self) -> &'static str {
+        "Suggest g_set_str() instead of manual g_free and g_strdup"
+    }
+
     fn check_all(
         &self,
         ast_context: &AstContext,

@@ -11,6 +11,10 @@ impl Rule for DeprecatedAddPrivate {
         "deprecated_add_private"
     }
 
+    fn description(&self) -> &'static str {
+        "Detect deprecated g_type_class_add_private (use G_DEFINE_TYPE_WITH_PRIVATE instead)"
+    }
+
     fn check_all(
         &self,
         ast_context: &AstContext,

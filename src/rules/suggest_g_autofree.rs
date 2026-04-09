@@ -12,6 +12,10 @@ impl Rule for SuggestGAutofree {
         "suggest_g_autofree"
     }
 
+    fn description(&self) -> &'static str {
+        "Suggest g_autofree for string/buffer types instead of manual g_free"
+    }
+
     fn check_all(
         &self,
         ast_context: &AstContext,

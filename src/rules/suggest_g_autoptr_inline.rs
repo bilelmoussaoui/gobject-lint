@@ -12,6 +12,10 @@ impl Rule for SuggestGAutoptrInline {
         "suggest_g_autoptr_inline_cleanup"
     }
 
+    fn description(&self) -> &'static str {
+        "Suggest g_autoptr instead of inline manual cleanup (g_object_unref/g_free)"
+    }
+
     fn check_all(
         &self,
         ast_context: &AstContext,

@@ -11,6 +11,10 @@ impl Rule for SuggestGAutoptrError {
         "suggest_g_autoptr_error"
     }
 
+    fn description(&self) -> &'static str {
+        "Suggest g_autoptr(GError) instead of manual g_error_free"
+    }
+
     fn check_all(
         &self,
         ast_context: &AstContext,

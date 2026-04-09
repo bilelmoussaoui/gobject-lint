@@ -12,6 +12,10 @@ impl Rule for SuggestGAutoptrGoto {
         "suggest_g_autoptr_goto_cleanup"
     }
 
+    fn description(&self) -> &'static str {
+        "Suggest g_autoptr instead of goto error cleanup pattern"
+    }
+
     fn check_all(
         &self,
         ast_context: &AstContext,

@@ -11,6 +11,10 @@ impl Rule for UnnecessaryNullCheck {
         "unnecessary_null_check"
     }
 
+    fn description(&self) -> &'static str {
+        "Detect unnecessary NULL checks before g_free/g_clear_pointer"
+    }
+
     fn check_all(
         &self,
         ast_context: &AstContext,

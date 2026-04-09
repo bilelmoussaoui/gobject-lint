@@ -10,6 +10,10 @@ impl Rule for UseGStrcmp0 {
     fn name(&self) -> &'static str {
         "use_g_strcmp0"
     }
+
+    fn description(&self) -> &'static str {
+        "Use g_strcmp0 instead of strcmp (NULL-safe)"
+    }
     fn check_all(
         &self,
         ast_context: &AstContext,

@@ -11,6 +11,10 @@ impl Rule for UseClearFunctions {
         "use_clear_functions"
     }
 
+    fn description(&self) -> &'static str {
+        "Suggest g_clear_object/g_clear_pointer instead of manual unref and NULL assignment"
+    }
+
     fn check_all(
         &self,
         ast_context: &AstContext,

@@ -10,6 +10,10 @@ impl Rule for GParamSpecNullNickBlurb {
     fn name(&self) -> &'static str {
         "g_param_spec_null_nick_blurb"
     }
+
+    fn description(&self) -> &'static str {
+        "Ensure g_param_spec_* functions have NULL for nick and blurb parameters"
+    }
     fn check_all(
         &self,
         ast_context: &AstContext,

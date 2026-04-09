@@ -10,6 +10,10 @@ impl Rule for MissingImplementation {
         "missing_implementation"
     }
 
+    fn description(&self) -> &'static str {
+        "Report functions declared in headers but not implemented"
+    }
+
     fn check_all(
         &self,
         ast_context: &AstContext,

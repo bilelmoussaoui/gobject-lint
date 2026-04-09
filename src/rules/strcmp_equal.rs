@@ -10,6 +10,10 @@ impl Rule for StrcmpForStringEqual {
     fn name(&self) -> &'static str {
         "strcmp_for_string_equal"
     }
+
+    fn description(&self) -> &'static str {
+        "Suggest g_str_equal() instead of strcmp() == 0 for better readability"
+    }
     fn check_all(
         &self,
         ast_context: &AstContext,

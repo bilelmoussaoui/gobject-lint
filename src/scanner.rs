@@ -19,6 +19,7 @@ use crate::rules::use_g_set_str::UseGSetStr;
 use crate::rules::use_g_strcmp0::UseGStrcmp0;
 use crate::rules::{Rule, Violation};
 use anyhow::Result;
+use colored::Colorize;
 use indicatif::ProgressBar;
 use std::fs;
 use std::path::Path;
@@ -77,6 +78,51 @@ struct RuleEntry {
     rule_config: RuleConfig,
 }
 
+/// Macro to define all rules in execution order
+#[macro_export]
+macro_rules! for_each_rule {
+    ($callback:ident) => {
+        $callback! {
+            gdeclare_semicolon => GDeclareSemicolon,
+            missing_implementation => MissingImplementation,
+            deprecated_add_private => DeprecatedAddPrivate,
+            use_g_strcmp0 => UseGStrcmp0,
+            use_clear_functions => UseClearFunctions,
+            g_param_spec_null_nick_blurb => GParamSpecNullNickBlurb,
+            gerror_init => GErrorInit,
+            property_enum_zero => PropertyEnumZero,
+            dispose_finalize_chains_up => DisposeFinalizeChainsUp,
+            gtask_source_tag => GTaskSourceTag,
+            unnecessary_null_check => UnnecessaryNullCheck,
+            strcmp_for_string_equal => StrcmpForStringEqual,
+            use_g_set_str => UseGSetStr,
+            suggest_g_autoptr_error => SuggestGAutoptrError,
+            suggest_g_autoptr_goto_cleanup => SuggestGAutoptrGoto,
+            suggest_g_autoptr_inline_cleanup => SuggestGAutoptrInline,
+            suggest_g_autofree => SuggestGAutofree,
+        }
+    };
+}
+
+macro_rules! impl_create_all_rules {
+    ($($config_field:ident => $rule_type:ident),* $(,)?) => {
+        /// Create all rule instances in execution order
+        fn create_all_rules(config: &Config) -> Vec<RuleEntry> {
+            vec![
+                $(
+                    RuleEntry {
+                        rule: Box::new($rule_type),
+                        enabled: config.rules.$config_field.enabled,
+                        rule_config: config.rules.$config_field.clone(),
+                    },
+                )*
+            ]
+        }
+    };
+}
+
+for_each_rule!(impl_create_all_rules);
+
 /// New AST-based scanner - much simpler than the old one!
 pub fn scan_with_ast(
     ast_context: &AstContext,
@@ -87,93 +133,7 @@ pub fn scan_with_ast(
     let mut violations = Vec::new();
 
     // Register all rules in execution order
-    let rules: Vec<RuleEntry> = vec![
-        RuleEntry {
-            rule: Box::new(GDeclareSemicolon),
-            enabled: config.rules.gdeclare_semicolon.enabled,
-            rule_config: config.rules.gdeclare_semicolon.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(MissingImplementation),
-            enabled: config.rules.missing_implementation.enabled,
-            rule_config: config.rules.missing_implementation.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(DeprecatedAddPrivate),
-            enabled: config.rules.deprecated_add_private.enabled,
-            rule_config: config.rules.deprecated_add_private.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(UseGStrcmp0),
-            enabled: config.rules.use_g_strcmp0.enabled,
-            rule_config: config.rules.use_g_strcmp0.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(UseClearFunctions),
-            enabled: config.rules.use_clear_functions.enabled,
-            rule_config: config.rules.use_clear_functions.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(GParamSpecNullNickBlurb),
-            enabled: config.rules.g_param_spec_null_nick_blurb.enabled,
-            rule_config: config.rules.g_param_spec_null_nick_blurb.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(GErrorInit),
-            enabled: config.rules.gerror_init.enabled,
-            rule_config: config.rules.gerror_init.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(PropertyEnumZero),
-            enabled: config.rules.property_enum_zero.enabled,
-            rule_config: config.rules.property_enum_zero.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(DisposeFinalizeChainsUp),
-            enabled: config.rules.dispose_finalize_chains_up.enabled,
-            rule_config: config.rules.dispose_finalize_chains_up.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(GTaskSourceTag),
-            enabled: config.rules.gtask_source_tag.enabled,
-            rule_config: config.rules.gtask_source_tag.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(UnnecessaryNullCheck),
-            enabled: config.rules.unnecessary_null_check.enabled,
-            rule_config: config.rules.unnecessary_null_check.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(StrcmpForStringEqual),
-            enabled: config.rules.strcmp_for_string_equal.enabled,
-            rule_config: config.rules.strcmp_for_string_equal.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(UseGSetStr),
-            enabled: config.rules.use_g_set_str.enabled,
-            rule_config: config.rules.use_g_set_str.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(SuggestGAutoptrError),
-            enabled: config.rules.suggest_g_autoptr_error.enabled,
-            rule_config: config.rules.suggest_g_autoptr_error.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(SuggestGAutoptrGoto),
-            enabled: config.rules.suggest_g_autoptr_goto_cleanup.enabled,
-            rule_config: config.rules.suggest_g_autoptr_goto_cleanup.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(SuggestGAutoptrInline),
-            enabled: config.rules.suggest_g_autoptr_inline_cleanup.enabled,
-            rule_config: config.rules.suggest_g_autoptr_inline_cleanup.clone(),
-        },
-        RuleEntry {
-            rule: Box::new(SuggestGAutofree),
-            enabled: config.rules.suggest_g_autofree.enabled,
-            rule_config: config.rules.suggest_g_autofree.clone(),
-        },
-    ];
+    let rules = create_all_rules(config);
 
     if let Some(sp) = spinner {
         sp.set_message("Running linter rules...");
@@ -207,6 +167,28 @@ pub fn scan_with_ast(
     deduplicate_by_rule_precedence(&mut violations);
 
     Ok(violations)
+}
+
+/// List all available rules with their descriptions
+pub fn list_all_rules(config: &Config) {
+    let rules = create_all_rules(config);
+
+    println!(
+        "{} {}",
+        "Available lint rules".bold(),
+        format!("({} total)", rules.len()).dimmed()
+    );
+
+    for entry in &rules {
+        let status = if entry.enabled {
+            "✓".green()
+        } else {
+            "✗".red()
+        };
+        let name = entry.rule.name().cyan().bold();
+        let desc = entry.rule.description().dimmed();
+        println!("  {} {} - {}", status, name, desc);
+    }
 }
 
 /// Keep only the violation with the highest rule_index for each (file, line) pair

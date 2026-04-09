@@ -11,6 +11,10 @@ impl Rule for DisposeFinalizeChainsUp {
         "dispose_finalize_chains_up"
     }
 
+    fn description(&self) -> &'static str {
+        "Ensure dispose/finalize methods chain up to parent class"
+    }
+
     fn check_all(
         &self,
         ast_context: &AstContext,

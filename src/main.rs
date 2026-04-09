@@ -24,6 +24,14 @@ struct Args {
     /// Show verbose output
     #[arg(short, long)]
     verbose: bool,
+
+    /// List all available lint rules
+    #[arg(long)]
+    list_rules: bool,
+
+    /// Enable only specific rules (can be repeated, overrides config)
+    #[arg(long, value_name = "RULE")]
+    only: Vec<String>,
 }
 
 fn main() -> Result<()> {
@@ -34,6 +42,17 @@ fn main() -> Result<()> {
 
     // Merge CLI ignore patterns with config
     config.ignore.extend(args.ignore.clone());
+
+    // Apply --only filter if specified
+    if !args.only.is_empty() {
+        config.enable_only_rules(&args.only);
+    }
+
+    // Handle --list-rules
+    if args.list_rules {
+        scanner::list_all_rules(&config);
+        return Ok(());
+    }
 
     // Build ignore matcher
     let ignore_matcher = config.build_ignore_matcher()?;

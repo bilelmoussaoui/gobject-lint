@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
     pub rules: RulesConfig,
@@ -198,5 +198,36 @@ impl Config {
         }
 
         builder.build().context("Failed to build ignore matcher")
+    }
+
+    /// Get mutable reference to a rule config by field name
+    pub fn get_rule_config_mut(&mut self, field_name: &str) -> Option<&mut RuleConfig> {
+        macro_rules! impl_get_rule_config_mut {
+            ($($config_field:ident => $rule_type:ident),* $(,)?) => {
+                match field_name {
+                    $(
+                        stringify!($config_field) => Some(&mut self.rules.$config_field),
+                    )*
+                    _ => None,
+                }
+            };
+        }
+
+        crate::for_each_rule!(impl_get_rule_config_mut)
+    }
+
+    /// Enable only specific rules, disabling all others
+    pub fn enable_only_rules(&mut self, rule_names: &[String]) {
+        macro_rules! impl_enable_only_rules {
+            ($($config_field:ident => $rule_type:ident),* $(,)?) => {
+                {
+                    $(
+                        self.rules.$config_field.enabled = rule_names.iter().any(|r| r == stringify!($config_field));
+                    )*
+                }
+            };
+        }
+
+        crate::for_each_rule!(impl_enable_only_rules);
     }
 }

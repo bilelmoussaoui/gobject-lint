@@ -10,6 +10,10 @@ impl Rule for GErrorInit {
     fn name(&self) -> &'static str {
         "gerror_init"
     }
+
+    fn description(&self) -> &'static str {
+        "Ensure GError* variables are initialized to NULL"
+    }
     fn check_all(
         &self,
         ast_context: &AstContext,

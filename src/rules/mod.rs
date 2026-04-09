@@ -37,6 +37,9 @@ pub trait Rule {
     /// The unique identifier for this rule (e.g., "missing_implementation")
     fn name(&self) -> &'static str;
 
+    /// Human-readable description of what this rule checks
+    fn description(&self) -> &'static str;
+
     /// Check the AST and add violations to the provided vector
     fn check_all(&self, ast_context: &AstContext, config: &Config, violations: &mut Vec<Violation>);
 

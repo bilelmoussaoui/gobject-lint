@@ -10,6 +10,10 @@ impl Rule for PropertyEnumZero {
     fn name(&self) -> &'static str {
         "property_enum_zero"
     }
+
+    fn description(&self) -> &'static str {
+        "Ensure property enums start with PROP_0, not PROP_NAME = 0"
+    }
     fn check_all(
         &self,
         ast_context: &AstContext,

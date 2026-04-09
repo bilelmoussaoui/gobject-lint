@@ -11,6 +11,10 @@ impl Rule for GTaskSourceTag {
         "gtask_source_tag"
     }
 
+    fn description(&self) -> &'static str {
+        "Ensure g_task_set_source_tag is called after g_task_new"
+    }
+
     fn check_all(
         &self,
         ast_context: &AstContext,
