@@ -169,6 +169,9 @@ pub struct RulesConfig {
     pub gdeclare_semicolon: RuleConfig,
 
     #[serde(default)]
+    pub matching_declare_define: RuleConfig,
+
+    #[serde(default)]
     pub prefer_g_new: RuleConfig,
 
     #[serde(default)]
