@@ -194,10 +194,12 @@ pub fn scan_with_ast(
 pub fn list_all_rules(config: &Config) {
     let rules = create_all_rules(config);
 
+    let fixable_count = rules.iter().filter(|e| e.rule.fixable()).count();
+
     println!(
         "{} {}",
         "Available lint rules".bold(),
-        format!("({} total)", rules.len()).dimmed()
+        format!("({} total, {} auto-fixable)", rules.len(), fixable_count).dimmed()
     );
 
     for entry in &rules {
