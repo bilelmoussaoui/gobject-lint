@@ -73,3 +73,6 @@ suggest_g_autoptr_goto_cleanup = true
 
 # Suggest g_autoptr instead of inline manual cleanup (g_object_unref/g_free)
 suggest_g_autoptr_inline_cleanup = true
+
+# Suggest g_autofree for string/buffer types instead of manual g_free
+suggest_g_autofree = true

@@ -9,6 +9,7 @@ use crate::rules::gtask_source_tag::GTaskSourceTag;
 use crate::rules::missing_implementation::MissingImplementation;
 use crate::rules::property_enum_zero::PropertyEnumZero;
 use crate::rules::strcmp_equal::StrcmpForStringEqual;
+use crate::rules::suggest_g_autofree::SuggestGAutofree;
 use crate::rules::suggest_g_autoptr_goto::SuggestGAutoptrGoto;
 use crate::rules::suggest_g_autoptr_inline::SuggestGAutoptrInline;
 use crate::rules::unnecessary_null_check::UnnecessaryNullCheck;
@@ -166,6 +167,11 @@ pub fn scan_with_ast(
             rule: Box::new(SuggestGAutoptrInline),
             enabled: config.rules.suggest_g_autoptr_inline_cleanup.enabled,
             rule_config: config.rules.suggest_g_autoptr_inline_cleanup.clone(),
+        },
+        RuleEntry {
+            rule: Box::new(SuggestGAutofree),
+            enabled: config.rules.suggest_g_autofree.enabled,
+            rule_config: config.rules.suggest_g_autofree.clone(),
         },
     ];
 
