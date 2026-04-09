@@ -59,11 +59,7 @@ impl GObjectBackend {
                 }
             }
         } else {
-            Config {
-                ignore: Vec::new(),
-                rules: Default::default(),
-                editor_url: None,
-            }
+            Config::default()
         };
 
         // Build ignore matcher

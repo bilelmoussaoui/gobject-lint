@@ -1,5 +1,11 @@
 # GObject Lint Configuration
 
+# Minimum supported GLib version (optional)
+# Rules requiring newer GLib versions will be automatically disabled
+# Format: "major.minor" (e.g., "2.76")
+# Comment out or remove to enable all rules regardless of version
+# min_glib_version = "2.76"
+
 # Editor URL format for clickable links
 # Available placeholders: {path}, {line}, {column}
 # Examples:
@@ -30,10 +36,10 @@ g_param_spec_null_nick_blurb = true
 # Ensure dispose/finalize methods chain up to parent class
 dispose_finalize_chains_up = true
 
-# Suggest g_clear_object/g_clear_pointer instead of manual unref and NULL assignment
+# Suggest g_clear_object/g_clear_pointer instead of manual unref and NULL assignment (requires GLib >= 2.28)
 use_clear_functions = true
 
-# Use g_strcmp0 instead of strcmp (NULL-safe)
+# Use g_strcmp0 instead of strcmp (NULL-safe) (requires GLib >= 2.16)
 use_g_strcmp0 = true
 
 # Ensure property enums start with PROP_0, not PROP_NAME = 0
@@ -45,7 +51,7 @@ deprecated_add_private = true
 # Ensure GError* variables are initialized to NULL
 gerror_init = true
 
-# Ensure g_task_set_source_tag is called after g_task_new
+# Ensure g_task_set_source_tag is called after g_task_new (requires GLib >= 2.36)
 gtask_source_tag = true
 
 # Detect unnecessary NULL checks before g_free/g_clear_pointer
@@ -62,17 +68,17 @@ missing_implementation = { enabled = true, ignore = ["src/backends/meta-egl-ext.
 # Suggest g_str_equal() instead of strcmp() == 0 for better readability
 strcmp_for_string_equal = true
 
-# Suggest g_set_str() instead of manual strcmp, g_free, and g_strdup
+# Suggest g_set_str() instead of manual strcmp, g_free, and g_strdup (requires GLib >= 2.76)
 use_g_set_str = true
 
-# Suggest g_autoptr(GError) instead of manual g_error_free
+# Suggest g_autoptr(GError) instead of manual g_error_free (requires GLib >= 2.44)
 suggest_g_autoptr_error = true
 
-# Suggest g_autoptr instead of goto error cleanup pattern
+# Suggest g_autoptr instead of goto error cleanup pattern (requires GLib >= 2.44)
 suggest_g_autoptr_goto_cleanup = true
 
-# Suggest g_autoptr instead of inline manual cleanup (g_object_unref/g_free)
+# Suggest g_autoptr instead of inline manual cleanup (g_object_unref/g_free) (requires GLib >= 2.44)
 suggest_g_autoptr_inline_cleanup = true
 
-# Suggest g_autofree for string/buffer types instead of manual g_free
+# Suggest g_autofree for string/buffer types instead of manual g_free (requires GLib >= 2.44)
 suggest_g_autofree = true

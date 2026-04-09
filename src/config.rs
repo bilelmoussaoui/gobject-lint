@@ -4,6 +4,37 @@ use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 
+/// Parse a GLib version string like "2.76" into (major, minor)
+fn parse_glib_version(version: &str) -> Option<(u32, u32)> {
+    let parts: Vec<&str> = version.split('.').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let major = parts[0].parse::<u32>().ok()?;
+    let minor = parts[1].parse::<u32>().ok()?;
+    Some((major, minor))
+}
+
+/// Deserialize GLib version from string to (major, minor) tuple
+fn deserialize_glib_version<'de, D>(deserializer: D) -> Result<Option<(u32, u32)>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    let version_str: Option<String> = Option::deserialize(deserializer)?;
+
+    match version_str {
+        Some(s) => parse_glib_version(&s).map(Some).ok_or_else(|| {
+            de::Error::custom(format!(
+                "Invalid GLib version format: '{}'. Expected format: 'major.minor' (e.g., '2.76')",
+                s
+            ))
+        }),
+        None => Ok(None),
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
@@ -11,6 +42,11 @@ pub struct Config {
 
     #[serde(default)]
     pub ignore: Vec<String>,
+
+    /// Minimum supported GLib version as (major, minor)
+    /// Rules requiring newer GLib versions will be automatically disabled
+    #[serde(default, deserialize_with = "deserialize_glib_version")]
+    pub min_glib_version: Option<(u32, u32)>,
 
     /// Editor URL format for clickable links
     /// Available placeholders: {path}, {line}, {column}
@@ -151,11 +187,7 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             // Return default config if file doesn't exist
-            return Ok(Config {
-                rules: RulesConfig::default(),
-                ignore: Vec::new(),
-                editor_url: None,
-            });
+            return Ok(Config::default());
         }
 
         let content = fs::read_to_string(path)
@@ -203,7 +235,7 @@ impl Config {
     /// Get mutable reference to a rule config by field name
     pub fn get_rule_config_mut(&mut self, field_name: &str) -> Option<&mut RuleConfig> {
         macro_rules! impl_get_rule_config_mut {
-            ($($config_field:ident => $rule_type:ident),* $(,)?) => {
+            ($(($config_field:ident, $rule_type:ident, $major:literal, $minor:literal)),* $(,)?) => {
                 match field_name {
                     $(
                         stringify!($config_field) => Some(&mut self.rules.$config_field),
@@ -219,7 +251,7 @@ impl Config {
     /// Enable only specific rules, disabling all others
     pub fn enable_only_rules(&mut self, rule_names: &[String]) {
         macro_rules! impl_enable_only_rules {
-            ($($config_field:ident => $rule_type:ident),* $(,)?) => {
+            ($(($config_field:ident, $rule_type:ident, $major:literal, $minor:literal)),* $(,)?) => {
                 {
                     $(
                         self.rules.$config_field.enabled = rule_names.iter().any(|r| r == stringify!($config_field));

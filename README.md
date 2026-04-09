@@ -54,6 +54,10 @@ All rules are enabled by default. Run `gobject-lint --list-rules` to see their c
 Create a `gobject-lint.toml` file in your project root:
 
 ```toml
+# Minimum supported GLib version (optional)
+# Rules requiring newer GLib versions will be automatically disabled
+min_glib_version = "2.40"
+
 [rules]
 # Ensure g_param_spec_* functions have NULL for nick and blurb parameters
 g_param_spec_null_nick_blurb = true

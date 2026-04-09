@@ -78,47 +78,58 @@ struct RuleEntry {
     rule_config: RuleConfig,
 }
 
-/// Macro to define all rules in execution order
+/// Macro to define all rules in execution order with their minimum GLib version requirements
 #[macro_export]
 macro_rules! for_each_rule {
     ($callback:ident) => {
         $callback! {
-            gdeclare_semicolon => GDeclareSemicolon,
-            missing_implementation => MissingImplementation,
-            deprecated_add_private => DeprecatedAddPrivate,
-            use_g_strcmp0 => UseGStrcmp0,
-            use_clear_functions => UseClearFunctions,
-            g_param_spec_null_nick_blurb => GParamSpecNullNickBlurb,
-            gerror_init => GErrorInit,
-            property_enum_zero => PropertyEnumZero,
-            dispose_finalize_chains_up => DisposeFinalizeChainsUp,
-            gtask_source_tag => GTaskSourceTag,
-            unnecessary_null_check => UnnecessaryNullCheck,
-            strcmp_for_string_equal => StrcmpForStringEqual,
-            use_g_set_str => UseGSetStr,
-            suggest_g_autoptr_error => SuggestGAutoptrError,
-            suggest_g_autoptr_goto_cleanup => SuggestGAutoptrGoto,
-            suggest_g_autoptr_inline_cleanup => SuggestGAutoptrInline,
-            suggest_g_autofree => SuggestGAutofree,
+            (gdeclare_semicolon, GDeclareSemicolon, 2, 0),
+            (missing_implementation, MissingImplementation, 2, 0),
+            (deprecated_add_private, DeprecatedAddPrivate, 2, 0),
+            (use_g_strcmp0, UseGStrcmp0, 2, 16),
+            (use_clear_functions, UseClearFunctions, 2, 28),
+            (g_param_spec_null_nick_blurb, GParamSpecNullNickBlurb, 2, 0),
+            (gerror_init, GErrorInit, 2, 0),
+            (property_enum_zero, PropertyEnumZero, 2, 0),
+            (dispose_finalize_chains_up, DisposeFinalizeChainsUp, 2, 0),
+            (gtask_source_tag, GTaskSourceTag, 2, 36),
+            (unnecessary_null_check, UnnecessaryNullCheck, 2, 0),
+            (strcmp_for_string_equal, StrcmpForStringEqual, 2, 0),
+            (use_g_set_str, UseGSetStr, 2, 76),
+            (suggest_g_autoptr_error, SuggestGAutoptrError, 2, 44),
+            (suggest_g_autoptr_goto_cleanup, SuggestGAutoptrGoto, 2, 44),
+            (suggest_g_autoptr_inline_cleanup, SuggestGAutoptrInline, 2, 44),
+            (suggest_g_autofree, SuggestGAutofree, 2, 44),
         }
     };
 }
 
 macro_rules! impl_create_all_rules {
-    ($($config_field:ident => $rule_type:ident),* $(,)?) => {
+    ($(($config_field:ident, $rule_type:ident, $major:literal, $minor:literal)),* $(,)?) => {
         /// Create all rule instances in execution order
         fn create_all_rules(config: &Config) -> Vec<RuleEntry> {
             vec![
                 $(
                     RuleEntry {
                         rule: Box::new($rule_type),
-                        enabled: config.rules.$config_field.enabled,
+                        enabled: config.rules.$config_field.enabled && is_rule_compatible(config, $major, $minor),
                         rule_config: config.rules.$config_field.clone(),
                     },
                 )*
             ]
         }
     };
+}
+
+/// Check if a rule is compatible with the configured minimum GLib version
+fn is_rule_compatible(config: &Config, required_major: u32, required_minor: u32) -> bool {
+    if let Some((major, minor)) = config.min_glib_version {
+        // Compare versions: config version must be >= required version
+        (major > required_major) || (major == required_major && minor >= required_minor)
+    } else {
+        // No minimum version set, all rules are compatible
+        true
+    }
 }
 
 for_each_rule!(impl_create_all_rules);
