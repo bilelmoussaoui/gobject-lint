@@ -29,6 +29,7 @@ pub mod gerror_init;
 pub mod gtask_source_tag;
 pub mod missing_implementation;
 pub mod prefer_g_new;
+pub mod prefer_g_variant_new_typed;
 pub mod property_enum_zero;
 pub mod strcmp_equal;
 pub mod suggest_g_autofree;

@@ -63,6 +63,9 @@ gdeclare_semicolon = true
 # Suggest g_new/g_new0 instead of g_malloc/g_malloc0 with sizeof for type safety
 prefer_g_new = true
 
+# Prefer g_variant_new_string/boolean/etc over g_variant_new with format strings (requires GLib >= 2.24)
+prefer_g_variant_new_typed = true
+
 # Report functions declared in headers but not implemented
 # Can also be configured with per-rule ignore patterns:
 # missing_implementation = { enabled = true, ignore = ["src/backends/**"] }

@@ -169,6 +169,9 @@ pub struct RulesConfig {
     pub prefer_g_new: RuleConfig,
 
     #[serde(default)]
+    pub prefer_g_variant_new_typed: RuleConfig,
+
+    #[serde(default)]
     pub strcmp_for_string_equal: RuleConfig,
 
     #[serde(default)]

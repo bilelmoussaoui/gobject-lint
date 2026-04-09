@@ -35,6 +35,7 @@ All rules are enabled by default. Run `gobject-lint --list-rules` to see their c
 - **missing_implementation** - Report functions declared in headers but not implemented
 - **deprecated_add_private** - Detect deprecated g_type_class_add_private (use G_DEFINE_TYPE_WITH_PRIVATE instead)
 - **prefer_g_new** - Suggest g_new/g_new0 instead of g_malloc/g_malloc0 with sizeof for type safety
+- **prefer_g_variant_new_typed** - Prefer g_variant_new_string/boolean/etc over g_variant_new with format strings
 - **use_g_strcmp0** - Use g_strcmp0 instead of strcmp (NULL-safe)
 - **use_clear_functions** - Suggest g_clear_object/g_clear_pointer instead of manual unref and NULL assignment
 - **g_param_spec_null_nick_blurb** - Ensure g_param_spec_* functions have NULL for nick and blurb parameters
