@@ -1,9 +1,17 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::Parser;
-use gobject_lint::{ast_context, config, fixer, reporter, rules::Category, scanner};
+use clap::{Parser, ValueEnum};
+use gobject_lint::{ast_context, config, fixer, output, reporter, rules::Category, scanner};
 use indicatif::{ProgressBar, ProgressStyle};
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum OutputFormat {
+    /// Human-readable colorized output (default)
+    Text,
+    /// SARIF JSON format for GitHub Code Scanning, VS Code, etc.
+    Sarif,
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "gobject-lint")]
@@ -36,6 +44,10 @@ struct Args {
     /// Filter rules by category
     #[arg(long, value_name = "CATEGORY")]
     category: Option<Category>,
+
+    /// Output format
+    #[arg(long, value_enum, default_value = "text")]
+    format: OutputFormat,
 
     /// Automatically apply fixes for violations
     #[arg(long)]
@@ -132,8 +144,16 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Report violations
-    reporter::report_violations(&violations, args.verbose, &config);
+    // Output violations in the requested format
+    match args.format {
+        OutputFormat::Text => {
+            reporter::report_violations(&violations, args.verbose, &config);
+        }
+        OutputFormat::Sarif => {
+            let sarif_output = output::sarif::generate_sarif(&violations, &config, &args.directory);
+            println!("{}", sarif_output);
+        }
+    }
 
     // Exit with error code if violations found
     if !violations.is_empty() {

@@ -58,10 +58,10 @@ fn filter_violations_in_place(
     Ok(())
 }
 
-struct RuleEntry {
-    rule: Box<dyn Rule>,
-    enabled: bool,
-    rule_config: RuleConfig,
+pub struct RuleEntry {
+    pub rule: Box<dyn Rule>,
+    pub enabled: bool,
+    pub rule_config: RuleConfig,
 }
 
 /// Macro to define all rules in execution order with their minimum GLib version
@@ -109,7 +109,7 @@ macro_rules! for_each_rule {
 macro_rules! impl_create_all_rules {
     ($(($config_field:ident, $rule_type:ident, $major:literal, $minor:literal)),* $(,)?) => {
         /// Create all rule instances in execution order
-        fn create_all_rules(config: &Config) -> Vec<RuleEntry> {
+        pub fn create_all_rules(config: &Config) -> Vec<RuleEntry> {
             vec![
                 $(
                     RuleEntry {
