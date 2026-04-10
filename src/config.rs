@@ -208,6 +208,9 @@ pub struct RulesConfig {
     pub use_g_clear_list: RuleConfig,
 
     #[serde(default)]
+    pub use_g_clear_weak_pointer: RuleConfig,
+
+    #[serde(default)]
     pub use_g_file_load_bytes: RuleConfig,
 
     #[serde(default)]
