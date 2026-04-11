@@ -7,7 +7,7 @@ pub struct GErrorInit;
 
 impl Rule for GErrorInit {
     fn name(&self) -> &'static str {
-        "gerror_init"
+        "g_error_init"
     }
 
     fn description(&self) -> &'static str {

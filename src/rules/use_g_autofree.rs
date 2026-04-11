@@ -5,15 +5,15 @@ use tree_sitter::Node;
 use super::Rule;
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
-pub struct SuggestGAutoptrInline;
+pub struct UseGAutofree;
 
-impl Rule for SuggestGAutoptrInline {
+impl Rule for UseGAutofree {
     fn name(&self) -> &'static str {
-        "suggest_g_autoptr_inline_cleanup"
+        "use_g_autofree"
     }
 
     fn description(&self) -> &'static str {
-        "Suggest g_autoptr instead of inline manual cleanup (g_object_unref/g_free)"
+        "Suggest g_autofree for string/buffer types instead of manual g_free"
     }
 
     fn category(&self) -> super::Category {
@@ -49,7 +49,7 @@ impl Rule for SuggestGAutoptrInline {
     }
 }
 
-impl SuggestGAutoptrInline {
+impl UseGAutofree {
     fn check_function(
         &self,
         ast_context: &AstContext,
@@ -63,8 +63,14 @@ impl SuggestGAutoptrInline {
             // Find all local pointer declarations
             let local_vars = self.find_local_pointer_vars(ast_context, body, source);
 
-            // For each variable, check if it's a candidate for g_autoptr
+            // For each variable, check if it's a candidate for g_autofree
             for (var_name, (var_type, decl_node)) in &local_vars {
+                // Only suggest g_autofree for simple types (char*, guint8*, void*, etc.)
+                // Not for GObject* types (those should use g_autoptr)
+                if !self.is_autofree_candidate(var_type) {
+                    continue;
+                }
+
                 // Check if variable is allocated
                 let is_allocated = self.is_var_allocated(ast_context, body, var_name, source);
 
@@ -72,28 +78,72 @@ impl SuggestGAutoptrInline {
                 let is_manually_freed =
                     self.is_var_manually_freed(ast_context, body, var_name, source);
 
-                // Check if variable is returned without being freed
+                // Check if variable is returned
                 let is_returned = self.is_var_returned(ast_context, body, var_name, source);
 
-                // Suggest g_autoptr if:
+                // Suggest g_autofree if:
                 // 1. Variable is allocated
-                // 2. Variable is manually freed at least once
-                // 3. Variable is not returned directly (would need g_steal_pointer)
+                // 2. Variable is manually freed
+                // 3. Variable is not returned (would need g_steal_pointer)
                 if is_allocated && is_manually_freed && !is_returned {
-                    let base_type = self.extract_base_type(var_type);
                     let position = decl_node.start_position();
                     violations.push(self.violation(
                         file_path,
                         base_line + position.row,
                         position.column + 1,
                         format!(
-                            "Consider using g_autoptr({}) {} to avoid manual cleanup",
-                            base_type, var_name
+                            "Consider using g_autofree {} to avoid manual g_free",
+                            var_name
                         ),
                     ));
                 }
             }
         }
+    }
+
+    fn is_autofree_candidate(&self, var_type: &str) -> bool {
+        let type_lower = var_type.to_lowercase();
+
+        // g_autofree is for simple pointer types: char*, guint8*, void*, etc.
+        // Not for GObject-derived types (those use g_autoptr)
+
+        // Simple types that should use g_autofree
+        if type_lower.contains("char")
+            || type_lower.contains("guint8")
+            || type_lower.contains("gint8")
+            || type_lower.contains("guchar")
+            || type_lower.contains("gchar")
+            || type_lower.contains("uint8_t")
+            || type_lower.contains("int8_t")
+            || type_lower.contains("void")
+        {
+            return true;
+        }
+
+        // Skip GObject types - these should use g_autoptr instead
+        // Common GObject patterns: GType*, GObject*, anything with G[A-Z][a-z]*
+        if var_type.contains("GError")
+            || var_type.contains("GObject")
+            || var_type.contains("GList")
+            || var_type.contains("GSList")
+            || var_type.contains("GHashTable")
+            || var_type.contains("GBytes")
+            || var_type.contains("GVariant")
+            || var_type.contains("GArray")
+        {
+            return false;
+        }
+
+        // Check for custom types (like CoglTexture, MetaWindow, etc.)
+        // These should use g_autoptr
+        if var_type.chars().next().is_some_and(|c| c.is_uppercase()) {
+            // If starts with uppercase and contains mixed case, likely an object type
+            if var_type.chars().any(|c| c.is_lowercase()) {
+                return false;
+            }
+        }
+
+        false
     }
 
     fn find_local_pointer_vars<'a>(
@@ -114,7 +164,6 @@ impl SuggestGAutoptrInline {
         source: &[u8],
         result: &mut HashMap<String, (String, Node<'a>)>,
     ) {
-        // Only look at top-level declarations in the function body
         if node.kind() == "compound_statement" {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
@@ -123,18 +172,16 @@ impl SuggestGAutoptrInline {
                 {
                     let type_text = ast_context.get_node_text(type_node, source);
 
-                    // Find declarators
                     let mut decl_cursor = child.walk();
                     for decl_child in child.children(&mut decl_cursor) {
                         if (decl_child.kind() == "init_declarator"
                             || decl_child.kind() == "pointer_declarator")
                             && let Some(var_name) =
                                 self.extract_var_name(ast_context, decl_child, source)
+                            && !var_name.contains("->")
+                            && !var_name.contains(".")
                         {
-                            // Only simple identifiers
-                            if !var_name.contains("->") && !var_name.contains(".") {
-                                result.insert(var_name, (type_text.clone(), child));
-                            }
+                            result.insert(var_name, (type_text.clone(), child));
                         }
                     }
                 }
@@ -184,26 +231,26 @@ impl SuggestGAutoptrInline {
         var_name: &str,
         source: &[u8],
     ) -> bool {
-        // Look for: var_name = allocation_call()
+        // Check assignment: var = g_strdup(...)
         if node.kind() == "assignment_expression"
             && let Some(left) = node.child_by_field_name("left")
         {
             let left_text = ast_context.get_node_text(left, source);
             if left_text == var_name
                 && let Some(right) = node.child_by_field_name("right")
-                && ast_context.is_allocation_call(right, source)
+                && self.is_autofree_allocation(ast_context, right, source)
             {
                 return true;
             }
         }
 
-        // Also check init declarator: Type *var = allocation_call()
+        // Check init: char *var = g_strdup(...)
         if node.kind() == "init_declarator"
             && let Some(declarator) = node.child_by_field_name("declarator")
             && let Some(found_var) = self.extract_var_name(ast_context, declarator, source)
             && found_var == var_name
             && let Some(value) = node.child_by_field_name("value")
-            && ast_context.is_allocation_call(value, source)
+            && self.is_autofree_allocation(ast_context, value, source)
         {
             return true;
         }
@@ -216,6 +263,30 @@ impl SuggestGAutoptrInline {
             }
         }
 
+        false
+    }
+
+    fn is_autofree_allocation(&self, ast_context: &AstContext, node: Node, source: &[u8]) -> bool {
+        if node.kind() == "call_expression"
+            && let Some(function) = node.child_by_field_name("function")
+        {
+            let func_name = ast_context.get_node_text(function, source);
+
+            // Functions that allocate memory suitable for g_autofree
+            if func_name == "g_strdup"
+                || func_name == "g_strndup"
+                || func_name == "g_strdup_printf"
+                || func_name == "g_strdup_vprintf"
+                || func_name == "g_malloc"
+                || func_name == "g_malloc0"
+                || func_name == "g_realloc"
+                || func_name == "g_try_malloc"
+                || func_name == "g_try_malloc0"
+                || func_name == "g_memdup"
+            {
+                return true;
+            }
+        }
         false
     }
 
@@ -236,8 +307,11 @@ impl SuggestGAutoptrInline {
         var_name: &str,
         source: &[u8],
     ) -> bool {
-        let (is_cleanup, _) = ast_context.is_cleanup_call(node, source);
-        if is_cleanup && let Some(arguments) = node.child_by_field_name("arguments") {
+        let (is_cleanup, func_name) = ast_context.is_cleanup_call(node, source);
+        if is_cleanup
+            && func_name == "g_free"
+            && let Some(arguments) = node.child_by_field_name("arguments")
+        {
             let args_text = ast_context.get_node_text(arguments, source);
             if args_text.contains(var_name) {
                 return true;
@@ -293,14 +367,5 @@ impl SuggestGAutoptrInline {
         }
 
         false
-    }
-
-    fn extract_base_type(&self, type_text: &str) -> String {
-        type_text
-            .trim()
-            .replace("const ", "")
-            .replace("*", "")
-            .trim()
-            .to_string()
     }
 }

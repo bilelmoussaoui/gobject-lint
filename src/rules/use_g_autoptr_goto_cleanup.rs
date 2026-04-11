@@ -5,11 +5,11 @@ use tree_sitter::Node;
 use super::Rule;
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
-pub struct SuggestGAutoptrGoto;
+pub struct UseGAutoptrGotoCleanup;
 
-impl Rule for SuggestGAutoptrGoto {
+impl Rule for UseGAutoptrGotoCleanup {
     fn name(&self) -> &'static str {
-        "suggest_g_autoptr_goto_cleanup"
+        "use_g_autoptr_goto_cleanup"
     }
 
     fn description(&self) -> &'static str {
@@ -49,7 +49,7 @@ impl Rule for SuggestGAutoptrGoto {
     }
 }
 
-impl SuggestGAutoptrGoto {
+impl UseGAutoptrGotoCleanup {
     fn check_function(
         &self,
         ast_context: &AstContext,

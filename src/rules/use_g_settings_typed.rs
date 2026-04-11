@@ -3,11 +3,11 @@ use tree_sitter::Node;
 use super::{CheckContext, Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
-pub struct PreferGSettingsTyped;
+pub struct UseGSettingsTyped;
 
-impl Rule for PreferGSettingsTyped {
+impl Rule for UseGSettingsTyped {
     fn name(&self) -> &'static str {
-        "prefer_g_settings_typed"
+        "use_g_settings_typed"
     }
 
     fn description(&self) -> &'static str {
@@ -50,7 +50,7 @@ impl Rule for PreferGSettingsTyped {
     }
 }
 
-impl PreferGSettingsTyped {
+impl UseGSettingsTyped {
     fn check_node(
         &self,
         ast_context: &AstContext,

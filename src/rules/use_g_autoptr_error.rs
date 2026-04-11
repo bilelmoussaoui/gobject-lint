@@ -3,11 +3,11 @@ use tree_sitter::Node;
 use super::Rule;
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
-pub struct SuggestGAutoptrError;
+pub struct UseGAutoptrError;
 
-impl Rule for SuggestGAutoptrError {
+impl Rule for UseGAutoptrError {
     fn name(&self) -> &'static str {
-        "suggest_g_autoptr_error"
+        "use_g_autoptr_error"
     }
 
     fn description(&self) -> &'static str {
@@ -47,7 +47,7 @@ impl Rule for SuggestGAutoptrError {
     }
 }
 
-impl SuggestGAutoptrError {
+impl UseGAutoptrError {
     fn check_node(
         &self,
         ast_context: &AstContext,

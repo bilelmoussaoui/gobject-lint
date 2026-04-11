@@ -215,7 +215,7 @@ pub struct RulesConfig {
     pub g_param_spec_static_name_canonical: RuleConfig,
 
     #[serde(default, alias = "dispose_finalize_chains_up")]
-    pub gobject_virtual_methods_chain_up: RuleConfig,
+    pub g_object_virtual_methods_chain_up: RuleConfig,
 
     #[serde(default)]
     pub use_clear_functions: RuleConfig,
@@ -233,10 +233,10 @@ pub struct RulesConfig {
     pub deprecated_add_private: RuleConfig,
 
     #[serde(default)]
-    pub gerror_init: RuleConfig,
+    pub g_error_init: RuleConfig,
 
     #[serde(default)]
-    pub gtask_source_tag: RuleConfig,
+    pub g_task_source_tag: RuleConfig,
 
     #[serde(default)]
     pub unnecessary_null_check: RuleConfig,
@@ -245,46 +245,46 @@ pub struct RulesConfig {
     pub missing_implementation: RuleConfig,
 
     #[serde(default)]
-    pub gdeclare_semicolon: RuleConfig,
+    pub g_declare_semicolon: RuleConfig,
 
     #[serde(default)]
     pub matching_declare_define: RuleConfig,
 
     #[serde(default)]
-    pub prefer_g_new: RuleConfig,
+    pub use_g_new: RuleConfig,
 
     #[serde(default)]
-    pub prefer_g_object_class_install_properties: RuleConfig,
+    pub use_g_object_class_install_properties: RuleConfig,
 
     #[serde(default)]
-    pub prefer_g_settings_typed: RuleConfig,
+    pub use_g_settings_typed: RuleConfig,
 
     #[serde(default)]
-    pub prefer_g_value_set_static_string: RuleConfig,
+    pub use_g_value_set_static_string: RuleConfig,
 
     #[serde(default)]
-    pub prefer_g_variant_new_typed: RuleConfig,
+    pub use_g_variant_new_typed: RuleConfig,
 
     #[serde(default)]
-    pub strcmp_for_string_equal: RuleConfig,
+    pub use_g_str_equal: RuleConfig,
 
     #[serde(default)]
     pub use_g_set_str: RuleConfig,
 
     #[serde(default)]
-    pub suggest_g_autoptr_error: RuleConfig,
+    pub use_g_autoptr_error: RuleConfig,
 
     #[serde(default)]
-    pub suggest_g_autoptr_goto_cleanup: RuleConfig,
+    pub use_g_autoptr_goto_cleanup: RuleConfig,
 
     #[serde(default)]
-    pub suggest_g_autoptr_inline_cleanup: RuleConfig,
+    pub use_g_autoptr_inline_cleanup: RuleConfig,
 
     #[serde(default)]
-    pub suggest_g_autofree: RuleConfig,
+    pub use_g_autofree: RuleConfig,
 
     #[serde(default)]
-    pub suggest_g_source_once: RuleConfig,
+    pub use_g_source_once: RuleConfig,
 
     #[serde(default)]
     pub use_g_source_constants: RuleConfig,

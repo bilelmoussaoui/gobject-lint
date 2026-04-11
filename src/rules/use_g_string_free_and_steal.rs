@@ -11,7 +11,7 @@ impl Rule for UseGStringFreeAndSteal {
     }
 
     fn description(&self) -> &'static str {
-        "Suggests g_string_free_and_steal instead of g_string_free (..., FALSE) for better readability"
+        "Suggest g_string_free_and_steal instead of g_string_free (..., FALSE) for better readability"
     }
 
     fn category(&self) -> super::Category {

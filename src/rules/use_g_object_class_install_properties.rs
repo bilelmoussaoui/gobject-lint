@@ -3,11 +3,11 @@ use tree_sitter::Node;
 use super::{CheckContext, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
-pub struct PreferGObjectClassInstallProperties;
+pub struct UseGObjectClassInstallProperties;
 
-impl Rule for PreferGObjectClassInstallProperties {
+impl Rule for UseGObjectClassInstallProperties {
     fn name(&self) -> &'static str {
-        "prefer_g_object_class_install_properties"
+        "use_g_object_class_install_properties"
     }
 
     fn description(&self) -> &'static str {
@@ -55,7 +55,7 @@ impl Rule for PreferGObjectClassInstallProperties {
     }
 }
 
-impl PreferGObjectClassInstallProperties {
+impl UseGObjectClassInstallProperties {
     /// Check a _class_init function and count install_property calls
     fn check_class_init_function(
         &self,

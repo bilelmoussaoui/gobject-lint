@@ -80,3 +80,17 @@ jobs:
 
       - name: Run tests
         run: cargo test --all
+
+  rule-consistency:
+    name: Rule Consistency Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Run rule consistency test
+        run: python3 tests/test_rule_consistency.py

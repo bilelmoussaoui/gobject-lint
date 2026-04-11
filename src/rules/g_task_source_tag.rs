@@ -7,7 +7,7 @@ pub struct GTaskSourceTag;
 
 impl Rule for GTaskSourceTag {
     fn name(&self) -> &'static str {
-        "gtask_source_tag"
+        "g_task_source_tag"
     }
 
     fn description(&self) -> &'static str {

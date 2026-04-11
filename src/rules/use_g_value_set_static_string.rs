@@ -3,11 +3,11 @@ use tree_sitter::Node;
 use super::{CheckContext, Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
-pub struct PreferGValueSetStaticString;
+pub struct UseGValueSetStaticString;
 
-impl Rule for PreferGValueSetStaticString {
+impl Rule for UseGValueSetStaticString {
     fn name(&self) -> &'static str {
-        "prefer_g_value_set_static_string"
+        "use_g_value_set_static_string"
     }
 
     fn description(&self) -> &'static str {
@@ -50,7 +50,7 @@ impl Rule for PreferGValueSetStaticString {
     }
 }
 
-impl PreferGValueSetStaticString {
+impl UseGValueSetStaticString {
     fn check_node(
         &self,
         ast_context: &AstContext,

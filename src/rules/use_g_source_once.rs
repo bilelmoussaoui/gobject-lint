@@ -3,11 +3,11 @@ use tree_sitter::Node;
 use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
-pub struct SuggestGSourceOnce;
+pub struct UseGSourceOnce;
 
-impl Rule for SuggestGSourceOnce {
+impl Rule for UseGSourceOnce {
     fn name(&self) -> &'static str {
-        "suggest_g_source_once"
+        "use_g_source_once"
     }
 
     fn description(&self) -> &'static str {
@@ -54,7 +54,7 @@ impl Rule for SuggestGSourceOnce {
     }
 }
 
-impl SuggestGSourceOnce {
+impl UseGSourceOnce {
     fn check_source_add_calls(
         &self,
         ast_context: &AstContext,

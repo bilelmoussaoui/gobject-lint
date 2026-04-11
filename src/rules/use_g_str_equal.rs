@@ -3,11 +3,11 @@ use tree_sitter::Node;
 use super::{CheckContext, Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
-pub struct StrcmpForStringEqual;
+pub struct UseGStrEqual;
 
-impl Rule for StrcmpForStringEqual {
+impl Rule for UseGStrEqual {
     fn name(&self) -> &'static str {
-        "strcmp_for_string_equal"
+        "use_g_str_equal"
     }
 
     fn description(&self) -> &'static str {
@@ -50,7 +50,7 @@ impl Rule for StrcmpForStringEqual {
     }
 }
 
-impl StrcmpForStringEqual {
+impl UseGStrEqual {
     fn check_node(
         &self,
         ast_context: &AstContext,

@@ -3,11 +3,11 @@ use tree_sitter::Node;
 use super::{CheckContext, Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
-pub struct PreferGVariantNewTyped;
+pub struct UseGVariantNewTyped;
 
-impl Rule for PreferGVariantNewTyped {
+impl Rule for UseGVariantNewTyped {
     fn name(&self) -> &'static str {
-        "prefer_g_variant_new_typed"
+        "use_g_variant_new_typed"
     }
 
     fn description(&self) -> &'static str {
@@ -50,7 +50,7 @@ impl Rule for PreferGVariantNewTyped {
     }
 }
 
-impl PreferGVariantNewTyped {
+impl UseGVariantNewTyped {
     fn check_node(
         &self,
         ast_context: &AstContext,

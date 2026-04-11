@@ -9,7 +9,7 @@ pub struct GDeclareSemicolon;
 
 impl Rule for GDeclareSemicolon {
     fn name(&self) -> &'static str {
-        "gdeclare_semicolon"
+        "g_declare_semicolon"
     }
 
     fn description(&self) -> &'static str {

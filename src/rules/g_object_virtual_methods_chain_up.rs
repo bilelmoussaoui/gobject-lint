@@ -7,7 +7,7 @@ pub struct GObjectVirtualMethodsChainUp;
 
 impl Rule for GObjectVirtualMethodsChainUp {
     fn name(&self) -> &'static str {
-        "gobject_virtual_methods_chain_up"
+        "g_object_virtual_methods_chain_up"
     }
 
     fn description(&self) -> &'static str {

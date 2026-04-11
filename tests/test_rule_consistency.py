@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""
+Test that enforces consistency between rule files, names, structs, and documentation.
+
+Requirements:
+1. Rule file name (without .rs) must match the rule's name() method return value
+2. Struct name must be PascalCase of the rule name
+3. Rule must be documented in RULES.md
+"""
+
+import re
+from pathlib import Path
+
+
+def snake_to_pascal(snake_str):
+    """Convert snake_case to PascalCase."""
+    components = snake_str.split('_')
+    return ''.join(x.title() for x in components)
+
+
+def extract_rule_info(file_path):
+    """
+    Extract struct name and rule name from a rule file.
+    Returns: (struct_name, rule_name) or None if not found
+    """
+    content = file_path.read_text()
+
+    # Extract struct name: pub struct StructName;
+    struct_match = re.search(r'pub\s+struct\s+(\w+)\s*;', content)
+    if not struct_match:
+        return None
+    struct_name = struct_match.group(1)
+
+    # Extract rule name from name() method
+    name_match = re.search(r'fn\s+name\(\&self\)\s*->\s*&\'static\s+str\s*{\s*"([^"]+)"\s*}', content)
+    if not name_match:
+        return None
+    rule_name = name_match.group(1)
+
+    return (struct_name, rule_name)
+
+
+def get_documented_rules(rules_md_path):
+    """Extract all rule names from RULES.md."""
+    content = rules_md_path.read_text()
+    # Match markdown bold rule names: - **rule_name** - description
+    matches = re.findall(r'-\s+\*\*([a-z_0-9]+)\*\*\s+-', content)
+    return set(matches)
+
+
+def test_rule_consistency():
+    """Test all rules for consistency."""
+    project_root = Path(__file__).parent.parent
+    rules_dir = project_root / "src" / "rules"
+    rules_md = project_root / "RULES.md"
+
+    # Get all rule files (excluding mod.rs)
+    rule_files = [f for f in rules_dir.glob("*.rs") if f.name != "mod.rs"]
+
+    if not rule_files:
+        raise AssertionError("No rule files found!")
+
+    # Get documented rules
+    documented_rules = get_documented_rules(rules_md)
+    if not documented_rules:
+        raise AssertionError("No rules found in RULES.md!")
+
+    errors = []
+    all_rule_names = set()
+
+    for rule_file in sorted(rule_files):
+        file_name = rule_file.stem  # filename without .rs
+
+        # Extract struct and rule name from file
+        rule_info = extract_rule_info(rule_file)
+        if not rule_info:
+            errors.append(f"{rule_file.name}: Could not extract struct name or rule name")
+            continue
+
+        struct_name, rule_name = rule_info
+        all_rule_names.add(rule_name)
+
+        # Check 1: File name must match rule name
+        if file_name != rule_name:
+            errors.append(
+                f"{rule_file.name}: File name '{file_name}' does not match "
+                f"rule name '{rule_name}' from name() method"
+            )
+
+        # Check 2: Struct name must be PascalCase of rule name
+        expected_struct_name = snake_to_pascal(rule_name)
+        if struct_name != expected_struct_name:
+            errors.append(
+                f"{rule_file.name}: Struct name '{struct_name}' does not match "
+                f"expected PascalCase '{expected_struct_name}' for rule '{rule_name}'"
+            )
+
+        # Check 3: Rule must be documented in RULES.md
+        if rule_name not in documented_rules:
+            errors.append(
+                f"{rule_file.name}: Rule '{rule_name}' is not documented in RULES.md"
+            )
+
+    # Check 4: All documented rules should have corresponding files
+    for doc_rule in documented_rules:
+        if doc_rule not in all_rule_names:
+            errors.append(
+                f"RULES.md: Rule '{doc_rule}' is documented but has no corresponding file"
+            )
+
+    # Report results
+    if errors:
+        error_msg = "\n".join(errors)
+        raise AssertionError(f"\nRule consistency errors found:\n{error_msg}")
+
+    print(f"✓ All {len(rule_files)} rules are consistent!")
+    print(f"  - File names match rule names")
+    print(f"  - Struct names are correct PascalCase")
+    print(f"  - All rules documented in RULES.md")
+
+
+if __name__ == "__main__":
+    test_rule_consistency()
