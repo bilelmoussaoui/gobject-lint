@@ -94,7 +94,7 @@ pub struct RuleConfig {
 impl Default for RuleConfig {
     fn default() -> Self {
         Self {
-            level: RuleLevel::Error,
+            level: RuleLevel::Warn,
             ignore: Vec::new(),
         }
     }

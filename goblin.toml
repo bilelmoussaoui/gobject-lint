@@ -31,14 +31,14 @@ ignore = [
 
 [rules]
 # Rules can be set to:
-#   "error" - Report as error and fail CI (default)
-#   "warn"  - Report as warning but don't fail CI
+#   "warn"  - Report as warning but don't fail CI (default)
+#   "error" - Report as error and fail CI
 #   "ignore" - Disable the rule
 #   true/false - Shorthand for "error"/"ignore"
 #
 # Examples:
-#   my_rule = "warn"           # Warning only
-#   my_rule = "error"          # Error (default)
+#   my_rule = "warn"           # Warning only (default)
+#   my_rule = "error"          # Error
 #   my_rule = "ignore"         # Disabled
 #   my_rule = true             # Same as "error"
 #   my_rule = false            # Same as "ignore"
