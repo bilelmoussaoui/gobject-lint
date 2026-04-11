@@ -53,9 +53,17 @@ See goblin.toml for all the supported rules/configurations.
 
 ## CI/CD Integration
 
+### Container Image
+
+goblin is available as a container image for easy CI/CD integration:
+
+```bash
+podman run --rm -v "$PWD:/workspace:Z" ghcr.io/bilelmoussaoui/goblin:latest
+```
+
 ### GitHub Actions
 
-Integrate goblin with GitHub Code Scanning using SARIF output:
+Using the container image with GitHub Code Scanning:
 
 ```yaml
 name: GObject Lint
@@ -69,22 +77,19 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/bilelmoussaoui/goblin:latest
     permissions:
       security-events: write  # Required for uploading SARIF results
 
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Install goblin
-        run: |
-          cargo install --git https://github.com/bilelmoussaoui/goblin goblin
+      - uses: actions/checkout@v4
 
       - name: Run goblin
-        run: |
-          goblin --format sarif > goblin.sarif
-        continue-on-error: true  # Don't fail the workflow on lint errors
+        run: goblin --format sarif > goblin.sarif
 
       - name: Upload SARIF results
+        if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: goblin.sarif
@@ -92,6 +97,31 @@ jobs:
 ```
 
 The results will appear in the "Security" tab under "Code scanning alerts" for your repository, and as inline comments on pull requests.
+
+### GitLab CI
+
+Using the container image with GitLab's SARIF ingestion:
+
+```yaml
+goblin:
+  stage: lint
+  image: ghcr.io/bilelmoussaoui/goblin:latest
+  script:
+    - goblin --format sarif > goblin.sarif
+  artifacts:
+    reports:
+      sarif: goblin.sarif
+```
+
+The results will appear in the merge request's security report and as inline comments.
+
+### Installation Alternative
+
+If you prefer installing locally instead of using containers:
+
+```bash
+cargo install --git https://github.com/bilelmoussaoui/goblin goblin
+```
 
 ## LSP Server
 
