@@ -6,27 +6,27 @@ use crate::rules::Violation;
 
 /// Apply fixes to files
 pub fn apply_fixes(violations: &[Violation]) -> Result<usize> {
-    // Group violations by file
-    let mut by_file: HashMap<&Path, Vec<&Violation>> = HashMap::new();
+    use crate::rules::Fix;
+
+    // Collect all fixes from all violations, grouped by file
+    let mut by_file: HashMap<&Path, Vec<&Fix>> = HashMap::new();
     for violation in violations {
-        if violation.fix.is_some() {
-            by_file
-                .entry(violation.file.as_path())
-                .or_default()
-                .push(violation);
+        if !violation.fixes.is_empty() {
+            for fix in &violation.fixes {
+                by_file
+                    .entry(violation.file.as_path())
+                    .or_default()
+                    .push(fix);
+            }
         }
     }
 
     let mut total_fixed = 0;
 
-    for (file_path, mut file_violations) in by_file {
+    for (file_path, mut fixes) in by_file {
         // Sort by start_byte descending - apply fixes from bottom to top
         // This way earlier fixes don't invalidate byte positions of later fixes
-        file_violations.sort_by(|a, b| {
-            let a_start = a.fix.as_ref().unwrap().start_byte;
-            let b_start = b.fix.as_ref().unwrap().start_byte;
-            b_start.cmp(&a_start)
-        });
+        fixes.sort_by(|a, b| b.start_byte.cmp(&a.start_byte));
 
         // Read file content as bytes
         let content = fs::read(file_path)
@@ -35,9 +35,7 @@ pub fn apply_fixes(violations: &[Violation]) -> Result<usize> {
         let mut modified_content = content;
 
         // Apply each fix
-        for violation in file_violations {
-            let fix = violation.fix.as_ref().unwrap();
-
+        for fix in fixes {
             // Replace the range [start_byte, end_byte) with replacement
             let mut new_content = Vec::new();
             new_content.extend_from_slice(&modified_content[..fix.start_byte]);

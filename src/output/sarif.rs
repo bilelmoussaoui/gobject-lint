@@ -93,38 +93,46 @@ fn generate_result(
         }]
     });
 
-    // Add fix if available
-    if let Some(ref fix) = violation.fix {
+    // Add fixes if available
+    if !violation.fixes.is_empty() {
         // Convert byte offsets to line/column positions for SARIF
-        if let Ok(content) = std::fs::read(&violation.file)
-            && let (Some(start_pos), Some(end_pos)) = (
-                byte_offset_to_position(&content, fix.start_byte),
-                byte_offset_to_position(&content, fix.end_byte),
-            )
-        {
-            let deleted_region = json!({
-                "startLine": start_pos.0,
-                "startColumn": start_pos.1,
-                "endLine": end_pos.0,
-                "endColumn": end_pos.1,
-            });
+        if let Ok(content) = std::fs::read(&violation.file) {
+            let mut replacements = Vec::new();
 
-            result["fixes"] = json!([{
-                "description": {
-                    "text": format!("Apply {}", violation.rule),
-                },
-                "artifactChanges": [{
-                    "artifactLocation": {
-                        "uri": relative_path,
-                    },
-                    "replacements": [{
+            for fix in &violation.fixes {
+                if let (Some(start_pos), Some(end_pos)) = (
+                    byte_offset_to_position(&content, fix.start_byte),
+                    byte_offset_to_position(&content, fix.end_byte),
+                ) {
+                    let deleted_region = json!({
+                        "startLine": start_pos.0,
+                        "startColumn": start_pos.1,
+                        "endLine": end_pos.0,
+                        "endColumn": end_pos.1,
+                    });
+
+                    replacements.push(json!({
                         "deletedRegion": deleted_region,
                         "insertedContent": {
                             "text": fix.replacement,
                         }
+                    }));
+                }
+            }
+
+            if !replacements.is_empty() {
+                result["fixes"] = json!([{
+                    "description": {
+                        "text": format!("Apply {}", violation.rule),
+                    },
+                    "artifactChanges": [{
+                        "artifactLocation": {
+                            "uri": relative_path,
+                        },
+                        "replacements": replacements,
                     }]
-                }]
-            }]);
+                }]);
+            }
         }
     }
 

@@ -137,8 +137,8 @@ pub struct Violation {
     /// Rule execution order - higher means more specific/later rules take
     /// precedence
     pub rule_index: usize,
-    /// Optional automated fix
-    pub fix: Option<Fix>,
+    /// Optional automated fixes (multiple edits can be applied)
+    pub fixes: Vec<Fix>,
 }
 
 /// Trait that all linting rules must implement
@@ -178,7 +178,7 @@ pub trait Rule {
             level: crate::config::RuleLevel::Error, // Will be overridden by scanner
             snippet: None,
             rule_index: 0, // Will be set by scanner based on execution order
-            fix: None,
+            fixes: Vec::new(),
         }
     }
 
@@ -201,7 +201,30 @@ pub trait Rule {
             level: crate::config::RuleLevel::Error, // Will be overridden by scanner
             snippet: None,
             rule_index: 0,
-            fix: Some(fix),
+            fixes: vec![fix],
+        }
+    }
+
+    /// Helper to create a violation with multiple automated fixes
+    fn violation_with_fixes(
+        &self,
+        file: &std::path::Path,
+        line: usize,
+        column: usize,
+        message: String,
+        fixes: Vec<Fix>,
+    ) -> Violation {
+        Violation {
+            file: file.to_path_buf(),
+            line,
+            column,
+            message,
+            rule: self.name(),
+            category: self.category(),
+            level: crate::config::RuleLevel::Error, // Will be overridden by scanner
+            snippet: None,
+            rule_index: 0,
+            fixes,
         }
     }
 }
