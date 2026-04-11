@@ -1,6 +1,6 @@
 use tree_sitter::Node;
 
-use super::Rule;
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct GTaskSourceTag;
@@ -16,6 +16,10 @@ impl Rule for GTaskSourceTag {
 
     fn category(&self) -> super::Category {
         super::Category::Suspicious
+    }
+
+    fn fixable(&self) -> bool {
+        true
     }
 
     fn check_all(
@@ -38,22 +42,33 @@ impl Rule for GTaskSourceTag {
                     if let Some(body) = ast_context.find_body(root) {
                         let task_vars = self.find_gtask_new_calls(ast_context, body, func_source);
 
-                        for (var_name, line_offset, col) in task_vars {
+                        for (var_name, line_offset, col, insert_byte, indentation) in task_vars {
                             if !self.has_set_source_tag_call(
                                 ast_context,
                                 body,
                                 &var_name,
                                 func_source,
                             ) {
-                                violations.push(self.violation(
-                                        path,
-                                        func.line + line_offset - 1,
-                                        col,
-                                        format!(
-                                            "GTask {} created without g_task_set_source_tag. Add: g_task_set_source_tag ({}, <function_name>);",
-                                            var_name, var_name
-                                        ),
-                                    ));
+                                // Create fix: insert g_task_set_source_tag after the statement
+                                let fix = Fix {
+                                    start_byte: func.start_byte.unwrap() + insert_byte,
+                                    end_byte: func.start_byte.unwrap() + insert_byte,
+                                    replacement: format!(
+                                        "\n{}g_task_set_source_tag ({}, {});",
+                                        indentation, var_name, func.name
+                                    ),
+                                };
+
+                                violations.push(self.violation_with_fix(
+                                    path,
+                                    func.line + line_offset - 1,
+                                    col,
+                                    format!(
+                                        "GTask '{}' created without g_task_set_source_tag",
+                                        var_name
+                                    ),
+                                    fix,
+                                ));
                             }
                         }
                     }
@@ -69,7 +84,7 @@ impl GTaskSourceTag {
         ast_context: &AstContext,
         node: Node,
         source: &[u8],
-    ) -> Vec<(String, usize, usize)> {
+    ) -> Vec<(String, usize, usize, usize, String)> {
         let mut results = Vec::new();
 
         // Look for assignments like: task = g_task_new(...)
@@ -80,7 +95,16 @@ impl GTaskSourceTag {
         {
             let var_name = ast_context.get_node_text(left, source);
             let position = node.start_position();
-            results.push((var_name, position.row + 1, position.column + 1));
+            // Find the parent statement to get the position after semicolon
+            let insert_byte = self.find_statement_end(node);
+            let indentation = self.extract_indentation(node, source);
+            results.push((
+                var_name,
+                position.row + 1,
+                position.column + 1,
+                insert_byte,
+                indentation,
+            ));
         }
 
         // Look for declarations like: GTask *task = g_task_new(...)
@@ -91,7 +115,16 @@ impl GTaskSourceTag {
             && let Some(var_name) = ast_context.extract_variable_name(declarator, source)
         {
             let position = node.start_position();
-            results.push((var_name, position.row + 1, position.column + 1));
+            // Find the parent statement to get the position after semicolon
+            let insert_byte = self.find_statement_end(node);
+            let indentation = self.extract_indentation(node, source);
+            results.push((
+                var_name,
+                position.row + 1,
+                position.column + 1,
+                insert_byte,
+                indentation,
+            ));
         }
 
         // Recursively check children
@@ -101,6 +134,41 @@ impl GTaskSourceTag {
         }
 
         results
+    }
+
+    fn extract_indentation(&self, node: Node, source: &[u8]) -> String {
+        // Find the start of the line
+        let mut line_start_byte = node.start_byte();
+
+        // Walk backwards to find the start of the line
+        while line_start_byte > 0 && source[line_start_byte - 1] != b'\n' {
+            line_start_byte -= 1;
+        }
+
+        // Count spaces/tabs from line start to first non-whitespace
+        let mut indent = String::new();
+        for &byte in &source[line_start_byte..node.start_byte()] {
+            if byte == b' ' || byte == b'\t' {
+                indent.push(byte as char);
+            } else {
+                break;
+            }
+        }
+
+        indent
+    }
+
+    fn find_statement_end(&self, mut node: Node) -> usize {
+        // Walk up to find the statement (expression_statement or declaration)
+        while let Some(parent) = node.parent() {
+            if parent.kind() == "expression_statement" || parent.kind() == "declaration" {
+                // Return the end byte of the statement (after the semicolon)
+                return parent.end_byte();
+            }
+            node = parent;
+        }
+        // Fallback: return the end of the node itself
+        node.end_byte()
     }
 
     fn is_gtask_new_call(&self, ast_context: &AstContext, node: Node, source: &[u8]) -> bool {

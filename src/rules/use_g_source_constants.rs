@@ -1,6 +1,6 @@
 use tree_sitter::Node;
 
-use super::Rule;
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGSourceConstants;
@@ -16,6 +16,10 @@ impl Rule for UseGSourceConstants {
 
     fn category(&self) -> super::Category {
         super::Category::Style
+    }
+
+    fn fixable(&self) -> bool {
+        true
     }
 
     fn check_all(
@@ -150,7 +154,13 @@ impl UseGSourceConstants {
                             "G_SOURCE_REMOVE"
                         };
 
-                        violations.push(self.violation(
+                        let fix = Fix {
+                            start_byte: child.start_byte(),
+                            end_byte: child.end_byte(),
+                            replacement: replacement.to_string(),
+                        };
+
+                        violations.push(self.violation_with_fix(
                             file_path,
                             func_line + position.row,
                             position.column + 1,
@@ -158,6 +168,7 @@ impl UseGSourceConstants {
                                 "Use {} instead of {} in GSourceFunc callback",
                                 replacement, return_value_trimmed
                             ),
+                            fix,
                         ));
                     }
                 }
