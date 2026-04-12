@@ -127,6 +127,11 @@ impl GErrorInit {
 
                         if let Some(declarator) = child.child_by_field_name("declarator") {
                             let var_name = ast_context.extract_variable_name(declarator, source)?;
+                            // Already initialized to a non-NULL value (e.g. GError **error = &d->error),
+                            // skip it - the fix would insert `= NULL` producing invalid code
+                            if !is_null {
+                                return None;
+                            }
                             return Some((var_name, is_null, declarator));
                         }
                     }
