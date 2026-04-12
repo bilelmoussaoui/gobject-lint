@@ -1,6 +1,6 @@
 use tree_sitter::Node;
 
-use super::{Fix, Rule};
+use super::{CheckContext, Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGSourceConstants;
@@ -115,14 +115,13 @@ impl UseGSourceConstants {
                 {
                     let root = tree.root_node();
                     if let Some(body) = ast_context.find_body(root) {
-                        self.check_returns_in_body(
-                            ast_context,
-                            body,
-                            func_source,
-                            path,
-                            func.line,
-                            violations,
-                        );
+                        let ctx = CheckContext {
+                            source: func_source,
+                            file_path: path,
+                            base_line: func.line,
+                            base_byte: func.start_byte.unwrap_or(0),
+                        };
+                        self.check_returns_in_body(ast_context, body, &ctx, violations);
                     }
                 }
             }
@@ -133,9 +132,7 @@ impl UseGSourceConstants {
         &self,
         ast_context: &AstContext,
         node: Node,
-        source: &[u8],
-        file_path: &std::path::Path,
-        func_line: usize,
+        ctx: &CheckContext,
         violations: &mut Vec<Violation>,
     ) {
         if node.kind() == "return_statement" {
@@ -143,7 +140,7 @@ impl UseGSourceConstants {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() != "return" && child.kind() != ";" {
-                    let return_value = ast_context.get_node_text(child, source);
+                    let return_value = ast_context.get_node_text(child, ctx.source);
                     let return_value_trimmed = return_value.trim();
 
                     if return_value_trimmed == "TRUE" || return_value_trimmed == "FALSE" {
@@ -154,11 +151,11 @@ impl UseGSourceConstants {
                             "G_SOURCE_REMOVE"
                         };
 
-                        let fix = Fix::new(child.start_byte(), child.end_byte(), replacement);
+                        let fix = Fix::from_node(child, ctx, replacement);
 
                         violations.push(self.violation_with_fix(
-                            file_path,
-                            func_line + position.row,
+                            ctx.file_path,
+                            ctx.base_line + position.row,
                             position.column + 1,
                             format!(
                                 "Use {} instead of {} in GSourceFunc callback",
@@ -174,14 +171,7 @@ impl UseGSourceConstants {
         // Recursively check children
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            self.check_returns_in_body(
-                ast_context,
-                child,
-                source,
-                file_path,
-                func_line,
-                violations,
-            );
+            self.check_returns_in_body(ast_context, child, ctx, violations);
         }
     }
 }
