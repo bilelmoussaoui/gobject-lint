@@ -378,7 +378,24 @@ impl Config {
     }
 
     /// Enable only specific rules, disabling all others
-    pub fn enable_only_rules(&mut self, rule_names: &[String]) {
+    pub fn enable_only_rules(&mut self, rule_names: &[String]) -> Result<()> {
+        // First, validate that all provided rule names exist
+        let valid_rules: Vec<&str> = {
+            macro_rules! collect_rule_names {
+                ($(($config_field:ident, $rule_type:ident, $major:literal, $minor:literal)),* $(,)?) => {
+                    vec![$(stringify!($config_field)),*]
+                };
+            }
+            crate::for_each_rule!(collect_rule_names)
+        };
+
+        for rule_name in rule_names {
+            if !valid_rules.contains(&rule_name.as_str()) {
+                anyhow::bail!("Unknown rule: {}", rule_name);
+            }
+        }
+
+        // Now enable only the specified rules
         macro_rules! impl_enable_only_rules {
             ($(($config_field:ident, $rule_type:ident, $major:literal, $minor:literal)),* $(,)?) => {
                 {
@@ -394,6 +411,7 @@ impl Config {
         }
 
         crate::for_each_rule!(impl_enable_only_rules);
+        Ok(())
     }
 
     /// Filter rules by category, disabling all others

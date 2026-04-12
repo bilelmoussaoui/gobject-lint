@@ -65,7 +65,7 @@ fn main() -> Result<()> {
 
     // Apply --only filter if specified
     if !args.only.is_empty() {
-        config.enable_only_rules(&args.only);
+        config.enable_only_rules(&args.only)?;
     }
 
     // Apply --category filter if specified
