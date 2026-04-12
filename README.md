@@ -1,43 +1,43 @@
-# goblin
+# goblint
 
 A tree-sitter-based linter for GObject/C applications.
 
-**goblin** = **G**Object **L**inter
+**goblint** = **G**Object **L**inter
 
 ## Usage
 
 ```bash
 # Lint current directory with default config
-goblin
+goblint
 
 # Lint specific directory
-goblin /path/to/project
+goblint /path/to/project
 
 # Use custom config file
-goblin --config my-lint.toml /path/to/project
+goblint --config my-lint.toml /path/to/project
 
 # Verbose output
-goblin -v
+goblint -v
 
 # List all available rules with their enabled/disabled status
-goblin --list-rules
+goblint --list-rules
 
 # Run only specific rules (overrides config)
-goblin --only use_g_strcmp0 --only use_clear_functions
+goblint --only use_g_strcmp0 --only use_clear_functions
 
 # Add custom ignore patterns
-goblin --ignore "build/**" --ignore "tests/**"
+goblint --ignore "build/**" --ignore "tests/**"
 ```
 
 ## Available Rules
 
 See [RULES.md](RULES.md) for a complete list of all available rules organized by category.
 
-Run `goblin --list-rules` to see the current status of all rules.
+Run `goblint --list-rules` to see the current status of all rules.
 
 ## Configuration
 
-Create a `goblin.toml` file in your project root:
+Create a `goblint.toml` file in your project root:
 
 ```toml
 # Minimum supported GLib version (optional)
@@ -49,16 +49,16 @@ min_glib_version = "2.40"
 g_param_spec_null_nick_blurb = true
 ```
 
-See goblin.toml for all the supported rules/configurations.
+See goblint.toml for all the supported rules/configurations.
 
 ## CI/CD Integration
 
 ### Container Image
 
-goblin is available as a container image for easy CI/CD integration:
+goblint is available as a container image for easy CI/CD integration:
 
 ```bash
-podman run --rm -v "$PWD:/workspace:Z" ghcr.io/bilelmoussaoui/goblin:latest
+podman run --rm -v "$PWD:/workspace:Z" ghcr.io/bilelmoussaoui/goblint:latest
 ```
 
 ### GitHub Actions
@@ -78,22 +78,22 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/bilelmoussaoui/goblin:latest
+      image: ghcr.io/bilelmoussaoui/goblint:latest
     permissions:
       security-events: write  # Required for uploading SARIF results
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run goblin
-        run: goblin --format sarif > goblin.sarif
+      - name: Run goblint
+        run: goblint --format sarif > goblint.sarif
 
       - name: Upload SARIF results
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: goblin.sarif
-          category: goblin
+          sarif_file: goblint.sarif
+          category: goblint
 ```
 
 The results will appear in the "Security" tab under "Code scanning alerts" for your repository, and as inline comments on pull requests.
@@ -103,14 +103,14 @@ The results will appear in the "Security" tab under "Code scanning alerts" for y
 Using the container image with GitLab's SARIF ingestion:
 
 ```yaml
-goblin:
+goblint:
   stage: lint
-  image: ghcr.io/bilelmoussaoui/goblin:latest
+  image: ghcr.io/bilelmoussaoui/goblint:latest
   script:
-    - goblin --format sarif > goblin.sarif
+    - goblint --format sarif > goblint.sarif
   artifacts:
     reports:
-      sarif: goblin.sarif
+      sarif: goblint.sarif
 ```
 
 The results will appear in the merge request's security report and as inline comments.
@@ -120,7 +120,7 @@ The results will appear in the merge request's security report and as inline com
 If you prefer installing locally instead of using containers:
 
 ```bash
-cargo install --git https://github.com/bilelmoussaoui/goblin goblin
+cargo install --git https://github.com/bilelmoussaoui/goblint goblint
 ```
 
 ## LSP Server
@@ -128,31 +128,31 @@ cargo install --git https://github.com/bilelmoussaoui/goblin goblin
 For real-time linting in your editor:
 
 ```bash
-cargo build --release --bin goblin-lsp
+cargo build --release --bin goblint-lsp
 ```
 
 **Neovim** (nvim-lspconfig):
 ```lua
 require('lspconfig.configs').gobject_lsp = {
   default_config = {
-    cmd = {'goblin-lsp'},
+    cmd = {'goblint-lsp'},
     filetypes = {'c', 'h'},
-    root_dir = require('lspconfig.util').root_pattern('goblin.toml', '.git'),
+    root_dir = require('lspconfig.util').root_pattern('goblint.toml', '.git'),
   },
 }
 require('lspconfig').gobject_lsp.setup{}
 ```
 
-**VS Code**: Use a generic LSP client extension pointing to `goblin-lsp`
+**VS Code**: Use a generic LSP client extension pointing to `goblint-lsp`
 
 **Helix** (`~/.config/helix/languages.toml`):
 ```toml
 [[language]]
 name = "c"
-language-servers = ["clangd", "goblin-lsp"]
+language-servers = ["clangd", "goblint-lsp"]
 
-[language-server.goblin-lsp]
-command = "goblin-lsp"
+[language-server.goblint-lsp]
+command = "goblint-lsp"
 ```
 
 Co-Authored by Claude Code.

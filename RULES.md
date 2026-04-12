@@ -1,6 +1,6 @@
 # Available Rules
 
-All rules are enabled by default. Run `goblin --list-rules` to see their current status.
+All rules are enabled by default. Run `goblint --list-rules` to see their current status.
 
 ## Correctness
 
@@ -78,13 +78,13 @@ You can filter rules by category using the `--category` flag:
 
 ```bash
 # Run only correctness rules
-goblin --category correctness
+goblint --category correctness
 
 # Run only performance rules
-goblin --category perf
+goblint --category perf
 
 # List only style rules
-goblin --list-rules --category style
+goblint --list-rules --category style
 ```
 
 Available categories: `correctness`, `suspicious`, `style`, `complexity`, `perf`, `pedantic`, `restriction`

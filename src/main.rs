@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use goblin::{ast_context, config, fixer, output, reporter, rules::Category, scanner};
+use goblint::{ast_context, config, fixer, output, reporter, rules::Category, scanner};
 use indicatif::{ProgressBar, ProgressStyle};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -14,7 +14,7 @@ enum OutputFormat {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "goblin")]
+#[command(name = "goblint")]
 #[command(about = "A fast linter for GObject/C code", long_about = None)]
 struct Args {
     /// Directory to scan for C files
@@ -22,7 +22,7 @@ struct Args {
     directory: PathBuf,
 
     /// Path to configuration file
-    #[arg(short, long, value_name = "FILE", default_value = "goblin.toml")]
+    #[arg(short, long, value_name = "FILE", default_value = "goblint.toml")]
     config: PathBuf,
 
     /// Additional ignore patterns (can be specified multiple times)

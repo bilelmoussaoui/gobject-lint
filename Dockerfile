@@ -10,7 +10,7 @@ COPY gobject-ast/Cargo.toml gobject-ast/
 RUN mkdir -p src gobject-ast/src && \
     echo "fn main() {}" > src/main.rs && \
     echo "fn main() {}" > gobject-ast/src/main.rs && \
-    cargo build --release --bin goblin && \
+    cargo build --release --bin goblint && \
     rm -rf src gobject-ast/src
 
 # Copy actual source code
@@ -18,7 +18,7 @@ COPY src ./src
 COPY gobject-ast ./gobject-ast
 
 # Build the actual binary
-RUN cargo build --release --bin goblin
+RUN cargo build --release --bin goblint
 
 # Runtime stage - minimal image
 FROM debian:bookworm-slim
@@ -31,11 +31,11 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy the binary from builder
-COPY --from=builder /build/target/release/goblin /usr/local/bin/goblin
+COPY --from=builder /build/target/release/goblint /usr/local/bin/goblint
 
 # Set working directory
 WORKDIR /workspace
 
-# Run goblin by default
-ENTRYPOINT ["goblin"]
+# Run goblint by default
+ENTRYPOINT ["goblint"]
 CMD ["--help"]

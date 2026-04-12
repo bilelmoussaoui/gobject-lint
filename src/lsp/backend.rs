@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use goblin::{ast_context::AstContext, config::Config, scanner};
+use goblint::{ast_context::AstContext, config::Config, scanner};
 use tokio::sync::Mutex;
 use tower_lsp::{Client, LanguageServer, jsonrpc::Result, lsp_types::*};
 
@@ -25,11 +25,11 @@ impl GObjectBackend {
 
     /// Initialize workspace (find root, load config, build AST context)
     async fn initialize_workspace(&self, file_path: &std::path::Path) -> Result<()> {
-        // Find workspace root by looking for goblin.toml
+        // Find workspace root by looking for goblint.toml
         let mut current = file_path;
         let mut root = None;
         while let Some(parent) = current.parent() {
-            let config_path = parent.join("goblin.toml");
+            let config_path = parent.join("goblint.toml");
             if config_path.exists() {
                 root = Some(parent.to_path_buf());
                 break;
@@ -41,7 +41,7 @@ impl GObjectBackend {
             root.unwrap_or_else(|| file_path.parent().unwrap_or(file_path).to_path_buf());
 
         // Load config
-        let config_path = workspace_root.join("goblin.toml");
+        let config_path = workspace_root.join("goblint.toml");
         let config = if config_path.exists() {
             match Config::load(&config_path) {
                 Ok(c) => c,
@@ -165,7 +165,7 @@ impl GObjectBackend {
                     range,
                     severity: Some(DiagnosticSeverity::WARNING),
                     code: Some(NumberOrString::String(v.rule.to_string())),
-                    source: Some("goblin".to_string()),
+                    source: Some("goblint".to_string()),
                     message: v.message.clone(),
                     ..Default::default()
                 }
