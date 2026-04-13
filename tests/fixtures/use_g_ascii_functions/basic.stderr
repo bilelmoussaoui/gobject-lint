@@ -1,0 +1,8 @@
+basic.c:8:16: use_g_ascii_functions: Use g_ascii_tolower() instead of tolower() — C ctype functions are locale-dependent
+basic.c:9:16: use_g_ascii_functions: Use g_ascii_toupper() instead of toupper() — C ctype functions are locale-dependent
+basic.c:11:7: use_g_ascii_functions: Use g_ascii_isdigit() instead of isdigit() — C ctype functions are locale-dependent
+basic.c:14:7: use_g_ascii_functions: Use g_ascii_isalpha() instead of isalpha() — C ctype functions are locale-dependent
+basic.c:17:7: use_g_ascii_functions: Use g_ascii_isalnum() instead of isalnum() — C ctype functions are locale-dependent
+basic.c:17:22: use_g_ascii_functions: Use g_ascii_isspace() instead of isspace() — C ctype functions are locale-dependent
+basic.c:20:7: use_g_ascii_functions: Use g_ascii_isupper() instead of isupper() — C ctype functions are locale-dependent
+basic.c:20:22: use_g_ascii_functions: Use g_ascii_islower() instead of islower() — C ctype functions are locale-dependent

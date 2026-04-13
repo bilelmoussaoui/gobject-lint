@@ -10,6 +10,8 @@ Rules that detect code that is outright wrong or very useless.
 - **property_enum_zero** - Ensure property enums start with PROP_0, not PROP_NAME = 0
 - **g_param_spec_static_name_canonical** - Ensure property names are canonical (use dashes, not underscores). Critical with G_PARAM_STATIC_NAME
 - **g_object_virtual_methods_chain_up** - Ensure dispose/finalize/constructed methods chain up to parent class
+- **use_g_ascii_functions** - Use g_ascii_* functions instead of locale-dependent C ctype functions (tolower, toupper, isdigit, etc.)
+- **use_g_strlcpy** - Avoid unsafe string functions (strcpy, strcat, strncat); use g_strlcpy/g_strlcat instead
 
 ## Suspicious
 
@@ -31,6 +33,7 @@ Rules that suggest more idiomatic ways to write code.
 - **use_g_string_free_and_steal** - Suggests g_string_free_and_steal instead of g_string_free (..., FALSE) for better readability
 - **use_g_source_once** - Suggest using g_idle_add_once/g_timeout_add_once when callback always returns G_SOURCE_REMOVE
 - **use_g_source_constants** - Use G_SOURCE_CONTINUE/G_SOURCE_REMOVE instead of TRUE/FALSE in GSourceFunc callbacks
+- **use_g_str_has_prefix** - Use g_str_has_prefix instead of strncmp(s, "prefix", strlen("prefix")) == 0
 
 ## Complexity
 
