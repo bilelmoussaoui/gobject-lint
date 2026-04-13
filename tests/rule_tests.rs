@@ -244,7 +244,10 @@ rule_test!(
 rule_test!(use_g_set_str, goblint::rules::UseGSetStr);
 rule_test!(use_g_settings_typed, goblint::rules::UseGSettingsTyped);
 rule_test!(use_g_source_constants, goblint::rules::UseGSourceConstants);
-rule_test!(use_g_str_has_prefix, goblint::rules::UseGStrHasPrefix);
+rule_test!(
+    use_g_str_has_prefix_suffix,
+    goblint::rules::UseGStrHasPrefixSuffix
+);
 rule_test!(use_g_ascii_functions, goblint::rules::UseGAsciiFunctions);
 rule_test!(use_g_strlcpy, goblint::rules::UseGStrlcpy);
 rule_test!(use_g_str_equal, goblint::rules::UseGStrEqual);

@@ -1,0 +1,5 @@
+basic.c:8:7: use_g_str_has_prefix_suffix: Use g_str_has_prefix (str, "foo") instead of strncmp() == 0
+basic.c:12:7: use_g_str_has_prefix_suffix: Use !g_str_has_prefix (str, "bar") instead of strncmp() != 0
+basic.c:16:7: use_g_str_has_prefix_suffix: Use g_str_has_prefix (str, "baz") instead of strncmp() == 0
+basic.c:28:7: use_g_str_has_prefix_suffix: Use g_str_has_suffix (str, "_bar") instead of strcmp() == 0
+basic.c:32:7: use_g_str_has_prefix_suffix: Use !g_str_has_suffix (str, ".baz") instead of strcmp() != 0

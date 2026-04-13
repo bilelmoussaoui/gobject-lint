@@ -3,15 +3,15 @@ use tree_sitter::Node;
 use super::{CheckContext, Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
-pub struct UseGStrHasPrefix;
+pub struct UseGStrHasPrefixSuffix;
 
-impl Rule for UseGStrHasPrefix {
+impl Rule for UseGStrHasPrefixSuffix {
     fn name(&self) -> &'static str {
-        "use_g_str_has_prefix"
+        "use_g_str_has_prefix_suffix"
     }
 
     fn description(&self) -> &'static str {
-        "Use g_str_has_prefix() instead of strncmp(s, \"prefix\", strlen(\"prefix\")) == 0"
+        "Use g_str_has_prefix/g_str_has_suffix() instead of manual strncmp/strcmp comparisons"
     }
 
     fn category(&self) -> super::Category {
@@ -50,7 +50,7 @@ impl Rule for UseGStrHasPrefix {
     }
 }
 
-impl UseGStrHasPrefix {
+impl UseGStrHasPrefixSuffix {
     fn check_node(
         &self,
         ast_context: &AstContext,
@@ -58,7 +58,6 @@ impl UseGStrHasPrefix {
         ctx: &CheckContext,
         violations: &mut Vec<Violation>,
     ) {
-        // Look for: strncmp(s, "literal", strlen("literal")) == 0
         if node.kind() == "binary_expression"
             && let Some(operator) = node.child_by_field_name("operator")
         {
@@ -68,24 +67,11 @@ impl UseGStrHasPrefix {
                 && let Some(right) = node.child_by_field_name("right")
             {
                 // strncmp(...) == 0  or  0 == strncmp(...)
-                self.check_strncmp_comparison(
-                    ast_context,
-                    left,
-                    right,
-                    op_text,
-                    ctx,
-                    node,
-                    violations,
-                );
-                self.check_strncmp_comparison(
-                    ast_context,
-                    right,
-                    left,
-                    op_text,
-                    ctx,
-                    node,
-                    violations,
-                );
+                self.check_strncmp_prefix(ast_context, left, right, op_text, ctx, node, violations);
+                self.check_strncmp_prefix(ast_context, right, left, op_text, ctx, node, violations);
+                // strcmp(...) == 0  or  0 == strcmp(...)
+                self.check_strcmp_suffix(ast_context, left, right, op_text, ctx, node, violations);
+                self.check_strcmp_suffix(ast_context, right, left, op_text, ctx, node, violations);
             }
         }
 
@@ -96,7 +82,7 @@ impl UseGStrHasPrefix {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn check_strncmp_comparison(
+    fn check_strncmp_prefix(
         &self,
         ast_context: &AstContext,
         strncmp_side: Node,
@@ -117,8 +103,7 @@ impl UseGStrHasPrefix {
             return;
         }
 
-        let value_text = ast_context.get_node_text(value_side, ctx.source).trim();
-        if value_text != "0" {
+        if ast_context.get_node_text(value_side, ctx.source).trim() != "0" {
             return;
         }
 
@@ -140,21 +125,16 @@ impl UseGStrHasPrefix {
         let prefix_arg = arguments[1];
         let len_arg = arguments[2];
 
-        // prefix must be a string literal
         if prefix_arg.kind() != "string_literal" {
             return;
         }
         let prefix_text = ast_context.get_node_text(prefix_arg, ctx.source);
 
-        // third arg must be strlen("same_literal")
         if !self.is_strlen_of(ast_context, len_arg, prefix_text, ctx.source) {
             return;
         }
 
-        let spacing_start = function.end_byte();
-        let spacing_end = args.start_byte();
-        let spacing = ctx.source_text(spacing_start, spacing_end);
-
+        let spacing = ctx.source_text(function.end_byte(), args.start_byte());
         let replacement = if operator == "==" {
             format!("g_str_has_prefix{spacing}({str_arg}, {prefix_text})")
         } else {
@@ -171,13 +151,127 @@ impl UseGStrHasPrefix {
         ));
     }
 
-    /// Returns true if `node` is a call `strlen("literal")` where the argument
-    /// matches `expected_literal`
+    #[allow(clippy::too_many_arguments)]
+    fn check_strcmp_suffix(
+        &self,
+        ast_context: &AstContext,
+        strcmp_side: Node,
+        value_side: Node,
+        operator: &str,
+        ctx: &CheckContext,
+        parent_node: Node,
+        violations: &mut Vec<Violation>,
+    ) {
+        if strcmp_side.kind() != "call_expression" {
+            return;
+        }
+
+        let Some(function) = strcmp_side.child_by_field_name("function") else {
+            return;
+        };
+        if ast_context.get_node_text(function, ctx.source) != "strcmp" {
+            return;
+        }
+
+        if ast_context.get_node_text(value_side, ctx.source).trim() != "0" {
+            return;
+        }
+
+        let Some(args) = strcmp_side.child_by_field_name("arguments") else {
+            return;
+        };
+
+        let mut cursor = args.walk();
+        let arguments: Vec<Node> = args
+            .children(&mut cursor)
+            .filter(|n| n.kind() != "(" && n.kind() != ")" && n.kind() != ",")
+            .collect();
+
+        if arguments.len() != 2 {
+            return;
+        }
+
+        let offset_arg = arguments[0];
+        let suffix_arg = arguments[1];
+
+        if suffix_arg.kind() != "string_literal" {
+            return;
+        }
+        let suffix_text = ast_context.get_node_text(suffix_arg, ctx.source);
+
+        // First arg must be: <str_expr> + strlen(<str_expr>) - strlen("suffix")
+        let Some(str_expr) =
+            self.extract_suffix_base(ast_context, offset_arg, suffix_text, ctx.source)
+        else {
+            return;
+        };
+
+        let spacing = ctx.source_text(function.end_byte(), args.start_byte());
+        let replacement = if operator == "==" {
+            format!("g_str_has_suffix{spacing}({str_expr}, {suffix_text})")
+        } else {
+            format!("!g_str_has_suffix{spacing}({str_expr}, {suffix_text})")
+        };
+
+        let fix = Fix::from_node(parent_node, ctx, &replacement);
+        violations.push(self.violation_with_fix(
+            ctx.file_path,
+            ctx.base_line + parent_node.start_position().row,
+            parent_node.start_position().column + 1,
+            format!("Use {replacement} instead of strcmp() {operator} 0"),
+            fix,
+        ));
+    }
+
+    /// Validates that `node` is `<str_expr> + strlen(<str_expr>) -
+    /// strlen("suffix")` and returns `str_expr` if so.
+    fn extract_suffix_base<'a>(
+        &self,
+        ast_context: &AstContext,
+        node: Node,
+        suffix_text: &str,
+        source: &'a [u8],
+    ) -> Option<&'a str> {
+        // Top level: X - strlen("suffix")
+        if node.kind() != "binary_expression" {
+            return None;
+        }
+        let op = node.child_by_field_name("operator")?;
+        if ast_context.get_node_text(op, source) != "-" {
+            return None;
+        }
+        let lhs = node.child_by_field_name("left")?;
+        let rhs = node.child_by_field_name("right")?;
+
+        if !self.is_strlen_of(ast_context, rhs, suffix_text, source) {
+            return None;
+        }
+
+        // Left side: <str_expr> + strlen(<str_expr>)
+        if lhs.kind() != "binary_expression" {
+            return None;
+        }
+        let inner_op = lhs.child_by_field_name("operator")?;
+        if ast_context.get_node_text(inner_op, source) != "+" {
+            return None;
+        }
+        let str_expr_node = lhs.child_by_field_name("left")?;
+        let strlen_node = lhs.child_by_field_name("right")?;
+
+        let str_expr = ast_context.get_node_text(str_expr_node, source);
+        if !self.is_strlen_of(ast_context, strlen_node, str_expr, source) {
+            return None;
+        }
+
+        Some(str_expr)
+    }
+
+    /// Returns true if `node` is `strlen(expected_text)`
     fn is_strlen_of(
         &self,
         ast_context: &AstContext,
         node: Node,
-        expected_literal: &str,
+        expected_text: &str,
         source: &[u8],
     ) -> bool {
         if node.kind() != "call_expression" {
@@ -200,6 +294,6 @@ impl UseGStrHasPrefix {
         if inner_args.len() != 1 {
             return false;
         }
-        ast_context.get_node_text(inner_args[0], source) == expected_literal
+        ast_context.get_node_text(inner_args[0], source) == expected_text
     }
 }
