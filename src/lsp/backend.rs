@@ -165,7 +165,7 @@ impl GObjectBackend {
                     range,
                     severity: Some(DiagnosticSeverity::WARNING),
                     code: Some(NumberOrString::String(v.rule.to_string())),
-                    source: Some("goblint".to_string()),
+                    source: Some(env!("CARGO_PKG_NAME").to_owned()),
                     message: v.message.clone(),
                     ..Default::default()
                 }

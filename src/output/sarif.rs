@@ -18,9 +18,9 @@ pub fn generate_sarif(violations: &[Violation], config: &Config, project_root: &
         "runs": [{
             "tool": {
                 "driver": {
-                    "name": "goblint",
+                    "name": env!("CARGO_PKG_NAME"),
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/bilelmoussaoui/goblint",
+                    "informationUri": env!("CARGO_PKG_REPOSITORY"),
                     "rules": rules,
                 }
             },

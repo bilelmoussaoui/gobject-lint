@@ -22,7 +22,7 @@ struct Args {
     directory: PathBuf,
 
     /// Path to configuration file
-    #[arg(short, long, value_name = "FILE", default_value = "goblint.toml")]
+    #[arg(short, long, value_name = "FILE", default_value = concat!(env!("CARGO_PKG_NAME"), ".toml"))]
     config: PathBuf,
 
     /// Additional ignore patterns (can be specified multiple times)
