@@ -225,6 +225,10 @@ rule_test!(
     goblint::rules::UseGObjectClassInstallProperties
 );
 rule_test!(use_g_source_once, goblint::rules::UseGSourceOnce);
+rule_test!(
+    use_g_clear_signal_handler,
+    goblint::rules::UseGClearSignalHandler
+);
 rule_test!(unnecessary_null_check, goblint::rules::UnnecessaryNullCheck);
 rule_test!(use_clear_functions, goblint::rules::UseClearFunctions);
 rule_test!(

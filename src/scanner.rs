@@ -129,6 +129,7 @@ macro_rules! for_each_rule {
             (use_g_autofree, UseGAutofree, 2, 44),
             (use_g_clear_handle_id, UseGClearHandleId, 2, 56),
             (use_g_clear_list, UseGClearList, 2, 64),
+            (use_g_clear_signal_handler, UseGClearSignalHandler, 2, 0),
             (use_g_clear_weak_pointer, UseGClearWeakPointer, 2, 56),
             (use_g_file_load_bytes, UseGFileLoadBytes, 2, 56),
             (use_g_object_new_with_properties, UseGObjectNewWithProperties, 2, 0),

@@ -260,14 +260,7 @@ impl UseGClearHandleId {
             let func_name = ast_context.get_node_text(function, source);
 
             // Check if this is a known handle cleanup function
-            let is_handle_cleanup = matches!(
-                func_name,
-                "g_source_remove"
-                    | "g_source_destroy"
-                    | "g_signal_handler_disconnect"
-                    | "g_signal_handler_block"
-                    | "g_signal_handler_unblock"
-            );
+            let is_handle_cleanup = matches!(func_name, "g_source_remove" | "g_source_destroy");
 
             if !is_handle_cleanup {
                 return None;
