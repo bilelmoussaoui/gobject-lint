@@ -3,6 +3,7 @@ use std::{fs, path::Path};
 use anyhow::Result;
 use colored::Colorize;
 use indicatif::ProgressBar;
+use rayon::prelude::*;
 
 use crate::{
     ast_context::AstContext,
@@ -189,29 +190,40 @@ pub fn scan_with_ast(
         sp.set_message("Running linter rules...");
     }
 
-    // Run all registered rules
-    for (rule_index, entry) in rules.iter().enumerate() {
-        if !entry.level.is_enabled() {
-            continue;
-        }
+    // Run all rules in parallel — each gets its own violations vec
+    let per_rule: Vec<Result<Vec<Violation>>> = rules
+        .par_iter()
+        .enumerate()
+        .map(|(rule_index, entry)| {
+            if !entry.level.is_enabled() {
+                return Ok(Vec::new());
+            }
 
-        let start = violations.len();
-        entry.rule.check_all(ast_context, config, &mut violations);
+            let mut rule_violations = Vec::new();
+            entry
+                .rule
+                .check_all(ast_context, config, &mut rule_violations);
 
-        // Set rule index and level for new violations
-        for violation in violations.iter_mut().skip(start) {
-            violation.rule_index = rule_index;
-            violation.level = entry.level;
-        }
+            for v in &mut rule_violations {
+                v.rule_index = rule_index;
+                v.level = entry.level;
+            }
 
-        populate_snippets(&mut violations, start);
-        filter_violations_in_place(
-            &mut violations,
-            start,
-            project_root,
-            config,
-            &entry.rule_config,
-        )?;
+            populate_snippets(&mut rule_violations, 0);
+            filter_violations_in_place(
+                &mut rule_violations,
+                0,
+                project_root,
+                config,
+                &entry.rule_config,
+            )?;
+
+            Ok(rule_violations)
+        })
+        .collect();
+
+    for rule_violations in per_rule {
+        violations.extend(rule_violations?);
     }
 
     // Deduplicate: keep only violations from later rules (higher index) when

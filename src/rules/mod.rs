@@ -190,7 +190,7 @@ pub struct Violation {
 }
 
 /// Trait that all linting rules must implement
-pub trait Rule {
+pub trait Rule: Send + Sync {
     /// The unique identifier for this rule (e.g., "missing_implementation")
     fn name(&self) -> &'static str;
 

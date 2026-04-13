@@ -1,17 +1,29 @@
-use std::{cell::RefCell, path::Path};
+use std::{
+    cell::RefCell,
+    path::Path,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+
+thread_local! {
+    static TS_PARSER: RefCell<tree_sitter::Parser> = RefCell::new({
+        let mut p = tree_sitter::Parser::new();
+        p.set_language(&tree_sitter_c::LANGUAGE.into())
+            .expect("Failed to load C grammar");
+        p
+    });
+}
 
 use anyhow::Result;
 use globset::GlobSet;
 use gobject_ast::{FunctionInfo, Parser, Project};
 use indicatif::ProgressBar;
+use rayon::prelude::*;
 use walkdir::WalkDir;
 
 /// AST-based project context that replaces the old tree-sitter based
 /// ProjectContext
 pub struct AstContext {
     pub project: Project,
-    /// Tree-sitter parser for rules that need to parse C code
-    ts_parser: RefCell<tree_sitter::Parser>,
 }
 
 impl AstContext {
@@ -21,9 +33,6 @@ impl AstContext {
         ignore_matcher: &GlobSet,
         spinner: Option<&ProgressBar>,
     ) -> Result<Self> {
-        let mut parser = Parser::new()?;
-        let mut project = Project::new();
-
         // Collect all files first to get count
         let files: Vec<_> = WalkDir::new(directory)
             .into_iter()
@@ -41,34 +50,27 @@ impl AstContext {
             .collect();
 
         let total_files = files.len();
+        let counter = AtomicUsize::new(0);
 
-        // Parse each file
-        for (i, entry) in files.iter().enumerate() {
-            let path = entry.path();
-
-            if let Some(sp) = spinner {
-                sp.set_message(format!("Parsing files... {}/{}", i + 1, total_files));
-            }
-
-            // Parse this file
-            if let Ok(file_project) = parser.parse_file(path) {
-                // Merge into main project
-                for (file_path, file_model) in file_project.files {
-                    project.files.insert(file_path, file_model);
+        // Parse files in parallel — each rayon thread gets its own Parser
+        let parsed: Vec<_> = files
+            .par_iter()
+            .filter_map(|entry| {
+                let i = counter.fetch_add(1, Ordering::Relaxed);
+                if let Some(sp) = spinner {
+                    sp.set_message(format!("Parsing files... {}/{}", i + 1, total_files));
                 }
-            }
+                let mut parser = Parser::new().ok()?;
+                parser.parse_file(entry.path()).ok()
+            })
+            .collect();
+
+        let mut project = Project::new();
+        for file_project in parsed {
+            project.files.extend(file_project.files);
         }
 
-        // Create and configure tree-sitter parser for rules
-        let mut ts_parser = tree_sitter::Parser::new();
-        ts_parser
-            .set_language(&tree_sitter_c::LANGUAGE.into())
-            .expect("Failed to load C grammar");
-
-        Ok(Self {
-            project,
-            ts_parser: RefCell::new(ts_parser),
-        })
+        Ok(Self { project })
     }
 
     /// Update a single file in the project
@@ -160,7 +162,7 @@ impl AstContext {
     /// This is a convenience method for rules that need to parse function
     /// bodies
     pub fn parse_c_source(&self, source: &[u8]) -> Option<tree_sitter::Tree> {
-        self.ts_parser.borrow_mut().parse(source, None)
+        TS_PARSER.with(|p| p.borrow_mut().parse(source, None))
     }
 
     // Common AST helper methods for rules
