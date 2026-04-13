@@ -1,0 +1,1 @@
+basic.c:6:3: g_error_init: GError *error must be initialized to NULL

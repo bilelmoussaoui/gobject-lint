@@ -112,8 +112,18 @@ impl UnnecessaryNullCheck {
             }
         }
 
-        // Handle simple condition (just "ptr")
-        if condition.kind() == "identifier" || condition.kind() == "parenthesized_expression" {
+        // Handle parenthesized expression - recurse into the inner expression
+        if condition.kind() == "parenthesized_expression" {
+            let mut cursor = condition.walk();
+            for child in condition.children(&mut cursor) {
+                if child.kind() != "(" && child.kind() != ")" {
+                    return self.extract_null_check_variable(ast_context, child, source);
+                }
+            }
+        }
+
+        // Handle simple identifier condition (just "ptr")
+        if condition.kind() == "identifier" {
             return Some(
                 ast_context
                     .get_node_text(condition, source)

@@ -26,3 +26,6 @@ indicatif = "0.18"
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std"] }
 serde_json = "1.0"
+
+[dev-dependencies]
+tempfile = "3"

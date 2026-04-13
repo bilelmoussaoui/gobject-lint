@@ -1,0 +1,3 @@
+basic.c:6:3: unnecessary_null_check: Remove unnecessary NULL check before g_free (g_free handles NULL)
+basic.c:9:3: unnecessary_null_check: Remove unnecessary NULL check before g_free (g_free handles NULL)
+basic.c:12:3: unnecessary_null_check: Remove unnecessary NULL check before g_free (g_free handles NULL)
