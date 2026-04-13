@@ -66,7 +66,15 @@ fn run_fixture_tests(rule_name: &str, rule: &dyn Rule) {
     let mut c_files: Vec<_> = fs::read_dir(&fixtures_dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "c"))
+        .filter(|e| {
+            let path = e.path();
+            // Only plain *.c files — exclude *.fixed.c (those are expected outputs)
+            path.extension().is_some_and(|ext| ext == "c")
+                && !path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|s| s.ends_with(".fixed"))
+        })
         .map(|e| e.path())
         .collect();
     c_files.sort();
@@ -121,6 +129,34 @@ fn run_fixture_tests(rule_name: &str, rule: &dyn Rule) {
                     expected_fixed.trim(),
                     actual_fixed.trim(),
                 ));
+            }
+
+            // --- post-fix violation check ---
+            // Re-run the rule on the fixed file to verify which violations remain.
+            let fixed_stderr_file = fixtures_dir.join(format!("{stem}.fixed.stderr"));
+            let (ctx_fixed, temp_dir_fixed) = build_context_for_file(&temp_c);
+            let mut post_fix_violations = Vec::new();
+            rule.check_all(&ctx_fixed, &config, &mut post_fix_violations);
+            post_fix_violations.sort_by_key(|v| (v.line, v.column));
+            let actual_fixed_stderr =
+                format_violations(&post_fix_violations, temp_dir_fixed.path());
+
+            if bless || !fixed_stderr_file.exists() {
+                fs::write(&fixed_stderr_file, format!("{actual_fixed_stderr}\n"))
+                    .expect("failed to write .fixed.stderr");
+                if bless {
+                    println!("blessed {}", fixed_stderr_file.display());
+                }
+            } else {
+                let expected = fs::read_to_string(&fixed_stderr_file).unwrap_or_default();
+                if actual_fixed_stderr.trim() != expected.trim() {
+                    failures.push(format!(
+                        "fixture {rule_name}/{stem}: post-fix violations mismatch\n\
+                         --- expected ---\n{}\n--- got ---\n{}",
+                        expected.trim(),
+                        actual_fixed_stderr.trim(),
+                    ));
+                }
             }
         }
     }
