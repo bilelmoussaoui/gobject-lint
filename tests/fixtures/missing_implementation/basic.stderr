@@ -1,0 +1,1 @@
+basic.h:6:1: missing_implementation: Function 'foo_also_do' is declared in a header but has no implementation

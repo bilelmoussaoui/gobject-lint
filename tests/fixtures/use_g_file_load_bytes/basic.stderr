@@ -1,0 +1,1 @@
+basic.c:10:19: use_g_file_load_bytes: Consider using g_file_load_bytes/g_file_load_bytes_async instead of g_file_load_contents + g_bytes_new_take for simplicity

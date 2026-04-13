@@ -1,0 +1,1 @@
+basic.c:13:10: use_g_source_constants: Use G_SOURCE_REMOVE instead of FALSE in GSourceFunc callback

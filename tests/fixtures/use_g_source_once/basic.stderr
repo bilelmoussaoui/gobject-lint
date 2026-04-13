@@ -1,0 +1,1 @@
+basic.c:13:3: use_g_source_once: Callback 'my_idle_cb' always returns G_SOURCE_REMOVE. Use g_idle_add_once instead of g_idle_add

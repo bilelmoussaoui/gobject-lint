@@ -1,0 +1,1 @@
+basic.c:6:3: use_g_object_new_with_properties: Set properties in g_object_new() instead of 1 separate g_object_set() call

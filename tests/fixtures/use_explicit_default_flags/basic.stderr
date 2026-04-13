@@ -1,0 +1,2 @@
+basic.c:6:23: use_explicit_default_flags: Use G_APPLICATION_DEFAULT_FLAGS instead of 0 for g_application_new() flags parameter
+basic.c:8:21: use_explicit_default_flags: Use G_FILE_QUERY_INFO_NONE instead of 0 for g_file_query_info() flags parameter

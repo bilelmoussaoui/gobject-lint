@@ -1,0 +1,3 @@
+basic.c:6:18: use_g_variant_new_typed: Use g_variant_new_string ("hello") instead of g_variant_new("s", ...) for type safety
+basic.c:7:18: use_g_variant_new_typed: Use g_variant_new_boolean (TRUE) instead of g_variant_new("b", ...) for type safety
+basic.c:8:18: use_g_variant_new_typed: Use g_variant_new_int32 (42) instead of g_variant_new("i", ...) for type safety

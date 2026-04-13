@@ -4,11 +4,26 @@ use globset::GlobSetBuilder;
 use goblint::{ast_context::AstContext, config::Config, fixer, rules::Rule};
 
 /// Build an AstContext from a single C file copied into a temp directory.
+/// Also copies any sibling .h files from the fixture directory.
 /// Returns the TempDir (must stay alive for the duration of the test).
 fn build_context_for_file(c_file: &Path) -> (AstContext, tempfile::TempDir) {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let dest = temp_dir.path().join(c_file.file_name().unwrap());
     fs::copy(c_file, &dest).expect("failed to copy fixture");
+
+    // Also copy any .h files from the same directory (for rules that inspect
+    // headers)
+    if let Some(fixture_dir) = c_file.parent()
+        && let Ok(entries) = fs::read_dir(fixture_dir)
+    {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "h") {
+                let h_dest = temp_dir.path().join(path.file_name().unwrap());
+                fs::copy(&path, &h_dest).expect("failed to copy header fixture");
+            }
+        }
+    }
 
     let ignore = GlobSetBuilder::new().build().unwrap();
     let ctx = AstContext::build_with_ignore(temp_dir.path(), &ignore, None)
@@ -125,6 +140,82 @@ macro_rules! rule_test {
 }
 
 rule_test!(deprecated_add_private, goblint::rules::DeprecatedAddPrivate);
+rule_test!(g_declare_semicolon, goblint::rules::GDeclareSemicolon);
 rule_test!(g_error_init, goblint::rules::GErrorInit);
+rule_test!(
+    g_object_virtual_methods_chain_up,
+    goblint::rules::GObjectVirtualMethodsChainUp
+);
+rule_test!(
+    g_param_spec_null_nick_blurb,
+    goblint::rules::GParamSpecNullNickBlurb
+);
+rule_test!(
+    g_param_spec_static_name_canonical,
+    goblint::rules::GParamSpecStaticNameCanonical
+);
+rule_test!(
+    g_param_spec_static_strings,
+    goblint::rules::GParamSpecStaticStrings
+);
+rule_test!(g_task_source_tag, goblint::rules::GTaskSourceTag);
+rule_test!(
+    matching_declare_define,
+    goblint::rules::MatchingDeclareDefine
+);
+rule_test!(
+    missing_implementation,
+    goblint::rules::MissingImplementation
+);
+rule_test!(property_enum_zero, goblint::rules::PropertyEnumZero);
+rule_test!(
+    use_g_object_new_with_properties,
+    goblint::rules::UseGObjectNewWithProperties
+);
+rule_test!(use_g_autofree, goblint::rules::UseGAutofree);
+rule_test!(use_g_autoptr_error, goblint::rules::UseGAutoptrError);
+rule_test!(
+    use_g_autoptr_goto_cleanup,
+    goblint::rules::UseGAutoptrGotoCleanup
+);
+rule_test!(
+    use_g_autoptr_inline_cleanup,
+    goblint::rules::UseGAutoptrInlineCleanup
+);
+rule_test!(use_g_file_load_bytes, goblint::rules::UseGFileLoadBytes);
+rule_test!(use_g_new, goblint::rules::UseGNew);
+rule_test!(
+    use_g_object_class_install_properties,
+    goblint::rules::UseGObjectClassInstallProperties
+);
+rule_test!(use_g_source_once, goblint::rules::UseGSourceOnce);
 rule_test!(unnecessary_null_check, goblint::rules::UnnecessaryNullCheck);
+rule_test!(use_clear_functions, goblint::rules::UseClearFunctions);
+rule_test!(
+    use_explicit_default_flags,
+    goblint::rules::UseExplicitDefaultFlags
+);
+rule_test!(use_g_clear_handle_id, goblint::rules::UseGClearHandleId);
+rule_test!(use_g_clear_list, goblint::rules::UseGClearList);
+rule_test!(
+    use_g_clear_weak_pointer,
+    goblint::rules::UseGClearWeakPointer
+);
+rule_test!(
+    use_g_object_notify_by_pspec,
+    goblint::rules::UseGObjectNotifyByPspec
+);
+rule_test!(use_g_set_str, goblint::rules::UseGSetStr);
+rule_test!(use_g_settings_typed, goblint::rules::UseGSettingsTyped);
+rule_test!(use_g_source_constants, goblint::rules::UseGSourceConstants);
+rule_test!(use_g_str_equal, goblint::rules::UseGStrEqual);
 rule_test!(use_g_strcmp0, goblint::rules::UseGStrcmp0);
+rule_test!(
+    use_g_string_free_and_steal,
+    goblint::rules::UseGStringFreeAndSteal
+);
+rule_test!(
+    use_g_value_set_static_string,
+    goblint::rules::UseGValueSetStaticString
+);
+rule_test!(use_g_variant_new_typed, goblint::rules::UseGVariantNewTyped);

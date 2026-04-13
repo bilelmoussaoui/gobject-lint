@@ -1,0 +1,1 @@
+basic.h:5:57: g_declare_semicolon: G_DECLARE_* macro should end with a semicolon. Without it, tree-sitter may misparse following declarations.

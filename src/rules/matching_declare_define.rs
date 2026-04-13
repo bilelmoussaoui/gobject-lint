@@ -96,73 +96,105 @@ impl MatchingDeclareDefine {
         for (line_num, line) in source_str.lines().enumerate() {
             let trimmed = line.trim();
 
-            // Check all G_DEFINE_* variants
-            let (define_macro, type_name) = if trimmed.starts_with("G_DEFINE_FINAL_TYPE") {
-                (
-                    "G_DEFINE_FINAL_TYPE",
-                    self.extract_type_name_from_define(trimmed),
-                )
-            } else if trimmed.starts_with("G_DEFINE_DERIVABLE_TYPE") {
-                (
-                    "G_DEFINE_DERIVABLE_TYPE",
-                    self.extract_type_name_from_define(trimmed),
-                )
-            } else if trimmed.starts_with("G_DEFINE_INTERFACE") {
-                (
-                    "G_DEFINE_INTERFACE",
-                    self.extract_type_name_from_define(trimmed),
-                )
-            } else if trimmed.starts_with("G_DEFINE_TYPE")
-                && !trimmed.starts_with("G_DEFINE_TYPE_EXTENDED")
-                && !trimmed.starts_with("G_DEFINE_TYPE_WITH_PRIVATE")
-                && !trimmed.starts_with("G_DEFINE_TYPE_WITH_CODE")
-            {
-                ("G_DEFINE_TYPE", self.extract_type_name_from_define(trimmed))
-            } else {
-                continue;
-            };
+            // Check all G_DEFINE_* variants that define GObject types.
+            // More-specific prefixes must come before their shorter prefixes.
+            let (define_macro, type_name) =
+                if trimmed.starts_with("G_DEFINE_FINAL_TYPE_WITH_PRIVATE") {
+                    (
+                        "G_DEFINE_FINAL_TYPE_WITH_PRIVATE",
+                        self.extract_type_name_from_define(trimmed),
+                    )
+                } else if trimmed.starts_with("G_DEFINE_FINAL_TYPE_WITH_CODE") {
+                    (
+                        "G_DEFINE_FINAL_TYPE_WITH_CODE",
+                        self.extract_type_name_from_define(trimmed),
+                    )
+                } else if trimmed.starts_with("G_DEFINE_FINAL_TYPE") {
+                    (
+                        "G_DEFINE_FINAL_TYPE",
+                        self.extract_type_name_from_define(trimmed),
+                    )
+                } else if trimmed.starts_with("G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE") {
+                    (
+                        "G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE",
+                        self.extract_type_name_from_define(trimmed),
+                    )
+                } else if trimmed.starts_with("G_DEFINE_ABSTRACT_TYPE_WITH_CODE") {
+                    (
+                        "G_DEFINE_ABSTRACT_TYPE_WITH_CODE",
+                        self.extract_type_name_from_define(trimmed),
+                    )
+                } else if trimmed.starts_with("G_DEFINE_ABSTRACT_TYPE") {
+                    (
+                        "G_DEFINE_ABSTRACT_TYPE",
+                        self.extract_type_name_from_define(trimmed),
+                    )
+                } else if trimmed.starts_with("G_DEFINE_INTERFACE_WITH_CODE") {
+                    (
+                        "G_DEFINE_INTERFACE_WITH_CODE",
+                        self.extract_type_name_from_define(trimmed),
+                    )
+                } else if trimmed.starts_with("G_DEFINE_INTERFACE") {
+                    (
+                        "G_DEFINE_INTERFACE",
+                        self.extract_type_name_from_define(trimmed),
+                    )
+                } else if trimmed.starts_with("G_DEFINE_TYPE_WITH_PRIVATE") {
+                    (
+                        "G_DEFINE_TYPE_WITH_PRIVATE",
+                        self.extract_type_name_from_define(trimmed),
+                    )
+                } else if trimmed.starts_with("G_DEFINE_TYPE_WITH_CODE") {
+                    (
+                        "G_DEFINE_TYPE_WITH_CODE",
+                        self.extract_type_name_from_define(trimmed),
+                    )
+                } else if trimmed.starts_with("G_DEFINE_TYPE")
+                    && !trimmed.starts_with("G_DEFINE_TYPE_EXTENDED")
+                {
+                    ("G_DEFINE_TYPE", self.extract_type_name_from_define(trimmed))
+                } else {
+                    continue;
+                };
 
             if let Some(type_name) = type_name {
                 // Check for mismatches
                 if let Some(declare_macro) = declared_types.get(&type_name) {
-                    let expected_define = match declare_macro.as_str() {
-                        "G_DECLARE_FINAL_TYPE" => "G_DEFINE_FINAL_TYPE",
-                        "G_DECLARE_DERIVABLE_TYPE" => "G_DEFINE_DERIVABLE_TYPE",
-                        "G_DECLARE_INTERFACE" => "G_DEFINE_INTERFACE",
-                        _ => continue,
+                    let is_compatible = match declare_macro.as_str() {
+                        // G_DECLARE_FINAL_TYPE requires a final define so that
+                        // G_TYPE_FLAG_FINAL is registered at runtime.
+                        "G_DECLARE_FINAL_TYPE" => matches!(
+                            define_macro,
+                            "G_DEFINE_FINAL_TYPE"
+                                | "G_DEFINE_FINAL_TYPE_WITH_CODE"
+                                | "G_DEFINE_FINAL_TYPE_WITH_PRIVATE"
+                        ),
+                        // G_DECLARE_DERIVABLE_TYPE covers both concrete and abstract types.
+                        "G_DECLARE_DERIVABLE_TYPE" => matches!(
+                            define_macro,
+                            "G_DEFINE_TYPE"
+                                | "G_DEFINE_TYPE_WITH_CODE"
+                                | "G_DEFINE_TYPE_WITH_PRIVATE"
+                                | "G_DEFINE_ABSTRACT_TYPE"
+                                | "G_DEFINE_ABSTRACT_TYPE_WITH_CODE"
+                                | "G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE"
+                        ),
+                        // G_DECLARE_INTERFACE requires G_DEFINE_INTERFACE.
+                        "G_DECLARE_INTERFACE" => matches!(
+                            define_macro,
+                            "G_DEFINE_INTERFACE" | "G_DEFINE_INTERFACE_WITH_CODE"
+                        ),
+                        _ => true,
                     };
 
-                    if define_macro != expected_define {
+                    if !is_compatible {
                         violations.push(self.violation(
                             path,
                             line_num + 1,
                             1,
                             format!(
-                                "Use {} instead of {} for '{}' (declared with {})",
-                                expected_define, define_macro, type_name, declare_macro
-                            ),
-                        ));
-                    }
-                } else {
-                    // Type is defined but not declared
-                    if define_macro == "G_DEFINE_FINAL_TYPE"
-                        || define_macro == "G_DEFINE_DERIVABLE_TYPE"
-                        || define_macro == "G_DEFINE_INTERFACE"
-                    {
-                        let expected_declare = match define_macro {
-                            "G_DEFINE_FINAL_TYPE" => "G_DECLARE_FINAL_TYPE",
-                            "G_DEFINE_DERIVABLE_TYPE" => "G_DECLARE_DERIVABLE_TYPE",
-                            "G_DEFINE_INTERFACE" => "G_DECLARE_INTERFACE",
-                            _ => continue,
-                        };
-
-                        violations.push(self.violation(
-                            path,
-                            line_num + 1,
-                            1,
-                            format!(
-                                "Type '{}' uses {} but has no corresponding {} in header",
-                                type_name, define_macro, expected_declare
+                                "'{}' is declared with {} but defined with {}",
+                                type_name, declare_macro, define_macro
                             ),
                         ));
                     }

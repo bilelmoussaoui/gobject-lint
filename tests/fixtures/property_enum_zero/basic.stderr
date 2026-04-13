@@ -1,0 +1,1 @@
+basic.c:3:3: property_enum_zero: Property enum should start with PROP_0, not PROP_NAME = 0. First property should be PROP_0, second should be PROP_NAME

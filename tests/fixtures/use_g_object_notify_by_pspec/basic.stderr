@@ -1,0 +1,2 @@
+basic.c:6:3: use_g_object_notify_by_pspec: Use g_object_notify_by_pspec(obj, properties[PROP_NAME]) instead of g_object_notify(obj, "name") for better performance
+basic.c:7:3: use_g_object_notify_by_pspec: Use g_object_notify_by_pspec(obj, properties[PROP_DISPLAY_NAME]) instead of g_object_notify(obj, "display-name") for better performance

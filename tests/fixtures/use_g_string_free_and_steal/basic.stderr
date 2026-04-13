@@ -1,0 +1,1 @@
+basic.c:8:10: use_g_string_free_and_steal: Use g_string_free_and_steal (str) instead of g_string_free(str, FALSE) for readability

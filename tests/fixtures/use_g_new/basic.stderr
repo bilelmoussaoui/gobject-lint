@@ -1,0 +1,2 @@
+basic.c:8:17: use_g_new: Use g_new (MyStruct, 1) instead of g_malloc(sizeof((MyStruct))) for type safety
+basic.c:9:17: use_g_new: Use g_new0 (MyStruct, 1) instead of g_malloc0(sizeof((MyStruct))) for type safety
