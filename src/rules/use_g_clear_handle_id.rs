@@ -58,19 +58,25 @@ impl UseGClearHandleId {
         ctx: &CheckContext,
         violations: &mut Vec<Violation>,
     ) {
+        // Track the byte range of any if-consequence we handle here so we can skip
+        // it during recursion and avoid processing it a second time as a plain
+        // compound_statement.
+        let mut handled_consequence_range: Option<(usize, usize)> = None;
+
         // Check for if statements with g_clear_handle_id in braces that can be
         // simplified OR look for handle cleanup pattern to convert
         if node.kind() == "if_statement"
             && let Some(consequence) = node.child_by_field_name("consequence")
             && consequence.kind() == "compound_statement"
         {
+            handled_consequence_range = Some((consequence.start_byte(), consequence.end_byte()));
+
             // First check if this is the pattern to convert (g_source_remove + id = 0)
             let conversions = self.check_cleanup_then_zero(ast_context, consequence, ctx.source);
 
             if !conversions.is_empty() {
-                // This is a pattern to convert
-                // Check if there are exactly 2 statements - if so, we can also remove the
-                // braces
+                // This is a pattern to convert.
+                // Count statements — if exactly 2, we can also remove the braces.
                 let mut stmt_count = 0;
                 let mut cursor = consequence.walk();
                 for child in consequence.children(&mut cursor) {
@@ -85,8 +91,7 @@ impl UseGClearHandleId {
                         format!("g_clear_handle_id (&{}, {});", var_name, cleanup_func);
 
                     let fix = if stmt_count == 2 {
-                        // Replace the entire compound_statement (including braces) with
-                        // just the call
+                        // Replace the entire compound_statement (including braces)
                         Fix::from_range(
                             consequence.start_byte(),
                             consequence.end_byte(),
@@ -115,15 +120,14 @@ impl UseGClearHandleId {
                     ));
                 }
             } else {
-                // Not a conversion pattern, check if we can remove braces
-                // Count statements in the compound block
+                // Not a conversion pattern — check if braces around a single
+                // g_clear_handle_id call can be removed.
                 let mut stmt_count = 0;
                 let mut clear_handle_call = None;
                 let mut cursor = consequence.walk();
                 for child in consequence.children(&mut cursor) {
                     if child.kind() == "expression_statement" {
                         stmt_count += 1;
-                        // Check if this is a g_clear_handle_id call
                         if let Some(call) = ast_context.find_call_expression(child)
                             && let Some(function) = call.child_by_field_name("function")
                         {
@@ -135,8 +139,6 @@ impl UseGClearHandleId {
                     }
                 }
 
-                // If there's exactly one statement and it's g_clear_handle_id, suggest
-                // removing braces
                 if stmt_count == 1
                     && let Some(call_stmt) = clear_handle_call
                 {
@@ -162,9 +164,14 @@ impl UseGClearHandleId {
             }
         }
 
-        // Look for compound statements (not if statements) that might have handle
-        // cleanup
-        if node.kind() == "compound_statement" {
+        // Look for cleanup+zero pairs directly in any compound_statement (e.g. a
+        // function body or loop body), but skip compound_statements that were
+        // already processed above as an if-consequence.
+        if node.kind() == "compound_statement"
+            && handled_consequence_range
+                .map(|(s, e)| s != node.start_byte() || e != node.end_byte())
+                .unwrap_or(true)
+        {
             for (var_name, cleanup_func, first_stmt, second_stmt) in
                 self.check_cleanup_then_zero(ast_context, node, ctx.source)
             {
@@ -191,9 +198,15 @@ impl UseGClearHandleId {
             }
         }
 
-        // Recurse
+        // Recurse, skipping the if-consequence we already handled above.
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
+            if let Some((start, end)) = handled_consequence_range
+                && child.start_byte() == start
+                && child.end_byte() == end
+            {
+                continue;
+            }
             self.check_node(ast_context, child, ctx, violations);
         }
     }

@@ -68,20 +68,36 @@ impl UseGSourceConstants {
         source: &[u8],
         callbacks: &mut Vec<String>,
     ) {
-        // Look for g_idle_add or g_timeout_add calls
+        // Map of source-add function name → zero-based index of the GSourceFunc
+        // argument. g_idle_add(func, data)                              → 0
+        // g_idle_add_full(priority, func, data, notify)       → 1
+        // g_idle_add_once(func, data)                         → 0
+        // g_timeout_add(interval, func, data)                 → 1
+        // g_timeout_add_once(interval, func, data)            → 1
+        // g_timeout_add_seconds(interval, func, data)         → 1
+        // g_timeout_add_full(pri, interval, func, data, note) → 2
+        // g_timeout_add_seconds_full(pri, iv, func, data, n)  → 2
         if node.kind() == "call_expression"
             && let Some(function) = node.child_by_field_name("function")
         {
             let func_text = ast_context.get_node_text(function, source);
 
-            if func_text == "g_idle_add" || func_text == "g_timeout_add" {
-                // Get the first argument (the callback function)
-                if let Some(arguments) = node.child_by_field_name("arguments")
-                    && let Some(first_arg) = self.get_first_argument(arguments)
-                {
-                    let callback_name = ast_context.get_node_text(first_arg, source);
-                    callbacks.push(callback_name);
-                }
+            let callback_arg_index: Option<usize> = match func_text.as_str() {
+                "g_idle_add" | "g_idle_add_once" => Some(0),
+                "g_idle_add_full"
+                | "g_timeout_add"
+                | "g_timeout_add_once"
+                | "g_timeout_add_seconds" => Some(1),
+                "g_timeout_add_full" | "g_timeout_add_seconds_full" => Some(2),
+                _ => None,
+            };
+
+            if let Some(arg_index) = callback_arg_index
+                && let Some(arguments) = node.child_by_field_name("arguments")
+                && let Some(arg) = self.get_argument_at(arguments, arg_index)
+            {
+                let callback_name = ast_context.get_node_text(arg, source);
+                callbacks.push(callback_name);
             }
         }
 
@@ -92,11 +108,12 @@ impl UseGSourceConstants {
         }
     }
 
-    fn get_first_argument<'a>(&self, arguments_node: Node<'a>) -> Option<Node<'a>> {
+    fn get_argument_at<'a>(&self, arguments_node: Node<'a>, index: usize) -> Option<Node<'a>> {
         let mut cursor = arguments_node.walk();
         arguments_node
             .children(&mut cursor)
-            .find(|&child| child.kind() != "(" && child.kind() != ")" && child.kind() != ",")
+            .filter(|child| child.kind() != "(" && child.kind() != ")" && child.kind() != ",")
+            .nth(index)
     }
 
     fn check_callback_returns(

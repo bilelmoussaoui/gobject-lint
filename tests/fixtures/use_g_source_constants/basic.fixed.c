@@ -4,7 +4,7 @@ static gboolean
 my_timeout_cb (gpointer user_data)
 {
   g_print ("tick\n");
-  return TRUE;
+  return G_SOURCE_CONTINUE;
 }
 
 static gboolean
