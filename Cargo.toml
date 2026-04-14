@@ -3,6 +3,7 @@ name = "goblint"
 version = "0.1.0"
 edition = "2024"
 repository = "https://github.com/bilelmoussaoui/goblint"
+license = "MIT"
 
 [features]
 lsp = ["dep:tower-lsp", "dep:tokio"]
