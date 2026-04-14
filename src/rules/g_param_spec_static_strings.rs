@@ -70,30 +70,32 @@ impl GParamSpecStaticStrings {
             {
                 // Check if this g_param_spec call has string literals and missing
                 // G_PARAM_STATIC_STRINGS
-                if let Some((flags_arg, flags_arg_text, has_static_strings)) =
-                    self.check_param_spec_flags(ast_context, node, ctx.source)
-                    && !has_static_strings
+                if let Some((
+                    flags_arg,
+                    flags_arg_text,
+                    is_satisfied,
+                    nick_is_literal,
+                    blurb_is_literal,
+                )) = self.check_param_spec_flags(ast_context, node, ctx.source)
+                    && !is_satisfied
                 {
-                    let fix = if flags_arg_text.is_empty() || flags_arg_text == "0" {
-                        Fix::from_node(flags_arg, ctx, "G_PARAM_STATIC_STRINGS")
-                    } else {
-                        Fix::from_node(
-                            flags_arg,
-                            ctx,
-                            format!("{} | G_PARAM_STATIC_STRINGS", flags_arg_text),
-                        )
-                    };
+                    let needed = self.needed_flags(nick_is_literal, blurb_is_literal);
+                    let fix = Fix::from_node(
+                        flags_arg,
+                        ctx,
+                        self.build_fixed_flags(flags_arg_text, nick_is_literal, blurb_is_literal),
+                    );
 
                     violations.push(self.violation_with_fix(
-                            ctx.file_path,
-                            ctx.base_line + node.start_position().row,
-                            node.start_position().column + 1,
-                            format!(
-                                "Add G_PARAM_STATIC_STRINGS to {} flags (saves memory for static strings)",
-                                func_name
-                            ),
-                            fix,
-                        ));
+                        ctx.file_path,
+                        ctx.base_line + node.start_position().row,
+                        node.start_position().column + 1,
+                        format!(
+                            "Add {} to {} flags (saves memory for static strings)",
+                            needed, func_name
+                        ),
+                        fix,
+                    ));
                 }
             }
         }
@@ -105,61 +107,129 @@ impl GParamSpecStaticStrings {
         }
     }
 
-    /// Check if g_param_spec_* has string literals and whether it has
-    /// G_PARAM_STATIC_STRINGS Returns (flags_arg_node, flags_text,
-    /// has_static_strings)
+    /// Check if g_param_spec_* has string literals and whether it already has
+    /// the minimal required static-string flags.
+    ///
+    /// Returns `(flags_node, flags_text, is_satisfied, nick_is_literal,
+    /// blurb_is_literal)`.
     fn check_param_spec_flags<'a>(
         &self,
         ast_context: &AstContext,
         call_node: Node<'a>,
         source: &'a [u8],
-    ) -> Option<(Node<'a>, &'a str, bool)> {
+    ) -> Option<(Node<'a>, &'a str, bool, bool, bool)> {
         let args = call_node.child_by_field_name("arguments")?;
 
-        // Collect all arguments
         let mut cursor = args.walk();
-        let mut arguments = Vec::new();
-        for child in args.children(&mut cursor) {
-            if child.kind() != "(" && child.kind() != ")" && child.kind() != "," {
-                arguments.push(child);
-            }
-        }
+        let arguments: Vec<Node> = args
+            .children(&mut cursor)
+            .filter(|c| c.kind() != "(" && c.kind() != ")" && c.kind() != ",")
+            .collect();
 
-        // Most g_param_spec_* functions have the pattern:
-        // g_param_spec_*(name, nick, blurb, ..., flags)
-        // name (0), nick (1), blurb (2) should be string literals
-        // flags is typically the last argument
-
+        // g_param_spec_*(name, nick, blurb, ..., flags) — need at least 4 args
         if arguments.len() < 4 {
             return None;
         }
 
-        // Check if name, nick, blurb are string literals
-        let nick = ast_context.get_node_text(arguments[1], source);
-        let blurb = ast_context.get_node_text(arguments[2], source);
-
-        // Check if they're string literals (or NULL for nick/blurb which is fine)
         let name_is_literal = arguments[0].kind() == "string_literal";
-        let nick_is_literal_or_null =
-            arguments[1].kind() == "string_literal" || ast_context.is_null_literal(nick);
-        let blurb_is_literal_or_null =
-            arguments[2].kind() == "string_literal" || ast_context.is_null_literal(blurb);
+        let nick_is_literal = arguments[1].kind() == "string_literal";
+        let blurb_is_literal = arguments[2].kind() == "string_literal";
 
-        // Only suggest if they're all literals/NULL
-        if !name_is_literal || !nick_is_literal_or_null || !blurb_is_literal_or_null {
+        let nick_text = ast_context.get_node_text(arguments[1], source);
+        let blurb_text = ast_context.get_node_text(arguments[2], source);
+
+        // Only check when name is a string literal and nick/blurb are literals or NULL
+        if !name_is_literal
+            || (!nick_is_literal && !ast_context.is_null_literal(nick_text))
+            || (!blurb_is_literal && !ast_context.is_null_literal(blurb_text))
+        {
             return None;
         }
 
-        // Get the flags argument (last argument)
         let flags_arg = *arguments.last()?;
         let flags_text = ast_context.get_node_text(flags_arg, source);
 
-        // Check if flags already contains G_PARAM_STATIC_STRINGS
-        let has_static_strings = flags_text.contains("G_PARAM_STATIC_STRINGS")
-            || flags_text.contains("G_PARAM_STATIC_NAME")
-                && flags_text.contains("G_PARAM_STATIC_NICK")
-                && flags_text.contains("G_PARAM_STATIC_BLURB");
+        let has_static_strings = flags_text.contains("G_PARAM_STATIC_STRINGS");
+        let has_static_name = flags_text.contains("G_PARAM_STATIC_NAME");
+        let has_static_nick = flags_text.contains("G_PARAM_STATIC_NICK");
+        let has_static_blurb = flags_text.contains("G_PARAM_STATIC_BLURB");
 
-        Some((flags_arg, flags_text, has_static_strings))
+        // Is the minimal required set of static flags already present?
+        let is_satisfied = if has_static_strings {
+            // G_PARAM_STATIC_STRINGS covers everything — always satisfied
+            true
+        } else if nick_is_literal && blurb_is_literal {
+            // All three strings are literals — need NAME + NICK + BLURB
+            has_static_name && has_static_nick && has_static_blurb
+        } else if nick_is_literal {
+            has_static_name && has_static_nick
+        } else if blurb_is_literal {
+            has_static_name && has_static_blurb
+        } else {
+            // nick and blurb are NULL — only the name needs the static flag
+            has_static_name
+        };
+
+        Some((
+            flags_arg,
+            flags_text,
+            is_satisfied,
+            nick_is_literal,
+            blurb_is_literal,
+        ))
+    }
+
+    /// Return the flag expression that should be added, given which args are
+    /// literals.
+    fn needed_flags(&self, nick_is_literal: bool, blurb_is_literal: bool) -> &'static str {
+        match (nick_is_literal, blurb_is_literal) {
+            (true, true) => "G_PARAM_STATIC_STRINGS",
+            (true, false) => "G_PARAM_STATIC_NAME | G_PARAM_STATIC_NICK",
+            (false, true) => "G_PARAM_STATIC_NAME | G_PARAM_STATIC_BLURB",
+            (false, false) => "G_PARAM_STATIC_NAME",
+        }
+    }
+
+    /// Build the replacement flags string: remove any individual static flags
+    /// already present, then append the minimal required ones.
+    fn build_fixed_flags(
+        &self,
+        flags_text: &str,
+        nick_is_literal: bool,
+        blurb_is_literal: bool,
+    ) -> String {
+        const INDIVIDUAL: &[&str] = &[
+            "G_PARAM_STATIC_NAME",
+            "G_PARAM_STATIC_NICK",
+            "G_PARAM_STATIC_BLURB",
+            "G_PARAM_STATIC_STRINGS",
+        ];
+
+        // Strip existing static flags; keep everything else.
+        let mut parts: Vec<&str> = if flags_text.is_empty() || flags_text == "0" {
+            Vec::new()
+        } else {
+            flags_text
+                .split('|')
+                .map(|s| s.trim())
+                .filter(|s| !INDIVIDUAL.contains(s))
+                .collect()
+        };
+
+        // Append the minimal needed flags.
+        match (nick_is_literal, blurb_is_literal) {
+            (true, true) => parts.push("G_PARAM_STATIC_STRINGS"),
+            (true, false) => {
+                parts.push("G_PARAM_STATIC_NAME");
+                parts.push("G_PARAM_STATIC_NICK");
+            }
+            (false, true) => {
+                parts.push("G_PARAM_STATIC_NAME");
+                parts.push("G_PARAM_STATIC_BLURB");
+            }
+            (false, false) => parts.push("G_PARAM_STATIC_NAME"),
+        }
+
+        parts.join(" | ")
     }
 }
