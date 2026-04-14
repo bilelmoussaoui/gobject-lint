@@ -85,12 +85,26 @@ impl UseGClearHandleId {
                     }
                 }
 
+                // If the if has no else and the condition is just a zero-check on
+                // the handle ID, the guard is redundant — g_clear_handle_id already
+                // handles the id==0 case internally. Replace the whole if_statement.
+                let has_else = node.child_by_field_name("alternative").is_some();
+                let cond_id = node
+                    .child_by_field_name("condition")
+                    .and_then(|c| self.extract_id_from_condition(ast_context, c, ctx.source));
+
                 for (var_name, cleanup_func, first_stmt, second_stmt) in conversions {
                     let position = first_stmt.start_position();
                     let replacement =
                         format!("g_clear_handle_id (&{}, {});", var_name, cleanup_func);
 
-                    let fix = if stmt_count == 2 {
+                    let can_remove_if =
+                        !has_else && cond_id.is_some_and(|id| id == var_name) && stmt_count == 2;
+
+                    let fix = if can_remove_if {
+                        // The if guard is redundant — replace the whole if_statement
+                        Fix::from_range(node.start_byte(), node.end_byte(), ctx, &replacement)
+                    } else if stmt_count == 2 {
                         // Replace the entire compound_statement (including braces)
                         Fix::from_range(
                             consequence.start_byte(),
@@ -308,5 +322,54 @@ impl UseGClearHandleId {
             }
         }
         None
+    }
+
+    /// Extract the handle ID from an if-condition, returning `Some(id_text)`
+    /// when the condition is a redundant zero-check: `(id)`, `(id > 0)`,
+    /// `(id != 0)`, `(0 < id)`, `(0 != id)`.
+    fn extract_id_from_condition<'a>(
+        &self,
+        ast_context: &AstContext,
+        condition: Node,
+        source: &'a [u8],
+    ) -> Option<&'a str> {
+        if condition.kind() != "parenthesized_expression" {
+            return None;
+        }
+        let mut cursor = condition.walk();
+        let inner = condition
+            .children(&mut cursor)
+            .find(|n| n.kind() != "(" && n.kind() != ")")?;
+
+        if inner.kind() == "binary_expression" {
+            let op = inner.child_by_field_name("operator")?;
+            let left = inner.child_by_field_name("left")?;
+            let right = inner.child_by_field_name("right")?;
+            let op_text = ast_context.get_node_text(op, source);
+            let left_text = ast_context.get_node_text(left, source);
+            let right_text = ast_context.get_node_text(right, source);
+            match op_text {
+                "!=" | ">" => {
+                    if right_text == "0" {
+                        Some(left_text)
+                    } else if left_text == "0" {
+                        Some(right_text)
+                    } else {
+                        None
+                    }
+                }
+                "<" => {
+                    if left_text == "0" {
+                        Some(right_text)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            // Plain truthy check: if (id)
+            Some(ast_context.get_node_text(inner, source))
+        }
     }
 }
