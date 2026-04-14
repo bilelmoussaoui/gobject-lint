@@ -1,4 +1,4 @@
-use std::env;
+use std::{collections::HashMap, env};
 
 use colored::*;
 
@@ -50,6 +50,117 @@ pub fn report_violations(violations: &[Violation], verbose: bool, config: &Confi
         println!("  {} {}", "rule:".blue(), violation.rule);
         println!();
     }
+}
+
+/// Print a summary table of violation counts grouped by rule, sorted by count
+/// descending. `fixable` maps rule name → whether the rule supports auto-fix.
+pub fn report_summary(violations: &[Violation], fixable: &HashMap<&str, bool>) {
+    if violations.is_empty() {
+        println!("{}", "No violations found!".green().bold());
+        return;
+    }
+
+    // Aggregate counts per rule.
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for v in violations {
+        *counts.entry(v.rule).or_insert(0) += 1;
+    }
+
+    // Build sorted rows: (rule, count, fixable), descending by count.
+    let mut rows: Vec<(&str, usize, bool)> = counts
+        .iter()
+        .map(|(&rule, &count)| (rule, count, *fixable.get(rule).unwrap_or(&false)))
+        .collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+
+    // Column widths — at least wide enough for the header labels.
+    let count_w = rows
+        .iter()
+        .map(|(_, c, _)| c.to_string().len())
+        .max()
+        .unwrap_or(0)
+        .max("Count".len());
+    let rule_w = rows
+        .iter()
+        .map(|(r, ..)| r.len())
+        .max()
+        .unwrap_or(0)
+        .max("Rule".len());
+    let fix_w = "Autofix".len(); // "Yes" / "No " padded to this width
+
+    // Helper closures for border rows.
+    let top = format!(
+        "┌{:─<cw$}┬{:─<rw$}┬{:─<fw$}┐",
+        "",
+        "",
+        "",
+        cw = count_w + 2,
+        rw = rule_w + 2,
+        fw = fix_w + 2,
+    );
+    let sep = format!(
+        "├{:─<cw$}┼{:─<rw$}┼{:─<fw$}┤",
+        "",
+        "",
+        "",
+        cw = count_w + 2,
+        rw = rule_w + 2,
+        fw = fix_w + 2,
+    );
+    let bot = format!(
+        "└{:─<cw$}┴{:─<rw$}┴{:─<fw$}┘",
+        "",
+        "",
+        "",
+        cw = count_w + 2,
+        rw = rule_w + 2,
+        fw = fix_w + 2,
+    );
+
+    println!("{}", top);
+    println!(
+        "│ {:<cw$} │ {:<rw$} │ {:<fw$} │",
+        "Count".bold(),
+        "Rule".bold(),
+        "Autofix".bold(),
+        cw = count_w,
+        rw = rule_w,
+        fw = fix_w,
+    );
+    println!("{}", sep);
+
+    for (rule, count, is_fixable) in &rows {
+        let count_str = count.to_string().yellow().to_string();
+        let rule_str = rule.cyan().to_string();
+        let fix_str = if *is_fixable {
+            "Yes".green().to_string()
+        } else {
+            "No".dimmed().to_string()
+        };
+
+        // ANSI escape codes inflate the byte length of colored strings, so we
+        // pad the *visible* widths by computing the difference and adding it.
+        let count_pad = count_w - count.to_string().len();
+        let rule_pad = rule_w - rule.len();
+        let fix_pad = fix_w - if *is_fixable { 3 } else { 2 };
+
+        println!(
+            "│ {}{} │ {}{} │ {}{} │",
+            count_str,
+            " ".repeat(count_pad),
+            rule_str,
+            " ".repeat(rule_pad),
+            fix_str,
+            " ".repeat(fix_pad),
+        );
+    }
+
+    println!("{}", bot);
+    println!(
+        "  {} violation(s) across {} rule(s)",
+        violations.len().to_string().yellow().bold(),
+        rows.len().to_string().yellow().bold(),
+    );
 }
 
 fn create_clickable_link(

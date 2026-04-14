@@ -52,6 +52,10 @@ struct Args {
     /// Automatically apply fixes for violations
     #[arg(long)]
     fix: bool,
+
+    /// Print a summary table of violation counts grouped by rule
+    #[arg(long)]
+    summary: bool,
 }
 
 fn main() -> Result<()> {
@@ -160,6 +164,21 @@ fn main() -> Result<()> {
         }
 
         // Don't exit with error code when we fixed things
+        return Ok(());
+    }
+
+    // Summary table mode
+    if args.summary {
+        let rules = scanner::create_all_rules(&config);
+        let fixable: std::collections::HashMap<&str, bool> = rules
+            .iter()
+            .map(|e| (e.rule.name(), e.rule.fixable()))
+            .collect();
+        reporter::report_summary(&violations, &fixable);
+        let has_errors = violations.iter().any(|v| v.level.is_error());
+        if has_errors {
+            std::process::exit(1);
+        }
         return Ok(());
     }
 
