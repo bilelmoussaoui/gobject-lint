@@ -1,7 +1,7 @@
 use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
-/// Rule that enforces semicolons after G_DECLARE_* macros
+/// Rule that enforces semicolons after G_DECLARE_* and G_DEFINE_* macros
 ///
 /// Without semicolons, tree-sitter misparses the following declarations,
 /// causing them to be missed by the AST parser.
@@ -13,7 +13,7 @@ impl Rule for GDeclareSemicolon {
     }
 
     fn description(&self) -> &'static str {
-        "Enforce semicolons after G_DECLARE_* macros"
+        "Enforce semicolons after G_DECLARE_* and G_DEFINE_* macros"
     }
 
     fn category(&self) -> super::Category {
@@ -30,7 +30,8 @@ impl Rule for GDeclareSemicolon {
         _config: &Config,
         violations: &mut Vec<Violation>,
     ) {
-        for (path, file) in ast_context.iter_header_files() {
+        // Check both header files and C files
+        for (path, file) in ast_context.iter_all_files() {
             // Use the already-loaded source from the file model
             let source = std::str::from_utf8(&file.source).unwrap_or("");
 
@@ -44,10 +45,15 @@ impl Rule for GDeclareSemicolon {
             for (line_num, line) in source.lines().enumerate() {
                 let trimmed = line.trim();
 
-                // Check if we're starting a G_DECLARE macro
+                // Check if we're starting a G_DECLARE or G_DEFINE macro
                 if trimmed.contains("G_DECLARE_FINAL_TYPE")
                     || trimmed.contains("G_DECLARE_DERIVABLE_TYPE")
                     || trimmed.contains("G_DECLARE_INTERFACE")
+                    || trimmed.contains("G_DEFINE_TYPE")
+                    || trimmed.contains("G_DEFINE_ABSTRACT_TYPE")
+                    || trimmed.contains("G_DEFINE_FINAL_TYPE")
+                    || trimmed.contains("G_DEFINE_INTERFACE")
+                    || trimmed.contains("G_DEFINE_BOXED_TYPE")
                 {
                     in_g_declare = Some(line_num);
                 }
@@ -69,7 +75,7 @@ impl Rule for GDeclareSemicolon {
                                 path,
                                 line_num + 1,
                                 paren_pos + 1,
-                                "G_DECLARE_* macro should end with a semicolon. Without it, tree-sitter may misparse following declarations.".to_string(),
+                                "G_DECLARE_*/G_DEFINE_* macro should end with a semicolon. Without it, tree-sitter may misparse following declarations.".to_string(),
                                 Fix::new(fix_byte_pos, fix_byte_pos, ";"),
                             );
                             v.snippet = Some(format!("{}; // Add semicolon here", trimmed));
