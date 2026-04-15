@@ -1,0 +1,8 @@
+if_condition_removal.c:14:7: use_g_steal_pointer: Use g_steal_pointer (&charset_str) instead of copying and setting to NULL
+if_condition_removal.c:27:7: use_g_steal_pointer: Use g_steal_pointer (&priv->theme_node) instead of copying and setting to NULL
+if_condition_removal.c:38:7: use_g_steal_pointer: Use g_steal_pointer (&new_value) instead of copying and setting to NULL
+if_condition_removal.c:49:7: use_g_steal_pointer: Use g_steal_pointer (&new_value) instead of copying and setting to NULL
+if_condition_removal.c:60:7: use_g_steal_pointer: Use g_steal_pointer (&new_value) instead of copying and setting to NULL
+if_condition_removal.c:69:3: use_g_steal_pointer: Use g_steal_pointer (&new_value) instead of if/else copy-and-NULL pattern
+if_condition_removal.c:86:7: use_g_steal_pointer: Use g_steal_pointer (&new_value) instead of copying and setting to NULL
+if_condition_removal.c:101:7: use_g_steal_pointer: Use g_steal_pointer (&new_value) instead of copying and setting to NULL

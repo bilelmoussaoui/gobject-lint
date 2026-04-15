@@ -312,11 +312,12 @@ impl UseGStealPointer {
         true
     }
 
-    /// Matches an if-without-else whose braced body contains a steal pattern,
-    /// and removes the braces in the fix:
-    ///   `if (c) { dest = ptr; ptr = NULL; }`      → `if (c)\n  dest =
-    /// g_steal_pointer(&ptr);`   `if (c) { T *t = ptr; ptr = NULL; return
-    /// t; }` → `if (c)\n  return g_steal_pointer(&ptr);`
+    /// Matches an if-without-else whose braced body contains a steal pattern.
+    /// If the condition tests the same variable being stolen, removes the
+    /// entire if. Otherwise, just removes the braces:
+    ///   `if (ptr) { dest = ptr; ptr = NULL; }` → `dest =
+    /// g_steal_pointer(&ptr);`   `if (c) { dest = ptr; ptr = NULL; }`   →
+    /// `if (c)\n  dest = g_steal_pointer(&ptr);`
     fn try_if_no_else_steal(
         &self,
         ast_context: &AstContext,
@@ -331,6 +332,9 @@ impl UseGStealPointer {
         if if_node.child_by_field_name("alternative").is_some() {
             return false;
         }
+        let Some(condition) = if_node.child_by_field_name("condition") else {
+            return false;
+        };
         let Some(consequence) = if_node.child_by_field_name("consequence") else {
             return false;
         };
@@ -343,6 +347,9 @@ impl UseGStealPointer {
             .children(&mut cursor)
             .filter(|n| n.kind() != "{" && n.kind() != "}" && n.kind() != "comment")
             .collect();
+
+        // Try to extract the condition expression
+        let condition_expr = self.extract_condition_expr(ast_context, condition, ctx.source);
 
         // 2-stmt: dest = ptr; ptr = NULL;
         if stmts.len() == 2 {
@@ -358,12 +365,15 @@ impl UseGStealPointer {
                 return false;
             }
             let replacement = format!("{other_expr} = g_steal_pointer (&{ptr_expr});");
-            let fix = Fix::from_range(
-                consequence.start_byte(),
-                consequence.end_byte(),
-                ctx,
-                &replacement,
-            );
+
+            // If condition tests the same variable being stolen, remove entire if
+            let (start, end) = if condition_expr == Some(ptr_expr) {
+                (if_node.start_byte(), if_node.end_byte())
+            } else {
+                (consequence.start_byte(), consequence.end_byte())
+            };
+
+            let fix = Fix::from_range(start, end, ctx, &replacement);
             violations.push(self.violation_with_fix(
                 ctx.file_path,
                 ctx.base_line + stmts[0].start_position().row,
@@ -398,12 +408,15 @@ impl UseGStealPointer {
                 return false;
             }
             let replacement = format!("return g_steal_pointer (&{ptr_expr});");
-            let fix = Fix::from_range(
-                consequence.start_byte(),
-                consequence.end_byte(),
-                ctx,
-                &replacement,
-            );
+
+            // If condition tests the same variable being stolen, remove entire if
+            let (start, end) = if condition_expr == Some(ptr_expr) {
+                (if_node.start_byte(), if_node.end_byte())
+            } else {
+                (consequence.start_byte(), consequence.end_byte())
+            };
+
+            let fix = Fix::from_range(start, end, ctx, &replacement);
             violations.push(self.violation_with_fix(
                 ctx.file_path,
                 ctx.base_line + stmts[0].start_position().row,

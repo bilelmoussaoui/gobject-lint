@@ -77,8 +77,7 @@ steal_nested_member (MyObj *self, char *value)
 static void
 steal_if_no_else (MyObj *self, char *name)
 {
-  if (name)
-    self->name = g_steal_pointer (&name);
+  self->name = g_steal_pointer (&name);
 }
 
 /* if/else steal: if (expr) { dest = expr; expr = NULL; } else { dest = NULL; } */
