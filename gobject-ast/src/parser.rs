@@ -221,6 +221,10 @@ impl Parser {
             if let Some(typedef) = self.extract_typedef_from_type_definition(node, source) {
                 file_model.typedefs.push(typedef);
             }
+            // Also check for typedef enums
+            if let Some(enum_info) = self.extract_enum(node, source) {
+                file_model.enums.push(enum_info);
+            }
         }
 
         // Extract GObject types from identifier pattern (handles ERROR nodes from
@@ -642,21 +646,91 @@ impl Parser {
     }
 
     fn extract_enum(&self, node: Node, source: &[u8]) -> Option<EnumInfo> {
-        // Look for enum definitions
+        // Handle typedef enum { ... } Name;
+        if node.kind() == "type_definition" {
+            if let Some(type_node) = node.child_by_field_name("type") {
+                if type_node.kind() == "enum_specifier" {
+                    if let Some(declarator_node) = node.child_by_field_name("declarator") {
+                        let name =
+                            std::str::from_utf8(&source[declarator_node.byte_range()]).ok()?;
+                        if let Some(body) = type_node.child_by_field_name("body") {
+                            let values = self.extract_enum_values(body, source);
+                            return Some(EnumInfo {
+                                name: name.to_owned(),
+                                line: node.start_position().row + 1,
+                                values,
+                                body_start_byte: body.start_byte(),
+                                body_end_byte: body.end_byte(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Handle standalone enum Name { ... };
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "enum_specifier" {
                 if let Some(name_node) = child.child_by_field_name("name") {
                     let name = std::str::from_utf8(&source[name_node.byte_range()]).ok()?;
-                    return Some(EnumInfo {
-                        name: name.to_owned(),
-                        line: child.start_position().row + 1,
-                        values: Vec::new(), // TODO: extract values
-                    });
+                    if let Some(body) = child.child_by_field_name("body") {
+                        let values = self.extract_enum_values(body, source);
+                        return Some(EnumInfo {
+                            name: name.to_owned(),
+                            line: child.start_position().row + 1,
+                            values,
+                            body_start_byte: body.start_byte(),
+                            body_end_byte: body.end_byte(),
+                        });
+                    }
                 }
             }
         }
         None
+    }
+
+    fn extract_enum_values(&self, body_node: Node, source: &[u8]) -> Vec<EnumValue> {
+        let mut values = Vec::new();
+
+        let mut cursor = body_node.walk();
+        for child in body_node.children(&mut cursor) {
+            if child.kind() == "enumerator" {
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    let name = std::str::from_utf8(&source[name_node.byte_range()])
+                        .unwrap_or("")
+                        .to_owned();
+
+                    let (value, value_start, value_end) =
+                        if let Some(value_node) = child.child_by_field_name("value") {
+                            // Try to parse the value as an integer
+                            let value_str = std::str::from_utf8(&source[value_node.byte_range()])
+                                .unwrap_or("")
+                                .trim();
+                            (
+                                value_str.parse::<i64>().ok(),
+                                Some(value_node.start_byte()),
+                                Some(value_node.end_byte()),
+                            )
+                        } else {
+                            (None, None, None)
+                        };
+
+                    values.push(EnumValue {
+                        name,
+                        value,
+                        start_byte: child.start_byte(),
+                        end_byte: child.end_byte(),
+                        name_start_byte: name_node.start_byte(),
+                        name_end_byte: name_node.end_byte(),
+                        value_start_byte: value_start,
+                        value_end_byte: value_end,
+                    });
+                }
+            }
+        }
+
+        values
     }
 
     fn find_static_forward_declarations<'a>(
