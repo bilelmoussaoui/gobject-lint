@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::{Assignment, CallExpression, Expression, ExpressionStmt, Statement};
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGBytesUnrefToData;
@@ -34,64 +34,46 @@ impl Rule for UseGBytesUnrefToData {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
-                }
+                self.check_statement_list(path, &func.body_statements, &file.source, violations);
             }
         }
     }
 }
 
 impl UseGBytesUnrefToData {
-    fn check_node(
+    /// Check a list of statements for consecutive g_bytes_get_data +
+    /// g_bytes_unref pattern
+    fn check_statement_list(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        file_path: &std::path::Path,
+        statements: &[Statement],
+        source: &[u8],
         violations: &mut Vec<Violation>,
     ) {
-        if node.kind() == "compound_statement" {
-            self.check_compound(ast_context, node, ctx, violations);
-            return;
+        // Check consecutive statements at this level
+        for i in 0..statements.len().saturating_sub(1) {
+            self.try_bytes_pattern(
+                file_path,
+                &statements[i],
+                &statements[i + 1],
+                source,
+                violations,
+            );
         }
 
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, ctx, violations);
-        }
-    }
-
-    fn check_compound(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
-        violations: &mut Vec<Violation>,
-    ) {
-        if node.kind() == "compound_statement" {
-            let mut cursor = node.walk();
-            let stmts: Vec<Node> = node
-                .children(&mut cursor)
-                .filter(|n| n.kind() != "{" && n.kind() != "}" && n.kind() != "comment")
-                .collect();
-
-            // Look for consecutive pairs of statements
-            for i in 0..stmts.len() {
-                // Try to match pattern starting at position i
-                if i + 1 < stmts.len() {
-                    self.try_bytes_pattern(ast_context, stmts[i], stmts[i + 1], ctx, violations);
+        // Recurse into nested statement blocks
+        for stmt in statements {
+            match stmt {
+                Statement::If(if_stmt) => {
+                    self.check_statement_list(file_path, &if_stmt.then_body, source, violations);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.check_statement_list(file_path, else_body, source, violations);
+                    }
                 }
-
-                // Also recurse into this statement to find nested patterns
-                self.check_node(ast_context, stmts[i], ctx, violations);
+                Statement::Compound(compound) => {
+                    self.check_statement_list(file_path, &compound.statements, source, violations);
+                }
+                _ => {}
             }
         }
     }
@@ -99,144 +81,122 @@ impl UseGBytesUnrefToData {
     /// Try to match: dest = g_bytes_get_data(bytes, ...); g_bytes_unref(bytes);
     fn try_bytes_pattern(
         &self,
-        ast_context: &AstContext,
-        stmt1: Node,
-        stmt2: Node,
-        ctx: &CheckContext,
+        file_path: &std::path::Path,
+        stmt1: &Statement,
+        stmt2: &Statement,
+        source: &[u8],
         violations: &mut Vec<Violation>,
-    ) -> bool {
-        // First statement should be: dest = g_bytes_get_data(bytes, ...)
-        let Some((dest, bytes_var, size_arg)) =
-            self.extract_bytes_get_data(ast_context, stmt1, ctx.source)
+    ) {
+        // First statement: dest = g_bytes_get_data(bytes, &size)
+        let Some((dest, bytes_var, size_arg, assignment, _call1)) =
+            self.extract_bytes_get_data(stmt1, source)
         else {
-            return false;
+            return;
         };
 
-        // Second statement should be: g_bytes_unref(bytes);
-        if !self.is_bytes_unref(ast_context, stmt2, bytes_var, ctx.source) {
-            return false;
-        }
+        // Second statement: g_bytes_unref(bytes)
+        let Some(stmt2_end_byte) = self.extract_bytes_unref(stmt2, &bytes_var, source) else {
+            return;
+        };
 
         // Build the replacement
         let replacement = format!(
             "{} = g_bytes_unref_to_data ({}, {});",
             dest, bytes_var, size_arg
         );
-        let fix = Fix::from_range(stmt1.start_byte(), stmt2.end_byte(), ctx, &replacement);
+
+        let fix = Fix::new(assignment.location.start_byte, stmt2_end_byte, replacement);
 
         violations.push(self.violation_with_fix(
-            ctx.file_path,
-            ctx.base_line + stmt1.start_position().row,
-            stmt1.start_position().column + 1,
+            file_path,
+            assignment.location.line,
+            assignment.location.column,
             format!(
                 "Use g_bytes_unref_to_data({}, {}) instead of g_bytes_get_data() followed by g_bytes_unref()",
                 bytes_var, size_arg
             ),
             fix,
         ));
-
-        true
     }
 
     /// Extract components from: dest = g_bytes_get_data(bytes, size_arg)
-    /// Returns (dest_text, bytes_var, size_arg)
+    /// Returns (dest_text, bytes_var, size_arg, assignment, call)
     fn extract_bytes_get_data<'a>(
         &self,
-        ast_context: &AstContext,
-        stmt: Node,
+        stmt: &'a Statement,
         source: &'a [u8],
-    ) -> Option<(&'a str, &'a str, &'a str)> {
-        if stmt.kind() != "expression_statement" {
+    ) -> Option<(String, String, String, &'a Assignment, &'a CallExpression)> {
+        let Statement::Expression(ExpressionStmt {
+            expr: Expression::Assignment(assignment),
+            ..
+        }) = stmt
+        else {
+            return None;
+        };
+
+        // Check operator is "="
+        if assignment.operator != "=" {
             return None;
         }
-
-        let mut cursor = stmt.walk();
-        let assign = stmt
-            .children(&mut cursor)
-            .find(|n| n.kind() == "assignment_expression")?;
-
-        let op = assign.child_by_field_name("operator")?;
-        if ast_context.get_node_text(op, source) != "=" {
-            return None;
-        }
-
-        let left = assign.child_by_field_name("left")?;
-        let right = assign.child_by_field_name("right")?;
 
         // Right side should be a call to g_bytes_get_data
-        if right.kind() != "call_expression" {
+        let Expression::Call(call) = assignment.rhs.as_ref() else {
+            return None;
+        };
+
+        if call.function != "g_bytes_get_data" {
             return None;
         }
 
-        let function = right.child_by_field_name("function")?;
-        if ast_context.get_node_text(function, source) != "g_bytes_get_data" {
+        // Need exactly 2 arguments
+        if call.arguments.len() != 2 {
             return None;
         }
 
-        // Extract arguments: g_bytes_get_data(bytes, &size)
-        let args = right.child_by_field_name("arguments")?;
-        let mut cursor = args.walk();
-        let arg_nodes: Vec<Node> = args
-            .children(&mut cursor)
-            .filter(|n| n.kind() != "(" && n.kind() != ")" && n.kind() != ",")
-            .collect();
+        // Extract argument text from source
+        let bytes_var = call.get_arg_text(0, source)?;
+        let size_arg = call.get_arg_text(1, source)?;
 
-        if arg_nodes.len() != 2 {
-            return None;
-        }
-
-        let bytes_var = ast_context.get_node_text(arg_nodes[0], source);
-        let size_arg = ast_context.get_node_text(arg_nodes[1], source);
-        let dest = ast_context.get_node_text(left, source);
-
-        Some((dest, bytes_var, size_arg))
+        Some((
+            assignment.lhs.clone(),
+            bytes_var,
+            size_arg,
+            assignment,
+            call,
+        ))
     }
 
-    /// Check if statement is: g_bytes_unref(expected_var);
-    fn is_bytes_unref(
+    /// Extract call from: g_bytes_unref(expected_var)
+    /// Returns the end_byte of the statement (including semicolon)
+    fn extract_bytes_unref(
         &self,
-        ast_context: &AstContext,
-        stmt: Node,
+        stmt: &Statement,
         expected_var: &str,
         source: &[u8],
-    ) -> bool {
-        if stmt.kind() != "expression_statement" {
-            return false;
-        }
-
-        let mut cursor = stmt.walk();
-        let call = stmt
-            .children(&mut cursor)
-            .find(|n| n.kind() == "call_expression");
-
-        let Some(call) = call else {
-            return false;
+    ) -> Option<usize> {
+        let Statement::Expression(expr_stmt) = stmt else {
+            return None;
         };
 
-        let Some(function) = call.child_by_field_name("function") else {
-            return false;
+        let Expression::Call(call) = &expr_stmt.expr else {
+            return None;
         };
 
-        if ast_context.get_node_text(function, source) != "g_bytes_unref" {
-            return false;
+        if call.function != "g_bytes_unref" {
+            return None;
         }
 
-        // Check that the argument matches the bytes variable
-        let Some(args) = call.child_by_field_name("arguments") else {
-            return false;
-        };
-
-        let mut cursor = args.walk();
-        let arg_nodes: Vec<Node> = args
-            .children(&mut cursor)
-            .filter(|n| n.kind() != "(" && n.kind() != ")" && n.kind() != ",")
-            .collect();
-
-        if arg_nodes.len() != 1 {
-            return false;
+        // Need exactly 1 argument
+        if call.arguments.len() != 1 {
+            return None;
         }
 
-        let arg_text = ast_context.get_node_text(arg_nodes[0], source);
-        arg_text == expected_var
+        // Check argument matches expected variable
+        let arg_text = call.get_arg_text(0, source)?;
+        if arg_text != expected_var {
+            return None;
+        }
+
+        Some(expr_stmt.location.end_byte)
     }
 }

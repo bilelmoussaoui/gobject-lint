@@ -24,6 +24,16 @@ impl Parser {
         Ok(Self { parser })
     }
 
+    /// Helper to create SourceLocation from a tree-sitter Node
+    fn node_location(&self, node: Node) -> SourceLocation {
+        SourceLocation::new(
+            node.start_position().row + 1,
+            node.start_position().column + 1,
+            node.start_byte(),
+            node.end_byte(),
+        )
+    }
+
     pub fn parse_directory(&mut self, path: &Path) -> Result<Project> {
         let mut project = Project::new();
 
@@ -1206,14 +1216,24 @@ impl Parser {
                 "type_qualifier"
                 | "storage_class_specifier"
                 | "type_specifier"
+                | "type_identifier"
+                | "primitive_type"
+                | "sized_type_specifier"
                 | "struct_specifier" => {
                     if !type_name.is_empty() {
                         type_name.push(' ');
                     }
                     type_name.push_str(std::str::from_utf8(&source[child.byte_range()]).ok()?);
                 }
+                // Declarations with initializer: int x = 5;
                 "init_declarator" => {
                     declarator = Some(child);
+                }
+                // Declarations without initializer: int x;  or  int *x;
+                "pointer_declarator" | "identifier" | "array_declarator" => {
+                    if declarator.is_none() {
+                        declarator = Some(child);
+                    }
                 }
                 _ => {}
             }
@@ -1225,7 +1245,14 @@ impl Parser {
         let mut var_name = None;
         let mut initializer = None;
 
+        // For pointer types like "GError *error", check if this is a pointer declarator
+        let declarator_text = std::str::from_utf8(&source[declarator.byte_range()]).ok()?;
+        if declarator_text.contains('*') && !type_name.contains('*') {
+            type_name.push('*');
+        }
+
         let mut dec_cursor = declarator.walk();
+        let mut has_equals = false;
         for child in declarator.children(&mut dec_cursor) {
             match child.kind() {
                 "pointer_declarator" | "identifier" => {
@@ -1234,10 +1261,14 @@ impl Parser {
                         var_name = Some(id);
                     }
                 }
-                "=" => {} // Skip
+                "=" => {
+                    has_equals = true;
+                }
                 _ => {
-                    // This is the initializer
-                    initializer = self.parse_expression(child, source);
+                    // Only treat as initializer if we've seen an "=" sign
+                    if has_equals {
+                        initializer = self.parse_expression(child, source);
+                    }
                 }
             }
         }
@@ -1246,9 +1277,7 @@ impl Parser {
             type_name,
             name: var_name?.to_owned(),
             initializer,
-            line: node.start_position().row + 1,
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
+            location: self.node_location(node),
         })
     }
 
@@ -1275,9 +1304,7 @@ impl Parser {
                 if let Some(expr) = self.parse_expression(child, source) {
                     return Some(ExpressionStmt {
                         expr,
-                        line: node.start_position().row + 1,
-                        start_byte: node.start_byte(),
-                        end_byte: node.end_byte(),
+                        location: self.node_location(node),
                     });
                 }
             }
@@ -1298,7 +1325,7 @@ impl Parser {
             "binary_expression" => self
                 .parse_binary_expression(node, source)
                 .map(Expression::Binary),
-            "unary_expression" => self
+            "unary_expression" | "pointer_expression" => self
                 .parse_unary_expression(node, source)
                 .map(Expression::Unary),
             "parenthesized_expression" => {
@@ -1311,23 +1338,103 @@ impl Parser {
                 }
                 None
             }
-            "identifier" => Some(Expression::Identifier(
-                std::str::from_utf8(&source[node.byte_range()])
+            "identifier" => {
+                let name = std::str::from_utf8(&source[node.byte_range()])
                     .ok()?
-                    .to_owned(),
-            )),
-            "string_literal" => Some(Expression::StringLiteral(
-                std::str::from_utf8(&source[node.byte_range()])
+                    .to_owned();
+                Some(Expression::Identifier(crate::model::IdentifierExpression {
+                    name,
+                    location: self.node_location(node),
+                }))
+            }
+            "field_expression" => {
+                let text = std::str::from_utf8(&source[node.byte_range()])
                     .ok()?
-                    .to_owned(),
-            )),
-            "number_literal" => Some(Expression::NumberLiteral(
-                std::str::from_utf8(&source[node.byte_range()])
+                    .to_owned();
+                Some(Expression::FieldAccess(
+                    crate::model::FieldAccessExpression {
+                        text,
+                        location: self.node_location(node),
+                    },
+                ))
+            }
+            "string_literal" => {
+                let value = std::str::from_utf8(&source[node.byte_range()])
                     .ok()?
-                    .to_owned(),
-            )),
-            "null" | "NULL" => Some(Expression::Null),
-            _ => None,
+                    .to_owned();
+                Some(Expression::StringLiteral(
+                    crate::model::StringLiteralExpression {
+                        value,
+                        location: self.node_location(node),
+                    },
+                ))
+            }
+            "number_literal" => {
+                let value = std::str::from_utf8(&source[node.byte_range()])
+                    .ok()?
+                    .to_owned();
+                Some(Expression::NumberLiteral(
+                    crate::model::NumberLiteralExpression {
+                        value,
+                        location: self.node_location(node),
+                    },
+                ))
+            }
+            "null" | "NULL" => Some(Expression::Null(crate::model::NullExpression {
+                location: self.node_location(node),
+            })),
+            "true" | "TRUE" => Some(Expression::Boolean(crate::model::BooleanExpression {
+                value: true,
+                location: self.node_location(node),
+            })),
+            "false" | "FALSE" => Some(Expression::Boolean(crate::model::BooleanExpression {
+                value: false,
+                location: self.node_location(node),
+            })),
+            "cast_expression" => self.parse_cast_expression(node, source),
+            "conditional_expression" => self.parse_conditional_expression(node, source),
+            "sizeof_expression" => {
+                let text = std::str::from_utf8(&source[node.byte_range()])
+                    .ok()?
+                    .to_owned();
+                Some(Expression::Sizeof(crate::model::SizeofExpression {
+                    text,
+                    location: self.node_location(node),
+                }))
+            }
+            "subscript_expression" => self.parse_subscript_expression(node, source),
+            "initializer_list" => {
+                let text = std::str::from_utf8(&source[node.byte_range()])
+                    .ok()?
+                    .to_owned();
+                Some(Expression::InitializerList(
+                    crate::model::InitializerListExpression {
+                        text,
+                        location: self.node_location(node),
+                    },
+                ))
+            }
+            "char_literal" => {
+                let value = std::str::from_utf8(&source[node.byte_range()])
+                    .ok()?
+                    .to_owned();
+                Some(Expression::CharLiteral(
+                    crate::model::CharLiteralExpression {
+                        value,
+                        location: self.node_location(node),
+                    },
+                ))
+            }
+            "update_expression" => self.parse_update_expression(node, source),
+            _ => {
+                // Unknown expression type - fail loudly so we implement it immediately
+                todo!(
+                    "Unimplemented expression type: {} at {}:{}",
+                    node.kind(),
+                    node.start_position().row + 1,
+                    node.start_position().column + 1
+                )
+            }
         }
     }
 
@@ -1352,9 +1459,7 @@ impl Parser {
         Some(CallExpression {
             function,
             arguments,
-            line: node.start_position().row + 1,
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
+            location: self.node_location(node),
         })
     }
 
@@ -1376,9 +1481,7 @@ impl Parser {
             lhs,
             operator,
             rhs: Box::new(rhs),
-            line: node.start_position().row + 1,
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
+            location: self.node_location(node),
         })
     }
 
@@ -1398,9 +1501,7 @@ impl Parser {
             left: Box::new(left),
             operator,
             right: Box::new(right),
-            line: node.start_position().row + 1,
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
+            location: self.node_location(node),
         })
     }
 
@@ -1416,10 +1517,86 @@ impl Parser {
         Some(UnaryExpression {
             operator,
             operand: Box::new(operand),
-            line: node.start_position().row + 1,
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
+            location: self.node_location(node),
         })
+    }
+
+    fn parse_cast_expression(&self, node: Node, source: &[u8]) -> Option<Expression> {
+        use crate::model::{CastExpression, Expression};
+
+        // Get the type node
+        let type_node = node.child_by_field_name("type")?;
+        let type_name = std::str::from_utf8(&source[type_node.byte_range()])
+            .ok()?
+            .to_owned();
+
+        // Get the value node
+        let value_node = node.child_by_field_name("value")?;
+        let operand = self.parse_expression(value_node, source)?;
+
+        Some(Expression::Cast(CastExpression {
+            type_name,
+            operand: Box::new(operand),
+            location: self.node_location(node),
+        }))
+    }
+
+    fn parse_conditional_expression(&self, node: Node, source: &[u8]) -> Option<Expression> {
+        use crate::model::{ConditionalExpression, Expression};
+
+        let condition_node = node.child_by_field_name("condition")?;
+        let condition = self.parse_expression(condition_node, source)?;
+
+        let consequence_node = node.child_by_field_name("consequence")?;
+        let then_expr = self.parse_expression(consequence_node, source)?;
+
+        let alternative_node = node.child_by_field_name("alternative")?;
+        let else_expr = self.parse_expression(alternative_node, source)?;
+
+        Some(Expression::Conditional(ConditionalExpression {
+            condition: Box::new(condition),
+            then_expr: Box::new(then_expr),
+            else_expr: Box::new(else_expr),
+            location: self.node_location(node),
+        }))
+    }
+
+    fn parse_subscript_expression(&self, node: Node, source: &[u8]) -> Option<Expression> {
+        use crate::model::{Expression, SubscriptExpression};
+
+        let argument_node = node.child_by_field_name("argument")?;
+        let array = self.parse_expression(argument_node, source)?;
+
+        let index_node = node.child_by_field_name("index")?;
+        let index = self.parse_expression(index_node, source)?;
+
+        Some(Expression::Subscript(SubscriptExpression {
+            array: Box::new(array),
+            index: Box::new(index),
+            location: self.node_location(node),
+        }))
+    }
+
+    fn parse_update_expression(&self, node: Node, source: &[u8]) -> Option<Expression> {
+        use crate::model::{Expression, UpdateExpression};
+
+        let operator_node = node.child_by_field_name("operator")?;
+        let operator = std::str::from_utf8(&source[operator_node.byte_range()])
+            .ok()?
+            .to_owned();
+
+        let argument_node = node.child_by_field_name("argument")?;
+        let operand = self.parse_expression(argument_node, source)?;
+
+        // Determine if prefix or postfix based on node positions
+        let is_prefix = operator_node.start_byte() < argument_node.start_byte();
+
+        Some(Expression::Update(UpdateExpression {
+            operator,
+            operand: Box::new(operand),
+            is_prefix,
+            location: self.node_location(node),
+        }))
     }
 
     fn parse_if_statement(&self, node: Node, source: &[u8]) -> Option<IfStatement> {
@@ -1427,7 +1604,8 @@ impl Parser {
         let condition = self.parse_expression(condition_node, source)?;
 
         let consequence_node = node.child_by_field_name("consequence")?;
-        let then_body = if consequence_node.kind() == "compound_statement" {
+        let then_has_braces = consequence_node.kind() == "compound_statement";
+        let then_body = if then_has_braces {
             self.parse_function_body(consequence_node, source)
         } else {
             // Single statement
@@ -1449,21 +1627,25 @@ impl Parser {
         Some(IfStatement {
             condition,
             then_body,
+            then_has_braces,
             else_body,
-            line: node.start_position().row + 1,
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
+            location: self.node_location(node),
         })
     }
 
     fn parse_return_statement(&self, node: Node, source: &[u8]) -> Option<ReturnStatement> {
-        let value = node.child(1).and_then(|v| self.parse_expression(v, source));
+        let value = node.child(1).and_then(|v| {
+            // Check if it's actually an expression (not a semicolon)
+            if v.is_named() && v.kind() != ";" {
+                self.parse_expression(v, source)
+            } else {
+                None
+            }
+        });
 
         Some(ReturnStatement {
             value,
-            line: node.start_position().row + 1,
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
+            location: self.node_location(node),
         })
     }
 
@@ -1475,9 +1657,7 @@ impl Parser {
 
         Some(GotoStatement {
             label,
-            line: node.start_position().row + 1,
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
+            location: self.node_location(node),
         })
     }
 
@@ -1500,9 +1680,7 @@ impl Parser {
         Some(LabeledStatement {
             label,
             statement: Box::new(statement?),
-            line: node.start_position().row + 1,
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
+            location: self.node_location(node),
         })
     }
 
@@ -1511,9 +1689,7 @@ impl Parser {
 
         Some(CompoundStatement {
             statements,
-            line: node.start_position().row + 1,
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
+            location: self.node_location(node),
         })
     }
 }

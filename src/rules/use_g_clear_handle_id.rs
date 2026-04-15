@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::{Expression, Statement};
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGClearHandleId;
@@ -34,175 +34,105 @@ impl Rule for UseGClearHandleId {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
-                }
+                self.check_statements(path, &func.body_statements, &file.source, violations);
             }
         }
     }
 }
 
 impl UseGClearHandleId {
-    fn check_node(
+    fn check_statements(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        file_path: &std::path::Path,
+        statements: &[Statement],
+        source: &[u8],
         violations: &mut Vec<Violation>,
     ) {
-        // Track the byte range of any if-consequence we handle here so we can skip
-        // it during recursion and avoid processing it a second time as a plain
-        // compound_statement.
-        let mut handled_consequence_range: Option<(usize, usize)> = None;
+        // Check the statements themselves for cleanup pattern
+        self.check_compound_statement(file_path, statements, source, violations);
 
-        // Check for if statements with g_clear_handle_id in braces that can be
-        // simplified OR look for handle cleanup pattern to convert
-        if node.kind() == "if_statement"
-            && let Some(consequence) = node.child_by_field_name("consequence")
-            && consequence.kind() == "compound_statement"
-        {
-            handled_consequence_range = Some((consequence.start_byte(), consequence.end_byte()));
+        // Recurse into nested statements
+        for stmt in statements {
+            match stmt {
+                Statement::If(if_stmt) => {
+                    // Check if we can simplify/remove the if itself
+                    // Returns true if it handled the then_body (found violations)
+                    let handled = self.check_if_statement(file_path, if_stmt, source, violations);
 
-            // First check if this is the pattern to convert (g_source_remove + id = 0)
-            let conversions = self.check_cleanup_then_zero(ast_context, consequence, ctx.source);
+                    // Only recurse into then_body if check_if_statement didn't handle it
+                    if !handled {
+                        self.check_statements(file_path, &if_stmt.then_body, source, violations);
+                    }
 
-            if !conversions.is_empty() {
-                // This is a pattern to convert.
-                // Count statements — if exactly 2, we can also remove the braces.
-                let mut stmt_count = 0;
-                let mut cursor = consequence.walk();
-                for child in consequence.children(&mut cursor) {
-                    if child.kind() == "expression_statement" {
-                        stmt_count += 1;
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.check_statements(file_path, else_body, source, violations);
                     }
                 }
-
-                // If the if has no else and the condition is just a zero-check on
-                // the handle ID, the guard is redundant — g_clear_handle_id already
-                // handles the id==0 case internally. Replace the whole if_statement.
-                let has_else = node.child_by_field_name("alternative").is_some();
-                let cond_id = node
-                    .child_by_field_name("condition")
-                    .and_then(|c| self.extract_id_from_condition(ast_context, c, ctx.source));
-
-                for (var_name, cleanup_func, first_stmt, second_stmt) in conversions {
-                    let position = first_stmt.start_position();
-                    let replacement =
-                        format!("g_clear_handle_id (&{}, {});", var_name, cleanup_func);
-
-                    let can_remove_if =
-                        !has_else && cond_id.is_some_and(|id| id == var_name) && stmt_count == 2;
-
-                    let fix = if can_remove_if {
-                        // The if guard is redundant — replace the whole if_statement
-                        Fix::from_range(node.start_byte(), node.end_byte(), ctx, &replacement)
-                    } else if stmt_count == 2 {
-                        // Replace the entire compound_statement (including braces)
-                        Fix::from_range(
-                            consequence.start_byte(),
-                            consequence.end_byte(),
-                            ctx,
-                            &replacement,
-                        )
-                    } else {
-                        // Just replace the two statements
-                        Fix::from_range(
-                            first_stmt.start_byte(),
-                            second_stmt.end_byte(),
-                            ctx,
-                            &replacement,
-                        )
-                    };
-
-                    violations.push(self.violation_with_fix(
-                        ctx.file_path,
-                        ctx.base_line + position.row,
-                        position.column + 1,
-                        format!(
-                            "Use {} instead of {} and zero assignment",
-                            replacement, cleanup_func
-                        ),
-                        fix,
-                    ));
+                Statement::Compound(compound) => {
+                    self.check_statements(file_path, &compound.statements, source, violations);
                 }
-            } else {
-                // Not a conversion pattern — check if braces around a single
-                // g_clear_handle_id call can be removed.
-                let mut stmt_count = 0;
-                let mut clear_handle_call = None;
-                let mut cursor = consequence.walk();
-                for child in consequence.children(&mut cursor) {
-                    if child.kind() == "expression_statement" {
-                        stmt_count += 1;
-                        if let Some(call) = ast_context.find_call_expression(child)
-                            && let Some(function) = call.child_by_field_name("function")
-                        {
-                            let func_name = ast_context.get_node_text(function, ctx.source);
-                            if func_name == "g_clear_handle_id" {
-                                clear_handle_call = Some(child);
-                            }
-                        }
-                    }
-                }
-
-                if stmt_count == 1
-                    && let Some(call_stmt) = clear_handle_call
-                {
-                    let position = node.start_position();
-                    let fix = Fix::from_range(
-                        consequence.start_byte(),
-                        consequence.end_byte(),
-                        ctx,
-                        ast_context.get_node_text(call_stmt, ctx.source),
-                    );
-
-                    violations.push(
-                        self.violation_with_fix(
-                            ctx.file_path,
-                            ctx.base_line + position.row,
-                            position.column + 1,
-                            "Remove unnecessary braces around single g_clear_handle_id call"
-                                .to_string(),
-                            fix,
-                        ),
-                    );
-                }
+                _ => {}
             }
         }
+    }
 
-        // Look for cleanup+zero pairs directly in any compound_statement (e.g. a
-        // function body or loop body), but skip compound_statements that were
-        // already processed above as an if-consequence.
-        if node.kind() == "compound_statement"
-            && handled_consequence_range
-                .map(|(s, e)| s != node.start_byte() || e != node.end_byte())
-                .unwrap_or(true)
-        {
-            for (var_name, cleanup_func, first_stmt, second_stmt) in
-                self.check_cleanup_then_zero(ast_context, node, ctx.source)
-            {
-                let position = first_stmt.start_position();
+    fn check_if_statement(
+        &self,
+        file_path: &std::path::Path,
+        if_stmt: &gobject_ast::IfStatement,
+        source: &[u8],
+        violations: &mut Vec<Violation>,
+    ) -> bool {
+        let conversions = self.check_cleanup_then_zero(&if_stmt.then_body, source);
+
+        if !conversions.is_empty() {
+            let stmt_count = if_stmt.then_body.len();
+
+            let has_else = if_stmt.else_body.is_some();
+            let cond_id = self.extract_id_from_condition(&if_stmt.condition);
+
+            for (var_name, cleanup_func, first_loc, second_loc) in conversions {
                 let replacement = format!("g_clear_handle_id (&{}, {});", var_name, cleanup_func);
 
-                let fix = Fix::from_range(
-                    first_stmt.start_byte(),
-                    second_stmt.end_byte(),
-                    ctx,
-                    &replacement,
-                );
+                let can_remove_if =
+                    !has_else && cond_id.as_deref() == Some(var_name.as_str()) && stmt_count == 2;
+
+                let fix = if can_remove_if {
+                    Fix::new(
+                        if_stmt.location.start_byte,
+                        if_stmt.location.end_byte,
+                        replacement.clone(),
+                    )
+                } else if stmt_count == 2 {
+                    // Find braces around the statements
+                    let first_start = if_stmt.then_body[0].location().start_byte;
+                    let second_end = if_stmt.then_body[1].location().end_byte;
+                    let (mut brace_start, brace_end) =
+                        self.find_braces_around(first_start, second_end, source);
+
+                    // Include the newline before the brace in the replacement
+                    while brace_start > 0 && source[brace_start - 1] != b'\n' {
+                        brace_start -= 1;
+                    }
+                    brace_start = brace_start.saturating_sub(1);
+
+                    // Extract indentation from the brace line
+                    let indent = self.get_indentation(brace_start + 1, source);
+                    let formatted_replacement = format!("\n{}{}", indent, replacement);
+
+                    Fix::new(brace_start, brace_end, formatted_replacement)
+                } else {
+                    Fix::new(
+                        first_loc.start_byte,
+                        second_loc.end_byte,
+                        replacement.clone(),
+                    )
+                };
 
                 violations.push(self.violation_with_fix(
-                    ctx.file_path,
-                    ctx.base_line + position.row,
-                    position.column + 1,
+                    file_path,
+                    first_loc.line,
+                    first_loc.column,
                     format!(
                         "Use {} instead of {} and zero assignment",
                         replacement, cleanup_func
@@ -210,166 +140,180 @@ impl UseGClearHandleId {
                     fix,
                 ));
             }
+            // We handled the cleanup pattern, return true to prevent double-checking
+            return true;
+        } else if if_stmt.then_body.len() == 1
+            && if_stmt.then_has_braces
+            && let Statement::Expression(expr_stmt) = &if_stmt.then_body[0]
+            && let Expression::Call(call) = &expr_stmt.expr
+            && call.function == "g_clear_handle_id"
+        {
+            let call_text = call.location.as_str(source).unwrap_or("");
+
+            let loc = if_stmt.then_body[0].location();
+            let fix = Fix::new(loc.start_byte, loc.end_byte, format!("{};", call_text));
+
+            violations.push(self.violation_with_fix(
+                file_path,
+                if_stmt.location.line,
+                if_stmt.location.column,
+                "Remove unnecessary braces around single g_clear_handle_id call".to_string(),
+                fix,
+            ));
         }
 
-        // Recurse, skipping the if-consequence we already handled above.
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if let Some((start, end)) = handled_consequence_range
-                && child.start_byte() == start
-                && child.end_byte() == end
-            {
-                continue;
-            }
-            self.check_node(ast_context, child, ctx, violations);
+        // Didn't find/handle cleanup pattern, let caller recurse into then_body
+        false
+    }
+
+    fn check_compound_statement(
+        &self,
+        file_path: &std::path::Path,
+        statements: &[Statement],
+        source: &[u8],
+        violations: &mut Vec<Violation>,
+    ) {
+        for (var_name, cleanup_func, first_loc, second_loc) in
+            self.check_cleanup_then_zero(statements, source)
+        {
+            let replacement = format!("g_clear_handle_id (&{}, {});", var_name, cleanup_func);
+
+            let fix = Fix::new(
+                first_loc.start_byte,
+                second_loc.end_byte,
+                replacement.clone(),
+            );
+
+            violations.push(self.violation_with_fix(
+                file_path,
+                first_loc.line,
+                first_loc.column,
+                format!(
+                    "Use {} instead of {} and zero assignment",
+                    replacement, cleanup_func
+                ),
+                fix,
+            ));
         }
     }
 
-    /// Check for consecutive handle cleanup + var = 0
-    /// Returns (var_name, cleanup_func, first_statement, second_statement)
-    fn check_cleanup_then_zero<'a>(
+    fn check_cleanup_then_zero(
         &self,
-        ast_context: &AstContext,
-        compound: Node<'a>,
-        source: &'a [u8],
-    ) -> Vec<(&'a str, &'a str, Node<'a>, Node<'a>)> {
-        let mut cursor = compound.walk();
-        let statements: Vec<_> = compound
-            .children(&mut cursor)
-            .filter(|n| n.kind() == "expression_statement")
-            .collect();
-
+        statements: &[Statement],
+        source: &[u8],
+    ) -> Vec<(
+        String,
+        String,
+        gobject_ast::SourceLocation,
+        gobject_ast::SourceLocation,
+    )> {
         let mut results = Vec::new();
 
-        // Look for consecutive pairs
         for i in 0..statements.len().saturating_sub(1) {
-            let first = statements[i];
-            let second = statements[i + 1];
+            let first = &statements[i];
+            let second = &statements[i + 1];
 
-            // Check if first is a handle cleanup function call
-            if let Some((var_name, cleanup_func)) =
-                self.extract_handle_cleanup(ast_context, first, source)
+            if let Some((var_name, cleanup_func)) = self.extract_handle_cleanup(first, source)
+                && let Some(assign_var) = self.extract_zero_assignment(second)
+                && assign_var.trim() == var_name.trim()
             {
-                // Check if second is assignment to 0
-                if let Some(assign_var) = self.extract_zero_assignment(ast_context, second, source)
-                    && assign_var.trim() == var_name.trim()
-                {
-                    results.push((var_name, cleanup_func, first, second));
-                }
+                results.push((
+                    var_name,
+                    cleanup_func,
+                    first.location().clone(),
+                    second.location().clone(),
+                ));
             }
         }
 
         results
     }
 
-    fn extract_handle_cleanup<'a>(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-    ) -> Option<(&'a str, &'a str)> {
-        if let Some(call) = ast_context.find_call_expression(node)
-            && let Some(function) = call.child_by_field_name("function")
-        {
-            let func_name = ast_context.get_node_text(function, source);
+    fn extract_handle_cleanup(&self, stmt: &Statement, source: &[u8]) -> Option<(String, String)> {
+        let call = stmt.extract_call()?;
 
-            // Check if this is a known handle cleanup function
-            let is_handle_cleanup = matches!(func_name, "g_source_remove" | "g_source_destroy");
+        let is_handle_cleanup = matches!(
+            call.function.as_str(),
+            "g_source_remove" | "g_source_destroy"
+        );
 
-            if !is_handle_cleanup {
-                return None;
-            }
-
-            // Get the first argument (the handle ID variable)
-            if let Some(args) = call.child_by_field_name("arguments") {
-                let mut cursor = args.walk();
-                for child in args.children(&mut cursor) {
-                    if child.kind() != "(" && child.kind() != ")" && child.kind() != "," {
-                        return Some((ast_context.get_node_text(child, source).trim(), func_name));
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    fn extract_zero_assignment<'a>(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-    ) -> Option<&'a str> {
-        if let Some(assignment) = self.find_assignment(node)
-            && let Some(left) = assignment.child_by_field_name("left")
-            && let Some(right) = assignment.child_by_field_name("right")
-        {
-            let right_text = ast_context.get_node_text(right, source);
-            if right_text.trim() == "0" {
-                return Some(ast_context.get_node_text(left, source).trim());
-            }
-        }
-        None
-    }
-
-    fn find_assignment<'a>(&self, node: Node<'a>) -> Option<Node<'a>> {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "assignment_expression" {
-                return Some(child);
-            }
-            if let Some(assignment) = self.find_assignment(child) {
-                return Some(assignment);
-            }
-        }
-        None
-    }
-
-    /// Extract the handle ID from an if-condition, returning `Some(id_text)`
-    /// when the condition is a redundant zero-check: `(id)`, `(id > 0)`,
-    /// `(id != 0)`, `(0 < id)`, `(0 != id)`.
-    fn extract_id_from_condition<'a>(
-        &self,
-        ast_context: &AstContext,
-        condition: Node,
-        source: &'a [u8],
-    ) -> Option<&'a str> {
-        if condition.kind() != "parenthesized_expression" {
+        if !is_handle_cleanup || call.arguments.is_empty() {
             return None;
         }
-        let mut cursor = condition.walk();
-        let inner = condition
-            .children(&mut cursor)
-            .find(|n| n.kind() != "(" && n.kind() != ")")?;
 
-        if inner.kind() == "binary_expression" {
-            let op = inner.child_by_field_name("operator")?;
-            let left = inner.child_by_field_name("left")?;
-            let right = inner.child_by_field_name("right")?;
-            let op_text = ast_context.get_node_text(op, source);
-            let left_text = ast_context.get_node_text(left, source);
-            let right_text = ast_context.get_node_text(right, source);
-            match op_text {
-                "!=" | ">" => {
-                    if right_text == "0" {
-                        Some(left_text)
-                    } else if left_text == "0" {
-                        Some(right_text)
-                    } else {
-                        None
-                    }
-                }
-                "<" => {
-                    if left_text == "0" {
-                        Some(right_text)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            }
-        } else {
-            // Plain truthy check: if (id)
-            Some(ast_context.get_node_text(inner, source))
+        let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
+        let var_name = arg_expr.location().as_str(source)?.trim().to_string();
+
+        Some((var_name, call.function.clone()))
+    }
+
+    fn extract_zero_assignment(&self, stmt: &Statement) -> Option<String> {
+        if let Statement::Expression(expr_stmt) = stmt
+            && let Expression::Assignment(assign) = &expr_stmt.expr
+            && assign.rhs.is_zero()
+        {
+            return Some(assign.lhs.clone());
         }
+        None
+    }
+
+    fn extract_id_from_condition(&self, condition: &Expression) -> Option<String> {
+        // Try direct variable extraction first
+        if let Some(var) = condition.extract_variable_name() {
+            return Some(var);
+        }
+
+        // Then try binary comparison
+        if let Expression::Binary(bin) = condition {
+            return bin.extract_compared_variable();
+        }
+
+        None
+    }
+
+    fn find_braces_around(&self, start: usize, _end: usize, source: &[u8]) -> (usize, usize) {
+        // Search backwards from start to find '{'
+        let mut brace_start = start;
+        while brace_start > 0 && source[brace_start - 1] != b'{' {
+            brace_start -= 1;
+            if start - brace_start > 100 {
+                break;
+            }
+        }
+        if brace_start > 0 && source[brace_start - 1] == b'{' {
+            brace_start -= 1;
+        }
+
+        // Search forwards from opening brace to find matching closing brace
+        let mut brace_end = brace_start + 1;
+        let mut depth = 1;
+        while brace_end < source.len() && depth > 0 {
+            if source[brace_end] == b'{' {
+                depth += 1;
+            } else if source[brace_end] == b'}' {
+                depth -= 1;
+            }
+            brace_end += 1;
+        }
+
+        (brace_start, brace_end)
+    }
+
+    fn get_indentation(&self, pos: usize, source: &[u8]) -> String {
+        // Find the start of the line
+        let mut line_start = pos;
+        while line_start > 0 && source[line_start - 1] != b'\n' {
+            line_start -= 1;
+        }
+
+        // Extract whitespace from line start
+        let mut indent = String::new();
+        let mut i = line_start;
+        while i < source.len() && (source[i] == b' ' || source[i] == b'\t') {
+            indent.push(source[i] as char);
+            i += 1;
+        }
+
+        indent
     }
 }

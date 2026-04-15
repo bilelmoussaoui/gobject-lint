@@ -1,5 +1,3 @@
-use tree_sitter::Node;
-
 use super::Rule;
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
@@ -30,45 +28,15 @@ impl Rule for DeprecatedAddPrivate {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    self.check_node(
-                        ast_context,
-                        tree.root_node(),
-                        func_source,
+                for call in func.find_calls(&["g_type_class_add_private"]) {
+                    violations.push(self.violation(
                         path,
-                        func.line,
-                        violations,
-                    );
+                        call.location.line,
+                        call.location.column,
+                        "g_type_class_add_private is deprecated since GLib 2.58. Use G_DEFINE_TYPE_WITH_PRIVATE or G_ADD_PRIVATE instead".to_string(),
+                    ));
                 }
             }
-        }
-    }
-}
-impl DeprecatedAddPrivate {
-    fn check_node(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &[u8],
-        file_path: &std::path::Path,
-        base_line: usize,
-        violations: &mut Vec<Violation>,
-    ) {
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let text = ast_context.get_node_text(function, source);
-            if text == "g_type_class_add_private" {
-                violations.push(self.violation(file_path, base_line + node.start_position().row, node.start_position().column + 1, "g_type_class_add_private is deprecated since GLib 2.58. Use G_DEFINE_TYPE_WITH_PRIVATE or G_ADD_PRIVATE instead".to_owned()));
-            }
-        }
-
-        // Recurse into children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, source, file_path, base_line, violations);
         }
     }
 }

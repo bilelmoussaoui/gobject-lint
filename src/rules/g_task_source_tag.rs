@@ -1,4 +1,4 @@
-use tree_sitter::Node;
+use gobject_ast::{Expression, Statement};
 
 use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
@@ -34,112 +34,178 @@ impl Rule for GTaskSourceTag {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let root = tree.root_node();
-
-                    if let Some(body) = ast_context.find_body(root) {
-                        let task_vars = self.find_gtask_new_calls(ast_context, body, func_source);
-
-                        for (var_name, line_offset, col, insert_byte, indentation) in task_vars {
-                            if !self.has_set_source_tag_call(
-                                ast_context,
-                                body,
-                                var_name,
-                                func_source,
-                            ) {
-                                // Create fix: insert g_task_set_source_tag after the statement
-                                let insert_pos = func.start_byte.unwrap_or(0) + insert_byte;
-                                let fix = Fix::new(
-                                    insert_pos,
-                                    insert_pos,
-                                    format!(
-                                        "\n{}g_task_set_source_tag ({}, {});",
-                                        indentation, var_name, func.name
-                                    ),
-                                );
-
-                                violations.push(self.violation_with_fix(
-                                    path,
-                                    func.line + line_offset - 1,
-                                    col,
-                                    format!(
-                                        "GTask '{}' created without g_task_set_source_tag",
-                                        var_name
-                                    ),
-                                    fix,
-                                ));
-                            }
-                        }
-                    }
-                }
+                self.check_statements(path, func, &func.body_statements, &file.source, violations);
             }
         }
     }
 }
 
 impl GTaskSourceTag {
-    fn find_gtask_new_calls<'a>(
+    fn check_statements(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-    ) -> Vec<(&'a str, usize, usize, usize, String)> {
+        file_path: &std::path::Path,
+        func: &gobject_ast::FunctionInfo,
+        statements: &[Statement],
+        source: &[u8],
+        violations: &mut Vec<Violation>,
+    ) {
+        // Find all g_task_new calls and their variables
+        let task_vars = self.find_gtask_new_vars(statements, source);
+
+        // For each task variable, check if there's a set_source_tag call
+        for (var_name, stmt_location) in task_vars {
+            if !self.has_set_source_tag_call(statements, &var_name, source) {
+                // Extract indentation from the statement
+                let indentation = self.extract_indentation(stmt_location.start_byte, source);
+
+                // Create fix: insert g_task_set_source_tag after the statement
+                let fix = Fix::new(
+                    stmt_location.end_byte,
+                    stmt_location.end_byte,
+                    format!(
+                        "\n{}g_task_set_source_tag ({}, {});",
+                        indentation, var_name, func.name
+                    ),
+                );
+
+                violations.push(self.violation_with_fix(
+                    file_path,
+                    stmt_location.line,
+                    stmt_location.column,
+                    format!("GTask '{}' created without g_task_set_source_tag", var_name),
+                    fix,
+                ));
+            }
+        }
+    }
+
+    fn find_gtask_new_vars(
+        &self,
+        statements: &[Statement],
+        source: &[u8],
+    ) -> Vec<(String, gobject_ast::SourceLocation)> {
         let mut results = Vec::new();
 
-        // Look for assignments like: task = g_task_new(...)
-        if node.kind() == "assignment_expression"
-            && let Some(right) = node.child_by_field_name("right")
-            && self.is_gtask_new_call(ast_context, right, source)
-            && let Some(left) = node.child_by_field_name("left")
-        {
-            let var_name = ast_context.get_node_text(left, source);
-            let position = node.start_position();
-            // Find the parent statement to get the position after semicolon
-            let insert_byte = self.find_statement_end(node);
-            let indentation = self.extract_indentation(node, source);
-            results.push((
-                var_name,
-                position.row + 1,
-                position.column + 1,
-                insert_byte,
-                indentation,
-            ));
-        }
-
-        // Look for declarations like: GTask *task = g_task_new(...)
-        if node.kind() == "init_declarator"
-            && let Some(value) = node.child_by_field_name("value")
-            && self.is_gtask_new_call(ast_context, value, source)
-            && let Some(declarator) = node.child_by_field_name("declarator")
-            && let Some(var_name) = ast_context.extract_variable_name(declarator, source)
-        {
-            let position = node.start_position();
-            // Find the parent statement to get the position after semicolon
-            let insert_byte = self.find_statement_end(node);
-            let indentation = self.extract_indentation(node, source);
-            results.push((
-                var_name,
-                position.row + 1,
-                position.column + 1,
-                insert_byte,
-                indentation,
-            ));
-        }
-
-        // Recursively check children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            results.extend(self.find_gtask_new_calls(ast_context, child, source));
+        for stmt in statements {
+            match stmt {
+                // Check declarations: GTask *task = g_task_new(...)
+                Statement::Declaration(decl) => {
+                    if let Some(Expression::Call(call)) = &decl.initializer
+                        && call.function == "g_task_new"
+                    {
+                        // Find the column where the variable name appears
+                        let var_name_column =
+                            self.find_var_name_column(decl.location.start_byte, &decl.name, source);
+                        let mut location = decl.location.clone();
+                        location.column = var_name_column;
+                        results.push((decl.name.clone(), location));
+                    }
+                }
+                // Check assignments: task = g_task_new(...)
+                Statement::Expression(expr_stmt) => {
+                    if let Expression::Assignment(assignment) = &expr_stmt.expr
+                        && let Expression::Call(call) = assignment.rhs.as_ref()
+                        && call.function == "g_task_new"
+                    {
+                        // For assignments, use the assignment location
+                        results.push((assignment.lhs.clone(), assignment.location.clone()));
+                    }
+                }
+                // Recurse into nested statements
+                Statement::If(if_stmt) => {
+                    results.extend(self.find_gtask_new_vars(&if_stmt.then_body, source));
+                    if let Some(else_body) = &if_stmt.else_body {
+                        results.extend(self.find_gtask_new_vars(else_body, source));
+                    }
+                }
+                Statement::Compound(compound) => {
+                    results.extend(self.find_gtask_new_vars(&compound.statements, source));
+                }
+                _ => {}
+            }
         }
 
         results
     }
 
-    fn extract_indentation(&self, node: Node, source: &[u8]) -> String {
+    fn find_var_name_column(&self, start_byte: usize, var_name: &str, source: &[u8]) -> usize {
+        let search_text = std::str::from_utf8(&source[start_byte..]).unwrap_or("");
+        if let Some(pos) = search_text.find(var_name) {
+            let var_byte = start_byte + pos;
+
+            // Find the start of the line
+            let mut line_start = var_byte;
+            while line_start > 0 && source[line_start - 1] != b'\n' {
+                line_start -= 1;
+            }
+
+            // Return byte offset from line start (0-indexed becomes 1-indexed)
+            var_byte - line_start
+        } else {
+            1
+        }
+    }
+
+    fn has_set_source_tag_call(
+        &self,
+        statements: &[Statement],
+        var_name: &str,
+        source: &[u8],
+    ) -> bool {
+        for stmt in statements {
+            // Check if any call is g_task_set_source_tag with our variable
+            if let Some(found) = self.check_statement_for_set_source_tag(stmt, var_name, source)
+                && found
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn check_statement_for_set_source_tag(
+        &self,
+        stmt: &Statement,
+        var_name: &str,
+        source: &[u8],
+    ) -> Option<bool> {
+        match stmt {
+            Statement::Expression(_) => {
+                if let Some(call) = stmt.extract_call()
+                    && call.function == "g_task_set_source_tag"
+                    && !call.arguments.is_empty()
+                {
+                    // Check if first argument contains our variable
+                    if let Some(arg_text) = call.get_arg_text(0, source)
+                        && arg_text.contains(var_name)
+                    {
+                        return Some(true);
+                    }
+                }
+            }
+            Statement::If(if_stmt) => {
+                if self.has_set_source_tag_call(&if_stmt.then_body, var_name, source) {
+                    return Some(true);
+                }
+                if let Some(else_body) = &if_stmt.else_body
+                    && self.has_set_source_tag_call(else_body, var_name, source)
+                {
+                    return Some(true);
+                }
+            }
+            Statement::Compound(compound) => {
+                if self.has_set_source_tag_call(&compound.statements, var_name, source) {
+                    return Some(true);
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
+    fn extract_indentation(&self, start_byte: usize, source: &[u8]) -> String {
         // Find the start of the line
-        let mut line_start_byte = node.start_byte();
+        let mut line_start_byte = start_byte;
 
         // Walk backwards to find the start of the line
         while line_start_byte > 0 && source[line_start_byte - 1] != b'\n' {
@@ -148,7 +214,7 @@ impl GTaskSourceTag {
 
         // Count spaces/tabs from line start to first non-whitespace
         let mut indent = String::new();
-        for &byte in &source[line_start_byte..node.start_byte()] {
+        for &byte in &source[line_start_byte..start_byte] {
             if byte == b' ' || byte == b'\t' {
                 indent.push(byte as char);
             } else {
@@ -157,67 +223,5 @@ impl GTaskSourceTag {
         }
 
         indent
-    }
-
-    fn find_statement_end(&self, mut node: Node) -> usize {
-        // Walk up to find the statement (expression_statement or declaration)
-        while let Some(parent) = node.parent() {
-            if parent.kind() == "expression_statement" || parent.kind() == "declaration" {
-                // Return the end byte of the statement (after the semicolon)
-                return parent.end_byte();
-            }
-            node = parent;
-        }
-        // Fallback: return the end of the node itself
-        node.end_byte()
-    }
-
-    fn is_gtask_new_call(&self, ast_context: &AstContext, node: Node, source: &[u8]) -> bool {
-        if node.kind() != "call_expression" {
-            return false;
-        }
-
-        let Some(function) = node.child_by_field_name("function") else {
-            return false;
-        };
-
-        let func_text = ast_context.get_node_text(function, source);
-        func_text == "g_task_new"
-    }
-
-    fn has_set_source_tag_call(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        var_name: &str,
-        source: &[u8],
-    ) -> bool {
-        // Look for g_task_set_source_tag(var_name, ...)
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let func_text = ast_context.get_node_text(function, source);
-
-            if func_text == "g_task_set_source_tag" {
-                // Check if first argument matches our variable
-                if let Some(arguments) = node.child_by_field_name("arguments") {
-                    let args_text = ast_context.get_node_text(arguments, source);
-                    // Simple check: does the arguments contain our variable name?
-                    if args_text.contains(var_name) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        // Recursively check children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if self.has_set_source_tag_call(ast_context, child, var_name, source) {
-                return true;
-            }
-        }
-
-        false
     }
 }

@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::{Expression, Statement};
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGSourceConstants;
@@ -29,25 +29,25 @@ impl Rule for UseGSourceConstants {
         violations: &mut Vec<Violation>,
     ) {
         // Collect all callbacks passed to g_idle_add/g_timeout_add
-        let mut callbacks_to_check = Vec::new();
+        let mut callbacks_to_check: Vec<String> = Vec::new();
 
-        for (path, file) in ast_context.iter_c_files() {
+        for (_path, file) in ast_context.iter_c_files() {
             for func in &file.functions {
                 if !func.is_definition {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let root = tree.root_node();
-                    if let Some(body) = ast_context.find_body(root) {
-                        self.collect_source_add_callbacks(
-                            ast_context,
-                            body,
-                            func_source,
-                            &mut callbacks_to_check,
-                        );
+                // Find all source add calls (exclude _once variants as they return void)
+                for call in func.find_calls(&[
+                    "g_idle_add",
+                    "g_idle_add_full",
+                    "g_timeout_add",
+                    "g_timeout_add_seconds",
+                    "g_timeout_add_full",
+                    "g_timeout_add_seconds_full",
+                ]) {
+                    if let Some(callback_name) = self.extract_callback_name(call, &file.source) {
+                        callbacks_to_check.push(callback_name);
                     }
                 }
             }
@@ -55,65 +55,37 @@ impl Rule for UseGSourceConstants {
 
         // Check each callback function for TRUE/FALSE returns
         for callback_name in callbacks_to_check {
-            self.check_callback_returns(ast_context, callback_name, violations);
+            self.check_callback_returns(ast_context, &callback_name, violations);
         }
     }
 }
 
 impl UseGSourceConstants {
-    fn collect_source_add_callbacks<'a>(
+    fn extract_callback_name(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-        callbacks: &mut Vec<&'a str>,
-    ) {
+        call: &gobject_ast::CallExpression,
+        _source: &[u8],
+    ) -> Option<String> {
         // Map of source-add function name → zero-based index of the GSourceFunc
-        // argument. g_idle_add(func, data)                              → 0
-        // g_idle_add_full(priority, func, data, notify)       → 1
-        // g_idle_add_once(func, data)                         → 0
-        // g_timeout_add(interval, func, data)                 → 1
-        // g_timeout_add_once(interval, func, data)            → 1
-        // g_timeout_add_seconds(interval, func, data)         → 1
-        // g_timeout_add_full(pri, interval, func, data, note) → 2
-        // g_timeout_add_seconds_full(pri, iv, func, data, n)  → 2
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let func_text = ast_context.get_node_text(function, source);
+        // argument
+        let callback_arg_index: usize = match call.function.as_str() {
+            "g_idle_add" => 0,
+            "g_idle_add_full" | "g_timeout_add" | "g_timeout_add_seconds" => 1,
+            "g_timeout_add_full" | "g_timeout_add_seconds_full" => 2,
+            _ => return None,
+        };
 
-            let callback_arg_index: Option<usize> = match func_text {
-                "g_idle_add" | "g_idle_add_once" => Some(0),
-                "g_idle_add_full"
-                | "g_timeout_add"
-                | "g_timeout_add_once"
-                | "g_timeout_add_seconds" => Some(1),
-                "g_timeout_add_full" | "g_timeout_add_seconds_full" => Some(2),
-                _ => None,
-            };
-
-            if let Some(arg_index) = callback_arg_index
-                && let Some(arguments) = node.child_by_field_name("arguments")
-                && let Some(arg) = self.get_argument_at(arguments, arg_index)
-            {
-                let callback_name = ast_context.get_node_text(arg, source);
-                callbacks.push(callback_name);
-            }
+        if callback_arg_index >= call.arguments.len() {
+            return None;
         }
 
-        // Recursively check children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.collect_source_add_callbacks(ast_context, child, source, callbacks);
+        // Get the callback argument (should be an identifier)
+        let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[callback_arg_index];
+        if let Expression::Identifier(id) = arg_expr.as_ref() {
+            Some(id.name.clone())
+        } else {
+            None
         }
-    }
-
-    fn get_argument_at<'a>(&self, arguments_node: Node<'a>, index: usize) -> Option<Node<'a>> {
-        let mut cursor = arguments_node.walk();
-        arguments_node
-            .children(&mut cursor)
-            .filter(|child| child.kind() != "(" && child.kind() != ")" && child.kind() != ",")
-            .nth(index)
     }
 
     fn check_callback_returns(
@@ -125,70 +97,98 @@ impl UseGSourceConstants {
         // Find the function definition
         for (path, file) in ast_context.iter_all_files() {
             for func in &file.functions {
-                if func.name == callback_name
-                    && func.is_definition
-                    && let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let root = tree.root_node();
-                    if let Some(body) = ast_context.find_body(root) {
-                        let ctx = CheckContext {
-                            source: func_source,
-                            file_path: path,
-                            base_line: func.line,
-                            base_byte: func.start_byte.unwrap_or(0),
-                        };
-                        self.check_returns_in_body(ast_context, body, &ctx, violations);
-                    }
+                if func.name == callback_name && func.is_definition {
+                    self.check_statements(path, &func.body_statements, &file.source, violations);
                 }
             }
         }
     }
 
-    fn check_returns_in_body(
+    fn check_statements(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        file_path: &std::path::Path,
+        statements: &[Statement],
+        source: &[u8],
         violations: &mut Vec<Violation>,
     ) {
-        if node.kind() == "return_statement" {
-            // Get the return value
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() != "return" && child.kind() != ";" {
-                    let return_value = ast_context.get_node_text(child, ctx.source);
-                    let return_value_trimmed = return_value.trim();
-
-                    if return_value_trimmed == "TRUE" || return_value_trimmed == "FALSE" {
-                        let position = child.start_position();
-                        let replacement = if return_value_trimmed == "TRUE" {
-                            "G_SOURCE_CONTINUE"
-                        } else {
-                            "G_SOURCE_REMOVE"
-                        };
-
-                        let fix = Fix::from_node(child, ctx, replacement);
-
-                        violations.push(self.violation_with_fix(
-                            ctx.file_path,
-                            ctx.base_line + position.row,
-                            position.column + 1,
-                            format!(
-                                "Use {} instead of {} in GSourceFunc callback",
-                                replacement, return_value_trimmed
-                            ),
-                            fix,
-                        ));
+        for stmt in statements {
+            match stmt {
+                Statement::Return(ret_stmt) => {
+                    if let Some(value) = &ret_stmt.value {
+                        self.check_return_value(file_path, value, source, violations);
                     }
                 }
+                Statement::If(if_stmt) => {
+                    self.check_statements(file_path, &if_stmt.then_body, source, violations);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.check_statements(file_path, else_body, source, violations);
+                    }
+                }
+                Statement::Compound(compound) => {
+                    self.check_statements(file_path, &compound.statements, source, violations);
+                }
+                _ => {}
             }
         }
+    }
 
-        // Recursively check children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_returns_in_body(ast_context, child, ctx, violations);
+    fn check_return_value(
+        &self,
+        file_path: &std::path::Path,
+        expr: &Expression,
+        _source: &[u8],
+        violations: &mut Vec<Violation>,
+    ) {
+        match expr {
+            Expression::Identifier(id) if id.name == "TRUE" || id.name == "FALSE" => {
+                let replacement = if id.name == "TRUE" {
+                    "G_SOURCE_CONTINUE"
+                } else {
+                    "G_SOURCE_REMOVE"
+                };
+
+                let fix = Fix::new(
+                    id.location.start_byte,
+                    id.location.end_byte,
+                    replacement.to_string(),
+                );
+
+                violations.push(self.violation_with_fix(
+                    file_path,
+                    id.location.line,
+                    id.location.column,
+                    format!(
+                        "Use {} instead of {} in GSourceFunc callback",
+                        replacement, id.name
+                    ),
+                    fix,
+                ));
+            }
+            Expression::Boolean(b) => {
+                let (old_name, replacement) = if b.value {
+                    ("TRUE", "G_SOURCE_CONTINUE")
+                } else {
+                    ("FALSE", "G_SOURCE_REMOVE")
+                };
+
+                let fix = Fix::new(
+                    b.location.start_byte,
+                    b.location.end_byte,
+                    replacement.to_string(),
+                );
+
+                violations.push(self.violation_with_fix(
+                    file_path,
+                    b.location.line,
+                    b.location.column,
+                    format!(
+                        "Use {} instead of {} in GSourceFunc callback",
+                        replacement, old_name
+                    ),
+                    fix,
+                ));
+            }
+            _ => {}
         }
     }
 }

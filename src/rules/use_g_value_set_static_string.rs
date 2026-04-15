@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::Expression;
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGValueSetStaticString;
@@ -34,16 +34,8 @@ impl Rule for UseGValueSetStaticString {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
+                for call in func.find_calls(&["g_value_set_string"]) {
+                    self.check_call(path, call, &file.source, violations);
                 }
             }
         }
@@ -51,63 +43,54 @@ impl Rule for UseGValueSetStaticString {
 }
 
 impl UseGValueSetStaticString {
-    fn check_node(
+    fn check_call(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        file_path: &std::path::Path,
+        call: &gobject_ast::CallExpression,
+        source: &[u8],
         violations: &mut Vec<Violation>,
     ) {
-        // Look for g_value_set_string calls
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let func_name = ast_context.get_node_text(function, ctx.source);
-            if func_name == "g_value_set_string" {
-                // Check if the second argument is a string literal
-                if let Some(args) = node.child_by_field_name("arguments") {
-                    let arguments = self.collect_arguments(args);
-
-                    if arguments.len() >= 2 {
-                        let second_arg = arguments[1];
-
-                        // Check if it's a string literal
-                        if second_arg.kind() == "string_literal" {
-                            let fix = Fix::from_node(function, ctx, "g_value_set_static_string");
-
-                            let string_value = ast_context.get_node_text(second_arg, ctx.source);
-
-                            violations.push(self.violation_with_fix(
-                                ctx.file_path,
-                                ctx.base_line + node.start_position().row,
-                                node.start_position().column + 1,
-                                format!(
-                                    "Use g_value_set_static_string instead of g_value_set_string for string literal {}",
-                                    string_value
-                                ),
-                                fix,
-                            ));
-                        }
-                    }
-                }
-            }
+        // Need at least 2 arguments
+        if call.arguments.len() < 2 {
+            return;
         }
 
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, ctx, violations);
+        // Check if second argument is a string literal
+        let gobject_ast::Argument::Expression(second_expr) = &call.arguments[1];
+        if !second_expr.is_string_literal() {
+            return;
         }
-    }
 
-    fn collect_arguments<'a>(&self, args_node: Node<'a>) -> Vec<Node<'a>> {
-        let mut cursor = args_node.walk();
-        let mut arguments = Vec::new();
-        for child in args_node.children(&mut cursor) {
-            if child.kind() != "(" && child.kind() != ")" && child.kind() != "," {
-                arguments.push(child);
-            }
-        }
-        arguments
+        // Get the string literal for the message
+        let Expression::StringLiteral(string_lit) = second_expr.as_ref() else {
+            unreachable!();
+        };
+
+        // Build the fix - replace just the function name
+        let replacement = format!(
+            "g_value_set_static_string ({})",
+            call.arguments
+                .iter()
+                .filter_map(|arg| arg.to_source_string(source))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+
+        let fix = Fix::new(
+            call.location.start_byte,
+            call.location.end_byte,
+            replacement,
+        );
+
+        violations.push(self.violation_with_fix(
+            file_path,
+            call.location.line,
+            call.location.column,
+            format!(
+                "Use g_value_set_static_string instead of g_value_set_string for string literal {}",
+                string_lit.value
+            ),
+            fix,
+        ));
     }
 }

@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::Expression;
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGStringFreeAndSteal;
@@ -34,16 +34,8 @@ impl Rule for UseGStringFreeAndSteal {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
+                for call in func.find_calls(&["g_string_free"]) {
+                    self.check_call(path, call, &file.source, violations);
                 }
             }
         }
@@ -51,45 +43,55 @@ impl Rule for UseGStringFreeAndSteal {
 }
 
 impl UseGStringFreeAndSteal {
-    fn check_node(
+    fn check_call(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        file_path: &std::path::Path,
+        call: &gobject_ast::CallExpression,
+        source: &[u8],
         violations: &mut Vec<Violation>,
     ) {
-        if let Some(call) =
-            ast_context.find_function_call_by_name(node, &["g_string_free"], ctx.source)
-            && let Some(args) = call.child_by_field_name("arguments")
-        {
-            let mut cursor = args.walk();
-            let mut children = args
-                .children(&mut cursor)
-                .filter(|c| !matches!(c.kind(), "(" | ")" | ","));
-            if let (Some(first), Some(second)) = (children.next(), children.next()) {
-                let second = ast_context.get_node_text(second, ctx.source);
-
-                if matches!(second, "FALSE" | "false" | "0") {
-                    let first_text = ast_context.get_node_text(first, ctx.source);
-
-                    // Build replacement with proper spacing
-                    let replacement = format!("g_string_free_and_steal ({})", first_text);
-
-                    let fix = Fix::from_node(call, ctx, &replacement);
-
-                    let position = call.start_position();
-                    violations.push(self.violation_with_fix(
-                        ctx.file_path,
-                        ctx.base_line + position.row,
-                        position.column + 1,
-                        format!(
-                            "Use {} instead of g_string_free({}, {}) for readability",
-                            replacement, first_text, second
-                        ),
-                        fix,
-                    ));
-                }
-            }
+        if call.arguments.len() != 2 {
+            return;
         }
+
+        // Check if second argument is FALSE/false/0
+        let gobject_ast::Argument::Expression(second_expr) = &call.arguments[1];
+        let is_false = match second_expr.as_ref() {
+            Expression::Boolean(b) => !b.value,
+            Expression::NumberLiteral(n) => n.value == "0",
+            _ => false,
+        };
+
+        if !is_false {
+            return;
+        }
+
+        // Get argument text for the fix
+        let Some(first_text) = call.get_arg_text(0, source) else {
+            return;
+        };
+        let Some(second_text) = call.get_arg_text(1, source) else {
+            return;
+        };
+
+        // Build replacement
+        let replacement = format!("g_string_free_and_steal ({})", first_text);
+
+        let fix = Fix::new(
+            call.location.start_byte,
+            call.location.end_byte,
+            replacement.clone(),
+        );
+
+        violations.push(self.violation_with_fix(
+            file_path,
+            call.location.line,
+            call.location.column,
+            format!(
+                "Use {} instead of g_string_free({}, {}) for readability",
+                replacement, first_text, second_text
+            ),
+            fix,
+        ));
     }
 }

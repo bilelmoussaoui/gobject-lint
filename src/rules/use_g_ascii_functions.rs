@@ -1,6 +1,4 @@
-use tree_sitter::Node;
-
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGAsciiFunctions;
@@ -55,51 +53,38 @@ impl Rule for UseGAsciiFunctions {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
+                for call in func.find_calls(&[
+                    "tolower", "toupper", "isdigit", "isalpha", "isalnum", "isspace", "isupper",
+                    "islower", "isxdigit", "ispunct", "isprint", "isgraph", "iscntrl",
+                ]) {
+                    if let Some(replacement) = g_ascii_replacement(&call.function) {
+                        let fix = Fix::new(
+                            call.location.start_byte,
+                            call.location.end_byte,
+                            format!(
+                                "{} ({})",
+                                replacement,
+                                call.arguments
+                                    .iter()
+                                    .filter_map(|arg| arg.to_source_string(&file.source))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        );
+
+                        violations.push(self.violation_with_fix(
+                            path,
+                            call.location.line,
+                            call.location.column,
+                            format!(
+                                "Use {}() instead of {}() — C ctype functions are locale-dependent",
+                                replacement, call.function
+                            ),
+                            fix,
+                        ));
+                    }
                 }
             }
-        }
-    }
-}
-
-impl UseGAsciiFunctions {
-    fn check_node(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
-        violations: &mut Vec<Violation>,
-    ) {
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let func_name = ast_context.get_node_text(function, ctx.source);
-            if let Some(replacement) = g_ascii_replacement(func_name) {
-                let fix = Fix::from_node(function, ctx, replacement);
-                violations.push(self.violation_with_fix(
-                    ctx.file_path,
-                    ctx.base_line + node.start_position().row,
-                    node.start_position().column + 1,
-                    format!(
-                        "Use {replacement}() instead of {func_name}() — C ctype functions are locale-dependent"
-                    ),
-                    fix,
-                ));
-            }
-        }
-
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, ctx, violations);
         }
     }
 }

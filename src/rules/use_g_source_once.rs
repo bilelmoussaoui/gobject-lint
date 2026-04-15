@@ -1,4 +1,4 @@
-use tree_sitter::Node;
+use gobject_ast::{Expression, Statement};
 
 use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
@@ -34,19 +34,53 @@ impl Rule for UseGSourceOnce {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let root = tree.root_node();
+                // Find g_idle_add and g_timeout_add calls
+                for call in func.find_calls(&["g_idle_add", "g_timeout_add"]) {
+                    // Get the callback name from the first argument
+                    if let Some(callback_name) = self.extract_callback_name(call, &file.source) {
+                        // Only proceed if callback is NOT used elsewhere
+                        if !self.is_callback_used_elsewhere(ast_context, &callback_name, path) {
+                            // Find the callback function definition and check if all returns are
+                            // FALSE/G_SOURCE_REMOVE
+                            if let Some(callback_fixes) =
+                                self.get_callback_fixes(ast_context, &callback_name, path)
+                            {
+                                let replacement = if call.function == "g_idle_add" {
+                                    "g_idle_add_once"
+                                } else {
+                                    "g_timeout_add_once"
+                                };
 
-                    if let Some(body) = ast_context.find_body(root) {
-                        let ctx = super::CheckContext {
-                            source: func_source,
-                            file_path: path,
-                            base_line: func.line,
-                            base_byte: func.start_byte.unwrap_or(0),
-                        };
-                        self.check_source_add_calls(ast_context, body, &ctx, violations);
+                                // Fix 1: Replace g_idle_add → g_idle_add_once
+                                let mut fixes = vec![Fix::new(
+                                    call.location.start_byte,
+                                    call.location.end_byte,
+                                    format!(
+                                        "{} ({})",
+                                        replacement,
+                                        call.arguments
+                                            .iter()
+                                            .filter_map(|arg| arg.to_source_string(&file.source))
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    ),
+                                )];
+
+                                // Add callback fixes (return type + return statements)
+                                fixes.extend(callback_fixes);
+
+                                violations.push(self.violation_with_fixes(
+                                    path,
+                                    call.location.line,
+                                    call.location.column,
+                                    format!(
+                                        "Callback '{}' always returns G_SOURCE_REMOVE. Use {} instead of {}",
+                                        callback_name, replacement, call.function
+                                    ),
+                                    fixes,
+                                ));
+                            }
+                        }
                     }
                 }
             }
@@ -55,73 +89,22 @@ impl Rule for UseGSourceOnce {
 }
 
 impl UseGSourceOnce {
-    fn check_source_add_calls(
+    fn extract_callback_name(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &super::CheckContext,
-        violations: &mut Vec<Violation>,
-    ) {
-        // Look for g_idle_add or g_timeout_add calls
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let func_text = ast_context.get_node_text(function, ctx.source);
-
-            if func_text == "g_idle_add" || func_text == "g_timeout_add" {
-                // Get the first argument (the callback function)
-                if let Some(arguments) = node.child_by_field_name("arguments")
-                    && let Some(first_arg) = self.get_first_argument(arguments)
-                {
-                    let callback_name = ast_context.get_node_text(first_arg, ctx.source);
-
-                    // Only proceed if callback is NOT used elsewhere
-                    if !self.is_callback_used_elsewhere(ast_context, callback_name, ctx.file_path) {
-                        // Find the callback function definition (only in the same file)
-                        if let Some(mut callback_fixes) =
-                            self.get_callback_fixes(ast_context, callback_name, ctx.file_path)
-                        {
-                            let position = node.start_position();
-                            let replacement = if func_text == "g_idle_add" {
-                                "g_idle_add_once"
-                            } else {
-                                "g_timeout_add_once"
-                            };
-
-                            // Fix 1: Replace g_idle_add → g_idle_add_once
-                            let mut fixes = vec![Fix::from_node(function, ctx, replacement)];
-
-                            // Add callback fixes (return type + return statements)
-                            fixes.append(&mut callback_fixes);
-
-                            violations.push(self.violation_with_fixes(
-                                ctx.file_path,
-                                ctx.base_line + position.row,
-                                position.column + 1,
-                                format!(
-                                    "Callback '{}' always returns G_SOURCE_REMOVE. Use {} instead of {}",
-                                    callback_name, replacement, func_text
-                                ),
-                                fixes,
-                            ));
-                        }
-                    }
-                }
-            }
+        call: &gobject_ast::CallExpression,
+        _source: &[u8],
+    ) -> Option<String> {
+        // Get the first argument (the callback function)
+        if call.arguments.is_empty() {
+            return None;
         }
 
-        // Recursively check children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_source_add_calls(ast_context, child, ctx, violations);
+        let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
+        if let Expression::Identifier(id) = arg_expr.as_ref() {
+            Some(id.name.clone())
+        } else {
+            None
         }
-    }
-
-    fn get_first_argument<'a>(&self, arguments_node: Node<'a>) -> Option<Node<'a>> {
-        let mut cursor = arguments_node.walk();
-        arguments_node
-            .children(&mut cursor)
-            .find(|&child| child.kind() != "(" && child.kind() != ")" && child.kind() != ",")
     }
 
     fn get_callback_fixes(
@@ -146,56 +129,37 @@ impl UseGSourceOnce {
                 }
 
                 if func.is_definition {
-                    let Some(func_source) = ast_context.get_function_source(path, func) else {
-                        continue;
-                    };
-                    let Some(tree) = ast_context.parse_c_source(func_source) else {
-                        continue;
-                    };
-                    let root = tree.root_node();
-                    let func_start_byte = func.start_byte.unwrap_or(0);
-                    // Check if all returns are FALSE/G_SOURCE_REMOVE
-                    if let Some(body) = ast_context.find_body(root) {
-                        let returns = self.collect_all_returns(body, func_source, ast_context);
+                    // Check if all returns are FALSE/G_SOURCE_REMOVE/0
+                    let return_values = self.collect_all_return_values(&func.body_statements);
 
-                        // Must have at least one return statement
-                        if returns.is_empty() {
-                            return None;
-                        }
-
-                        // All returns must be FALSE or G_SOURCE_REMOVE
-                        if !returns
-                            .iter()
-                            .all(|r| *r == "FALSE" || *r == "G_SOURCE_REMOVE" || *r == "0")
-                        {
-                            return None;
-                        }
-
-                        // Fix: Change return type from gboolean to void in definition
-                        if let Some(return_type_node) =
-                            self.find_return_type(root, func_source, ast_context)
-                        {
-                            fixes.push(Fix::new(
-                                func_start_byte + return_type_node.start_byte(),
-                                func_start_byte + return_type_node.end_byte(),
-                                "void",
-                            ));
-                        }
-
-                        // Fix: Remove all return statements (entire lines)
-                        let return_statements = self.collect_all_return_statements(body);
-                        for return_stmt in return_statements {
-                            let (line_start, line_end) =
-                                self.find_line_bounds(return_stmt, func_source);
-                            fixes.push(Fix::new(
-                                func_start_byte + line_start,
-                                func_start_byte + line_end,
-                                "",
-                            ));
-                        }
-
-                        found_definition = true;
+                    // Must have at least one return statement
+                    if return_values.is_empty() {
+                        return None;
                     }
+
+                    // All returns must be FALSE or G_SOURCE_REMOVE or 0
+                    if !return_values
+                        .iter()
+                        .all(|r| r == "FALSE" || r == "G_SOURCE_REMOVE" || r == "0" || r == "false")
+                    {
+                        return None;
+                    }
+
+                    // Fix: Change return type from gboolean to void in definition
+                    // We need to find "gboolean" in the function and replace it
+                    if let Some(fix) = self.fix_definition_return_type(path, func, ast_context) {
+                        fixes.push(fix);
+                    }
+
+                    // Fix: Remove all return statements (entire lines)
+                    let return_locations = self.collect_all_return_locations(&func.body_statements);
+                    for location in return_locations {
+                        let (line_start, line_end) =
+                            self.find_line_bounds(location.start_byte, &file.source);
+                        fixes.push(Fix::new(line_start, line_end, String::new()));
+                    }
+
+                    found_definition = true;
                 } else {
                     // This is a declaration - fix by searching the line in the file
                     if let Some(fix) = self.fix_declaration_return_type(path, func, ast_context) {
@@ -212,93 +176,101 @@ impl UseGSourceOnce {
         }
     }
 
-    fn collect_all_returns<'a>(
-        &self,
-        node: Node,
-        source: &'a [u8],
-        ast_context: &AstContext,
-    ) -> Vec<&'a str> {
+    fn collect_all_return_values(&self, statements: &[Statement]) -> Vec<String> {
         let mut returns = Vec::new();
 
-        if node.kind() == "return_statement" {
-            // Get the return value
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() != "return" && child.kind() != ";" {
-                    let return_value = ast_context.get_node_text(child, source);
-                    returns.push(return_value.trim());
+        for stmt in statements {
+            match stmt {
+                Statement::Return(ret_stmt) => {
+                    if let Some(value) = &ret_stmt.value {
+                        // Get the return value as a string
+                        if let Some(val_str) = self.expr_to_simple_string(value) {
+                            returns.push(val_str);
+                        }
+                    }
                 }
+                Statement::If(if_stmt) => {
+                    returns.extend(self.collect_all_return_values(&if_stmt.then_body));
+                    if let Some(else_body) = &if_stmt.else_body {
+                        returns.extend(self.collect_all_return_values(else_body));
+                    }
+                }
+                Statement::Compound(compound) => {
+                    returns.extend(self.collect_all_return_values(&compound.statements));
+                }
+                _ => {}
             }
-        }
-
-        // Recursively check children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            returns.extend(self.collect_all_returns(child, source, ast_context));
         }
 
         returns
     }
 
-    fn collect_all_return_statements<'a>(&self, node: Node<'a>) -> Vec<Node<'a>> {
-        let mut statements = Vec::new();
+    fn collect_all_return_locations(
+        &self,
+        statements: &[Statement],
+    ) -> Vec<gobject_ast::SourceLocation> {
+        let mut locations = Vec::new();
 
-        if node.kind() == "return_statement" {
-            statements.push(node);
+        for stmt in statements {
+            match stmt {
+                Statement::Return(ret_stmt) => {
+                    locations.push(ret_stmt.location.clone());
+                }
+                Statement::If(if_stmt) => {
+                    locations.extend(self.collect_all_return_locations(&if_stmt.then_body));
+                    if let Some(else_body) = &if_stmt.else_body {
+                        locations.extend(self.collect_all_return_locations(else_body));
+                    }
+                }
+                Statement::Compound(compound) => {
+                    locations.extend(self.collect_all_return_locations(&compound.statements));
+                }
+                _ => {}
+            }
         }
 
-        // Recursively check children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            statements.extend(self.collect_all_return_statements(child));
-        }
-
-        statements
+        locations
     }
 
-    fn find_return_type<'a>(
-        &self,
-        node: Node<'a>,
-        source: &[u8],
-        ast_context: &AstContext,
-    ) -> Option<Node<'a>> {
-        // Root might be a translation_unit, find function_definition first
-        let func_def = if node.kind() == "function_definition" {
-            node
-        } else {
-            let mut cursor = node.walk();
-            node.children(&mut cursor)
-                .find(|c| c.kind() == "function_definition")?
-        };
-
-        // Now recursively search for primitive_type or type_identifier with "gboolean"
-        self.find_gboolean_type(func_def, source, ast_context)
+    fn expr_to_simple_string(&self, expr: &Expression) -> Option<String> {
+        match expr {
+            Expression::Identifier(id) => Some(id.name.clone()),
+            Expression::NumberLiteral(n) => Some(n.value.clone()),
+            Expression::Boolean(b) => Some(if b.value {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }),
+            _ => None,
+        }
     }
 
-    fn find_gboolean_type<'a>(
+    fn fix_definition_return_type(
         &self,
-        node: Node<'a>,
-        source: &[u8],
+        file_path: &std::path::Path,
+        func: &gobject_ast::FunctionInfo,
         ast_context: &AstContext,
-    ) -> Option<Node<'a>> {
-        // Check if this node itself is a gboolean type
-        if node.kind() == "primitive_type" || node.kind() == "type_identifier" {
-            let text = ast_context.get_node_text(node, source);
-            if text == "gboolean" {
-                return Some(node);
-            }
-        }
+    ) -> Option<Fix> {
+        // Get the file source
+        let file = ast_context.project.files.get(file_path)?;
+        let source = &file.source;
 
-        // Recursively search children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            // Don't search inside the function body
-            if child.kind() == "compound_statement" {
-                continue;
-            }
-            if let Some(result) = self.find_gboolean_type(child, source, ast_context) {
-                return Some(result);
-            }
+        // Find "gboolean" in the function signature
+        let func_start = func.start_byte?;
+        let func_end = func.end_byte?;
+
+        // Search for "gboolean" before the function body
+        let func_text = std::str::from_utf8(&source[func_start..func_end]).ok()?;
+
+        // Find the position of the function body (first '{')
+        let body_start = func_text.find('{')?;
+        let signature = &func_text[..body_start];
+
+        if let Some(offset) = signature.find("gboolean") {
+            let gboolean_start = func_start + offset;
+            let gboolean_end = gboolean_start + "gboolean".len();
+
+            return Some(Fix::new(gboolean_start, gboolean_end, "void".to_string()));
         }
 
         None
@@ -369,80 +341,112 @@ impl UseGSourceOnce {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let root = tree.root_node();
-                    if let Some(body) = ast_context.find_body(root)
-                        && self.has_non_source_add_usage(
-                            ast_context,
-                            body,
-                            callback_name,
-                            func_source,
-                        )
+                // Walk through all statements looking for uses of the callback name
+                if self.has_non_source_add_usage(&func.body_statements, callback_name) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn has_non_source_add_usage(&self, statements: &[Statement], callback_name: &str) -> bool {
+        for stmt in statements {
+            if self.statement_uses_identifier(stmt, callback_name) {
+                // Check if this is inside a g_idle_add or g_timeout_add call
+                // For now, we'll be conservative and just check if it's used in any expression
+                // that's not a direct g_idle_add/g_timeout_add call
+                if !self.is_source_add_statement(stmt, callback_name) {
+                    return true;
+                }
+            }
+
+            // Recurse into nested statements
+            match stmt {
+                Statement::If(if_stmt) => {
+                    if self.has_non_source_add_usage(&if_stmt.then_body, callback_name) {
+                        return true;
+                    }
+                    if let Some(else_body) = &if_stmt.else_body
+                        && self.has_non_source_add_usage(else_body, callback_name)
                     {
                         return true;
                     }
                 }
+                Statement::Compound(compound) => {
+                    if self.has_non_source_add_usage(&compound.statements, callback_name) {
+                        return true;
+                    }
+                }
+                _ => {}
             }
         }
 
         false
     }
 
-    fn has_non_source_add_usage(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        callback_name: &str,
-        source: &[u8],
-    ) -> bool {
-        // Check if this is an identifier matching the callback name
-        if node.kind() == "identifier" {
-            let text = ast_context.get_node_text(node, source);
-            if text == callback_name {
-                // Check if this usage is inside a g_idle_add or g_timeout_add call
-                if !self.is_inside_source_add_call(node, source, ast_context) {
-                    return true;
+    fn statement_uses_identifier(&self, stmt: &Statement, identifier: &str) -> bool {
+        match stmt {
+            Statement::Expression(expr_stmt) => {
+                self.expr_uses_identifier(&expr_stmt.expr, identifier)
+            }
+            Statement::Return(ret_stmt) => {
+                if let Some(value) = &ret_stmt.value {
+                    self.expr_uses_identifier(value, identifier)
+                } else {
+                    false
                 }
             }
-        }
-
-        // Recursively check children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if self.has_non_source_add_usage(ast_context, child, callback_name, source) {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    fn is_inside_source_add_call(
-        &self,
-        node: Node,
-        source: &[u8],
-        ast_context: &AstContext,
-    ) -> bool {
-        let mut current = node;
-        while let Some(parent) = current.parent() {
-            if parent.kind() == "call_expression"
-                && let Some(function) = parent.child_by_field_name("function")
-            {
-                let func_text = ast_context.get_node_text(function, source);
-                if func_text == "g_idle_add" || func_text == "g_timeout_add" {
-                    return true;
+            Statement::Declaration(decl) => {
+                if let Some(init) = &decl.initializer {
+                    self.expr_uses_identifier(init, identifier)
+                } else {
+                    false
                 }
             }
-            current = parent;
+            _ => false,
+        }
+    }
+
+    fn expr_uses_identifier(&self, expr: &Expression, identifier: &str) -> bool {
+        match expr {
+            Expression::Identifier(id) => id.name == identifier,
+            Expression::Call(call) => {
+                // Check if callback is used in arguments
+                call.arguments.iter().any(|arg| {
+                    let gobject_ast::Argument::Expression(e) = arg;
+                    self.expr_uses_identifier(e, identifier)
+                })
+            }
+            Expression::Assignment(assign) => self.expr_uses_identifier(&assign.rhs, identifier),
+            Expression::Binary(bin) => {
+                self.expr_uses_identifier(&bin.left, identifier)
+                    || self.expr_uses_identifier(&bin.right, identifier)
+            }
+            Expression::Unary(unary) => self.expr_uses_identifier(&unary.operand, identifier),
+            _ => false,
+        }
+    }
+
+    fn is_source_add_statement(&self, stmt: &Statement, callback_name: &str) -> bool {
+        // Check if this statement is a g_idle_add/g_timeout_add call with our callback
+        if let Statement::Expression(expr_stmt) = stmt
+            && let Expression::Call(call) = &expr_stmt.expr
+            && (call.function == "g_idle_add" || call.function == "g_timeout_add")
+            && !call.arguments.is_empty()
+        {
+            let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
+            if let Expression::Identifier(id) = arg_expr.as_ref() {
+                return id.name == callback_name;
+            }
         }
         false
     }
 
-    fn find_line_bounds(&self, node: Node, source: &[u8]) -> (usize, usize) {
+    fn find_line_bounds(&self, start_byte: usize, source: &[u8]) -> (usize, usize) {
         // Find the start of the line
-        let mut line_start = node.start_byte();
+        let mut line_start = start_byte;
         while line_start > 0 && source[line_start - 1] != b'\n' {
             line_start -= 1;
         }
@@ -462,7 +466,7 @@ impl UseGSourceOnce {
         }
 
         // Find the end of the line (including newline)
-        let mut line_end = node.end_byte();
+        let mut line_end = start_byte;
         while line_end < source.len() && source[line_end] != b'\n' {
             line_end += 1;
         }

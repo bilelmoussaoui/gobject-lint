@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::{Expression, IfStatement, Statement};
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseClearFunctions;
@@ -34,165 +34,139 @@ impl Rule for UseClearFunctions {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
-                }
+                self.check_statements(path, &func.body_statements, &file.source, violations);
             }
         }
     }
 }
 
 impl UseClearFunctions {
-    fn is_manual_clear_pattern<'a>(
-        &'a self,
-        ast_context: &AstContext,
-        node: Node<'a>,
-        source: &'a [u8],
-    ) -> Option<(&'a str, &'a str, &'a str, Node<'a>)> {
-        // Look for pattern:
-        // if (obj->field) {
-        //   g_object_unref (obj->field);
-        //   obj->field = NULL;
-        // }
+    fn check_statements(
+        &self,
+        file_path: &std::path::Path,
+        statements: &[Statement],
+        source: &[u8],
+        violations: &mut Vec<Violation>,
+    ) {
+        for stmt in statements {
+            if let Statement::If(if_stmt) = stmt {
+                self.check_if_statement(file_path, if_stmt, source, violations);
 
-        if node.kind() != "if_statement" {
-            return None;
+                // Recurse into if/else bodies
+                self.check_statements(file_path, &if_stmt.then_body, source, violations);
+                if let Some(else_body) = &if_stmt.else_body {
+                    self.check_statements(file_path, else_body, source, violations);
+                }
+            } else if let Statement::Compound(compound) = stmt {
+                self.check_statements(file_path, &compound.statements, source, violations);
+            }
         }
+    }
 
-        // Get the condition
-        let condition = node.child_by_field_name("condition")?;
-
+    fn check_if_statement(
+        &self,
+        file_path: &std::path::Path,
+        if_stmt: &IfStatement,
+        source: &[u8],
+        violations: &mut Vec<Violation>,
+    ) {
         // Check if condition has && or || operators - if so, skip
         // g_clear_pointer only checks NULL, not other conditions
-        if self.has_logical_operators(ast_context, condition, source) {
-            return None;
+        if self.has_logical_operators(&if_stmt.condition) {
+            return;
         }
 
-        let checked_var = self.find_variable_in_condition(ast_context, condition, source)?;
+        // Get the variable being checked in the condition
+        let Some(checked_var) = self.find_variable_in_condition(&if_stmt.condition, source) else {
+            return;
+        };
 
-        // Get the consequence (the if body)
-        let consequence = node.child_by_field_name("consequence")?;
-
-        // Count ALL statements in the body (including declarations, loops, etc.)
-        let statement_count = self.count_all_statements(consequence);
-
-        // Look for unref/free call and NULL assignment as DIRECT children only
-        let (has_unref_call, unref_function) =
-            self.has_unref_call_direct(ast_context, consequence, checked_var, source);
-        let has_null_assignment =
-            self.has_null_assignment_direct(ast_context, consequence, checked_var, source);
-
-        // Only suggest if there are EXACTLY 2 statements: the free and the NULL
-        // assignment
-        if statement_count == 2 && has_unref_call && has_null_assignment {
-            let suggested_function = self.suggest_clear_function(unref_function);
-            return Some((checked_var, suggested_function, unref_function, node));
+        // Check if body has exactly 2 statements
+        if if_stmt.then_body.len() != 2 {
+            return;
         }
 
-        None
+        // Look for unref/free call and NULL assignment
+        let Some((unref_function, _unref_stmt)) =
+            self.find_unref_call(&if_stmt.then_body, &checked_var, source)
+        else {
+            return;
+        };
+
+        if !self.has_null_assignment(&if_stmt.then_body, &checked_var) {
+            return;
+        }
+
+        // Build the replacement
+        let suggested_function = self.suggest_clear_function(&unref_function);
+        let replacement = if suggested_function == "g_clear_object" {
+            format!("g_clear_object (&{});", checked_var)
+        } else {
+            format!("g_clear_pointer (&{}, {});", checked_var, unref_function)
+        };
+
+        let fix = Fix::new(
+            if_stmt.location.start_byte,
+            if_stmt.location.end_byte,
+            replacement.clone(),
+        );
+
+        violations.push(self.violation_with_fix(
+            file_path,
+            if_stmt.location.line,
+            if_stmt.location.column,
+            format!(
+                "Use {} instead of manual NULL check, unref, and assignment",
+                replacement
+            ),
+            fix,
+        ));
     }
 
-    fn find_variable_in_condition<'a>(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-    ) -> Option<&'a str> {
-        // For field_expression (obj->field), return the full expression
-        if node.kind() == "field_expression" {
-            return Some(ast_context.get_node_text(node, source));
+    fn find_variable_in_condition(&self, expr: &Expression, source: &[u8]) -> Option<String> {
+        // Try direct variable extraction first
+        if let Some(var) = expr.extract_variable_name() {
+            return Some(var);
         }
 
-        // For identifier
-        if node.kind() == "identifier" {
-            return Some(ast_context.get_node_text(node, source));
-        }
-
-        // For binary expressions (field != NULL), find the field
-        if node.kind() == "binary_expression" {
-            // Try both left and right sides
-            if let Some(left) = node.child_by_field_name("left")
-                && let Some(var) = self.find_variable_in_condition(ast_context, left, source)
-            {
-                return Some(var);
-            }
-            if let Some(right) = node.child_by_field_name("right")
-                && let Some(var) = self.find_variable_in_condition(ast_context, right, source)
-            {
-                return Some(var);
-            }
-        }
-
-        // For parenthesized expression, check inside
-        if node.kind() == "parenthesized_expression" {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if let Some(var) = self.find_variable_in_condition(ast_context, child, source) {
+        match expr {
+            Expression::Binary(bin) => {
+                // For binary expressions (field != NULL), try left side first
+                if let Some(var) = self.find_variable_in_condition(&bin.left, source) {
                     return Some(var);
                 }
+                // Then try right side
+                self.find_variable_in_condition(&bin.right, source)
             }
+            Expression::Unary(unary) => {
+                // For unary expressions like (!ptr), check the operand
+                self.find_variable_in_condition(&unary.operand, source)
+            }
+            // For any other expression type, try to get its source text
+            _ => expr.to_source_string(source),
         }
-
-        None
     }
 
-    fn has_logical_operators(&self, ast_context: &AstContext, node: Node, source: &[u8]) -> bool {
-        // Check if the condition contains && or || operators
-        if node.kind() == "binary_expression"
-            && let Some(operator) = node.child_by_field_name("operator")
-        {
-            let op_text = ast_context.get_node_text(operator, source);
-            if op_text == "&&" || op_text == "||" {
-                return true;
-            }
-        }
-
-        // Recursively check children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if self.has_logical_operators(ast_context, child, source) {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    fn count_all_statements(&self, body: Node) -> usize {
-        if body.kind() == "compound_statement" {
-            let mut count = 0;
-            let mut cursor = body.walk();
-            for child in body.children(&mut cursor) {
-                // Count all statement types: expression_statement, declaration,
-                // for_statement, while_statement, if_statement, etc.
-                if child.kind().ends_with("_statement") || child.kind() == "declaration" {
-                    count += 1;
+    fn has_logical_operators(&self, expr: &Expression) -> bool {
+        match expr {
+            Expression::Binary(bin) => {
+                if bin.operator == "&&" || bin.operator == "||" {
+                    return true;
                 }
+                // Recursively check operands
+                self.has_logical_operators(&bin.left) || self.has_logical_operators(&bin.right)
             }
-            count
-        } else {
-            // Single statement without braces
-            1
+            Expression::Unary(unary) => self.has_logical_operators(&unary.operand),
+            _ => false,
         }
     }
 
-    fn has_unref_call_direct<'a>(
+    fn find_unref_call<'a>(
         &self,
-        ast_context: &AstContext,
-        body: Node,
+        statements: &'a [Statement],
         var_name: &str,
-        source: &'a [u8],
-    ) -> (bool, &'a str) {
-        // Look for g_object_unref, g_free, etc. in DIRECT children only, not
-        // recursively
+        source: &[u8],
+    ) -> Option<(String, &'a Statement)> {
         let unref_functions = [
             "g_object_unref",
             "g_free",
@@ -205,23 +179,16 @@ impl UseClearFunctions {
             "g_variant_unref",
         ];
 
-        // Only check direct children
-        if body.kind() == "compound_statement" {
-            let mut cursor = body.walk();
-            for child in body.children(&mut cursor) {
-                if child.kind() == "expression_statement"
-                    && let Some(call) = ast_context.find_call_expression(child)
-                    && let Some(function) = call.child_by_field_name("function")
-                {
-                    let func_name = ast_context.get_node_text(function, source);
-
-                    for &expected_func in &unref_functions {
-                        if func_name == expected_func
-                            && let Some(arguments) = call.child_by_field_name("arguments")
-                        {
-                            let args_text = ast_context.get_node_text(arguments, source);
-                            if args_text.contains(var_name) {
-                                return (true, func_name);
+        for stmt in statements {
+            if let Some(call) = stmt.extract_call() {
+                for &func_name in &unref_functions {
+                    if call.function == func_name {
+                        // Check if any argument contains the variable
+                        for arg in &call.arguments {
+                            if let Some(arg_text) = arg.to_source_string(source)
+                                && arg_text.contains(var_name)
+                            {
+                                return Some((func_name.to_string(), stmt));
                             }
                         }
                     }
@@ -229,47 +196,17 @@ impl UseClearFunctions {
             }
         }
 
-        (false, "")
+        None
     }
 
-    fn has_null_assignment_direct(
-        &self,
-        ast_context: &AstContext,
-        body: Node,
-        var_name: &str,
-        source: &[u8],
-    ) -> bool {
-        // Look for: var_name = NULL; in DIRECT children only
-        if body.kind() == "compound_statement" {
-            let mut cursor = body.walk();
-            for child in body.children(&mut cursor) {
-                if child.kind() == "expression_statement" {
-                    // Look for assignment_expression directly in this child
-                    let mut child_cursor = child.walk();
-                    for grandchild in child.children(&mut child_cursor) {
-                        if grandchild.kind() == "assignment_expression"
-                            && let Some(left) = grandchild.child_by_field_name("left")
-                        {
-                            let left_text = ast_context.get_node_text(left, source);
-                            if left_text == var_name
-                                && let Some(right) = grandchild.child_by_field_name("right")
-                            {
-                                let right_full = ast_context.get_node_text(right, source);
-                                let right_text = right_full.trim();
-                                if right_text == "NULL"
-                                    || right_text == "0"
-                                    || right_text == "((void*)0)"
-                                {
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        false
+    fn has_null_assignment(&self, statements: &[Statement], var_name: &str) -> bool {
+        statements.iter().any(|stmt| {
+            stmt.is_assignment_to(var_name, |expr| {
+                expr.is_null()
+                    || expr.is_zero()
+                    || matches!(expr, Expression::Identifier(id) if id.name == "NULL")
+            })
+        })
     }
 
     fn suggest_clear_function(&self, unref_function: &str) -> &str {
@@ -282,46 +219,6 @@ impl UseClearFunctions {
             "g_bytes_unref" => "g_clear_pointer",
             "g_variant_unref" => "g_clear_pointer",
             _ => "g_clear_pointer",
-        }
-    }
-
-    fn check_node(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
-        violations: &mut Vec<Violation>,
-    ) {
-        if let Some((var_name, suggested_function, unref_function, if_node)) =
-            self.is_manual_clear_pattern(ast_context, node, ctx.source)
-        {
-            let position = if_node.start_position();
-
-            // Build the correct replacement based on the function type
-            let replacement = if suggested_function == "g_clear_object" {
-                format!("g_clear_object (&{});", var_name)
-            } else {
-                // g_clear_pointer needs the free function as second arg
-                format!("g_clear_pointer (&{}, {});", var_name, unref_function)
-            };
-
-            let fix = Fix::from_node(if_node, ctx, &replacement);
-
-            violations.push(self.violation_with_fix(
-                ctx.file_path,
-                ctx.base_line + position.row,
-                position.column + 1,
-                format!(
-                    "Use {} instead of manual NULL check, unref, and assignment",
-                    replacement
-                ),
-                fix,
-            ));
-        }
-
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, ctx, violations);
         }
     }
 }

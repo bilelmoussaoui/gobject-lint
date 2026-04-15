@@ -1,6 +1,4 @@
-use tree_sitter::Node;
-
-use super::{CheckContext, Rule};
+use super::Rule;
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGObjectClassInstallProperties;
@@ -39,69 +37,21 @@ impl Rule for UseGObjectClassInstallProperties {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_class_init_function(ast_context, tree.root_node(), &ctx, violations);
+                let install_property_calls = func.find_calls(&["g_object_class_install_property"]);
+
+                if install_property_calls.len() >= 2 {
+                    let first_call = install_property_calls[0];
+                    violations.push(self.violation(
+                        path,
+                        first_call.location.line,
+                        first_call.location.column,
+                        format!(
+                            "Consider using g_object_class_install_properties() instead of {} g_object_class_install_property() calls",
+                            install_property_calls.len()
+                        ),
+                    ));
                 }
             }
-        }
-    }
-}
-
-impl UseGObjectClassInstallProperties {
-    /// Check a _class_init function and count install_property calls
-    fn check_class_init_function(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
-        violations: &mut Vec<Violation>,
-    ) {
-        let mut install_property_calls = Vec::new();
-        self.collect_install_property_calls(ast_context, node, ctx, &mut install_property_calls);
-
-        if install_property_calls.len() >= 2 {
-            let first_call = install_property_calls[0];
-            violations.push(self.violation(
-                ctx.file_path,
-                ctx.base_line + first_call.start_position().row,
-                first_call.start_position().column + 1,
-                format!(
-                    "Consider using g_object_class_install_properties() instead of {} g_object_class_install_property() calls",
-                    install_property_calls.len()
-                ),
-            ));
-        }
-    }
-
-    /// Recursively collect all g_object_class_install_property calls
-    fn collect_install_property_calls<'a>(
-        &self,
-        ast_context: &AstContext,
-        node: Node<'a>,
-        ctx: &CheckContext,
-        calls: &mut Vec<Node<'a>>,
-    ) {
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let func_name = ast_context.get_node_text(function, ctx.source);
-            if func_name == "g_object_class_install_property" {
-                calls.push(node);
-            }
-        }
-
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.collect_install_property_calls(ast_context, child, ctx, calls);
         }
     }
 }

@@ -1,6 +1,4 @@
-use tree_sitter::Node;
-
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseExplicitDefaultFlags;
@@ -86,22 +84,17 @@ impl Rule for UseExplicitDefaultFlags {
         _config: &Config,
         violations: &mut Vec<Violation>,
     ) {
+        // Collect all function names from FLAG_REPLACEMENTS
+        let function_names: Vec<&str> = FLAG_REPLACEMENTS.iter().map(|(name, ..)| *name).collect();
+
         for (path, file) in ast_context.iter_c_files() {
             for func in &file.functions {
                 if !func.is_definition {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
+                for call in func.find_calls(&function_names) {
+                    self.check_call(path, call, violations);
                 }
             }
         }
@@ -109,65 +102,39 @@ impl Rule for UseExplicitDefaultFlags {
 }
 
 impl UseExplicitDefaultFlags {
-    fn check_node(
+    fn check_call(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        file_path: &std::path::Path,
+        call: &gobject_ast::CallExpression,
         violations: &mut Vec<Violation>,
     ) {
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let func_name = ast_context.get_node_text(function, ctx.source);
+        // Find the matching replacement rule
+        for &(target_func, arg_pos, replacement_const) in FLAG_REPLACEMENTS {
+            if call.function == target_func {
+                if arg_pos < call.arguments.len() {
+                    let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[arg_pos];
 
-            // Check if this function matches any in our mapping
-            for &(target_func, arg_pos, replacement_const) in FLAG_REPLACEMENTS {
-                if func_name == target_func {
-                    if let Some(args) = node.child_by_field_name("arguments") {
-                        let arguments = self.collect_arguments(args);
+                    if arg_expr.is_zero() {
+                        let fix = Fix::new(
+                            arg_expr.location().start_byte,
+                            arg_expr.location().end_byte,
+                            replacement_const.to_string(),
+                        );
 
-                        if arg_pos < arguments.len() {
-                            let arg_node = arguments[arg_pos];
-                            let arg_text = ast_context.get_node_text(arg_node, ctx.source);
-
-                            // Check if the argument is literally "0"
-                            if arg_text == "0" {
-                                let fix = Fix::from_node(arg_node, ctx, replacement_const);
-
-                                violations.push(self.violation_with_fix(
-                                    ctx.file_path,
-                                    ctx.base_line + node.start_position().row,
-                                    node.start_position().column + 1,
-                                    format!(
-                                        "Use {} instead of 0 for {}() flags parameter",
-                                        replacement_const, target_func
-                                    ),
-                                    fix,
-                                ));
-                            }
-                        }
+                        violations.push(self.violation_with_fix(
+                            file_path,
+                            call.location.line,
+                            call.location.column,
+                            format!(
+                                "Use {} instead of 0 for {}() flags parameter",
+                                replacement_const, target_func
+                            ),
+                            fix,
+                        ));
                     }
-                    break;
                 }
+                break;
             }
         }
-
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, ctx, violations);
-        }
-    }
-
-    fn collect_arguments<'a>(&self, args_node: Node<'a>) -> Vec<Node<'a>> {
-        let mut cursor = args_node.walk();
-        let mut arguments = Vec::new();
-        for child in args_node.children(&mut cursor) {
-            if child.kind() != "(" && child.kind() != ")" && child.kind() != "," {
-                arguments.push(child);
-            }
-        }
-        arguments
     }
 }
