@@ -298,6 +298,7 @@ impl Parser {
                         end_byte: None,
                         body_start_byte: None,
                         body_end_byte: None,
+                        body_statements: Vec::new(),
                     });
                 }
             }
@@ -332,6 +333,11 @@ impl Parser {
                             .map(|b| (Some(b.start_byte()), Some(b.end_byte())))
                             .unwrap_or((None, None));
 
+                        // Parse body statements
+                        let body_statements = body
+                            .map(|b| self.parse_function_body(b, source))
+                            .unwrap_or_default();
+
                         file_model.functions.push(FunctionInfo {
                             name: name.to_owned(),
                             line: node.start_position().row + 1,
@@ -345,6 +351,7 @@ impl Parser {
                             end_byte: Some(node.end_byte()),
                             body_start_byte: body_start,
                             body_end_byte: body_end,
+                            body_statements,
                         });
                     }
                 }
@@ -1140,6 +1147,374 @@ impl Parser {
         for child in node.children(&mut cursor) {
             self.extract_vfuncs_from_tree(child, source, vfuncs);
         }
+    }
+
+    // ========================================================================
+    // Statement and Expression Parsing
+    // ========================================================================
+
+    fn parse_function_body(&self, body_node: Node, source: &[u8]) -> Vec<Statement> {
+        let mut statements = Vec::new();
+
+        let mut cursor = body_node.walk();
+        for child in body_node.children(&mut cursor) {
+            if let Some(stmt) = self.parse_statement(child, source) {
+                statements.push(stmt);
+            }
+        }
+
+        statements
+    }
+
+    fn parse_statement(&self, node: Node, source: &[u8]) -> Option<Statement> {
+        use crate::model::*;
+
+        match node.kind() {
+            "declaration" => {
+                // Variable declaration
+                self.parse_variable_decl(node, source)
+                    .map(Statement::Declaration)
+            }
+            "expression_statement" => {
+                // Expression like function call, assignment, etc.
+                self.parse_expression_stmt(node, source)
+                    .map(Statement::Expression)
+            }
+            "if_statement" => self.parse_if_statement(node, source).map(Statement::If),
+            "return_statement" => self
+                .parse_return_statement(node, source)
+                .map(Statement::Return),
+            "goto_statement" => self.parse_goto_statement(node, source).map(Statement::Goto),
+            "labeled_statement" => self
+                .parse_labeled_statement(node, source)
+                .map(Statement::Labeled),
+            "compound_statement" => self
+                .parse_compound_statement(node, source)
+                .map(Statement::Compound),
+            _ => None,
+        }
+    }
+
+    fn parse_variable_decl(&self, node: Node, source: &[u8]) -> Option<VariableDecl> {
+        // declaration contains declarator and optionally type_specifier
+        let mut type_name = String::new();
+        let mut declarator = None;
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            match child.kind() {
+                "type_qualifier"
+                | "storage_class_specifier"
+                | "type_specifier"
+                | "struct_specifier" => {
+                    if !type_name.is_empty() {
+                        type_name.push(' ');
+                    }
+                    type_name.push_str(std::str::from_utf8(&source[child.byte_range()]).ok()?);
+                }
+                "init_declarator" => {
+                    declarator = Some(child);
+                }
+                _ => {}
+            }
+        }
+
+        let declarator = declarator?;
+
+        // Get variable name from declarator
+        let mut var_name = None;
+        let mut initializer = None;
+
+        let mut dec_cursor = declarator.walk();
+        for child in declarator.children(&mut dec_cursor) {
+            match child.kind() {
+                "pointer_declarator" | "identifier" => {
+                    // Extract identifier from declarator
+                    if let Some(id) = self.find_identifier(child, source) {
+                        var_name = Some(id);
+                    }
+                }
+                "=" => {} // Skip
+                _ => {
+                    // This is the initializer
+                    initializer = self.parse_expression(child, source);
+                }
+            }
+        }
+
+        Some(VariableDecl {
+            type_name,
+            name: var_name?.to_owned(),
+            initializer,
+            line: node.start_position().row + 1,
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+        })
+    }
+
+    fn find_identifier<'a>(&self, node: Node, source: &'a [u8]) -> Option<&'a str> {
+        if node.kind() == "identifier" {
+            return std::str::from_utf8(&source[node.byte_range()]).ok();
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(id) = self.find_identifier(child, source) {
+                return Some(id);
+            }
+        }
+
+        None
+    }
+
+    fn parse_expression_stmt(&self, node: Node, source: &[u8]) -> Option<ExpressionStmt> {
+        // Get the actual expression inside the statement
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.is_named() && child.kind() != ";" {
+                if let Some(expr) = self.parse_expression(child, source) {
+                    return Some(ExpressionStmt {
+                        expr,
+                        line: node.start_position().row + 1,
+                        start_byte: node.start_byte(),
+                        end_byte: node.end_byte(),
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    fn parse_expression(&self, node: Node, source: &[u8]) -> Option<Expression> {
+        use crate::model::Expression;
+
+        match node.kind() {
+            "call_expression" => self
+                .parse_call_expression(node, source)
+                .map(Expression::Call),
+            "assignment_expression" => self
+                .parse_assignment(node, source)
+                .map(Expression::Assignment),
+            "binary_expression" => self
+                .parse_binary_expression(node, source)
+                .map(Expression::Binary),
+            "unary_expression" => self
+                .parse_unary_expression(node, source)
+                .map(Expression::Unary),
+            "parenthesized_expression" => {
+                // Unwrap the parentheses and parse the inner expression
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.is_named() && child.kind() != "(" && child.kind() != ")" {
+                        return self.parse_expression(child, source);
+                    }
+                }
+                None
+            }
+            "identifier" => Some(Expression::Identifier(
+                std::str::from_utf8(&source[node.byte_range()])
+                    .ok()?
+                    .to_owned(),
+            )),
+            "string_literal" => Some(Expression::StringLiteral(
+                std::str::from_utf8(&source[node.byte_range()])
+                    .ok()?
+                    .to_owned(),
+            )),
+            "number_literal" => Some(Expression::NumberLiteral(
+                std::str::from_utf8(&source[node.byte_range()])
+                    .ok()?
+                    .to_owned(),
+            )),
+            "null" | "NULL" => Some(Expression::Null),
+            _ => None,
+        }
+    }
+
+    fn parse_call_expression(&self, node: Node, source: &[u8]) -> Option<CallExpression> {
+        let function_node = node.child_by_field_name("function")?;
+        let function = std::str::from_utf8(&source[function_node.byte_range()])
+            .ok()?
+            .to_owned();
+
+        let mut arguments = Vec::new();
+        if let Some(args_node) = node.child_by_field_name("arguments") {
+            let mut cursor = args_node.walk();
+            for child in args_node.children(&mut cursor) {
+                if child.is_named() && child.kind() != "," {
+                    if let Some(expr) = self.parse_expression(child, source) {
+                        arguments.push(Argument::Expression(Box::new(expr)));
+                    }
+                }
+            }
+        }
+
+        Some(CallExpression {
+            function,
+            arguments,
+            line: node.start_position().row + 1,
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+        })
+    }
+
+    fn parse_assignment(&self, node: Node, source: &[u8]) -> Option<Assignment> {
+        let left_node = node.child_by_field_name("left")?;
+        let lhs = std::str::from_utf8(&source[left_node.byte_range()])
+            .ok()?
+            .to_owned();
+
+        let operator_node = node.child_by_field_name("operator")?;
+        let operator = std::str::from_utf8(&source[operator_node.byte_range()])
+            .ok()?
+            .to_owned();
+
+        let right_node = node.child_by_field_name("right")?;
+        let rhs = self.parse_expression(right_node, source)?;
+
+        Some(Assignment {
+            lhs,
+            operator,
+            rhs: Box::new(rhs),
+            line: node.start_position().row + 1,
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+        })
+    }
+
+    fn parse_binary_expression(&self, node: Node, source: &[u8]) -> Option<BinaryExpression> {
+        let left_node = node.child_by_field_name("left")?;
+        let left = self.parse_expression(left_node, source)?;
+
+        let operator_node = node.child_by_field_name("operator")?;
+        let operator = std::str::from_utf8(&source[operator_node.byte_range()])
+            .ok()?
+            .to_owned();
+
+        let right_node = node.child_by_field_name("right")?;
+        let right = self.parse_expression(right_node, source)?;
+
+        Some(BinaryExpression {
+            left: Box::new(left),
+            operator,
+            right: Box::new(right),
+            line: node.start_position().row + 1,
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+        })
+    }
+
+    fn parse_unary_expression(&self, node: Node, source: &[u8]) -> Option<UnaryExpression> {
+        let operator_node = node.child_by_field_name("operator")?;
+        let operator = std::str::from_utf8(&source[operator_node.byte_range()])
+            .ok()?
+            .to_owned();
+
+        let operand_node = node.child_by_field_name("argument")?;
+        let operand = self.parse_expression(operand_node, source)?;
+
+        Some(UnaryExpression {
+            operator,
+            operand: Box::new(operand),
+            line: node.start_position().row + 1,
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+        })
+    }
+
+    fn parse_if_statement(&self, node: Node, source: &[u8]) -> Option<IfStatement> {
+        let condition_node = node.child_by_field_name("condition")?;
+        let condition = self.parse_expression(condition_node, source)?;
+
+        let consequence_node = node.child_by_field_name("consequence")?;
+        let then_body = if consequence_node.kind() == "compound_statement" {
+            self.parse_function_body(consequence_node, source)
+        } else {
+            // Single statement
+            self.parse_statement(consequence_node, source)
+                .map(|s| vec![s])
+                .unwrap_or_default()
+        };
+
+        let else_body = node.child_by_field_name("alternative").map(|alt_node| {
+            if alt_node.kind() == "compound_statement" {
+                self.parse_function_body(alt_node, source)
+            } else {
+                self.parse_statement(alt_node, source)
+                    .map(|s| vec![s])
+                    .unwrap_or_default()
+            }
+        });
+
+        Some(IfStatement {
+            condition,
+            then_body,
+            else_body,
+            line: node.start_position().row + 1,
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+        })
+    }
+
+    fn parse_return_statement(&self, node: Node, source: &[u8]) -> Option<ReturnStatement> {
+        let value = node.child(1).and_then(|v| self.parse_expression(v, source));
+
+        Some(ReturnStatement {
+            value,
+            line: node.start_position().row + 1,
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+        })
+    }
+
+    fn parse_goto_statement(&self, node: Node, source: &[u8]) -> Option<GotoStatement> {
+        let label_node = node.child_by_field_name("label")?;
+        let label = std::str::from_utf8(&source[label_node.byte_range()])
+            .ok()?
+            .to_owned();
+
+        Some(GotoStatement {
+            label,
+            line: node.start_position().row + 1,
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+        })
+    }
+
+    fn parse_labeled_statement(&self, node: Node, source: &[u8]) -> Option<LabeledStatement> {
+        let label_node = node.child_by_field_name("label")?;
+        let label = std::str::from_utf8(&source[label_node.byte_range()])
+            .ok()?
+            .to_owned();
+
+        // Get the statement after the label
+        let mut cursor = node.walk();
+        let mut statement = None;
+        for child in node.children(&mut cursor) {
+            if child.kind() != "label" && child.kind() != ":" && child.is_named() {
+                statement = self.parse_statement(child, source);
+                break;
+            }
+        }
+
+        Some(LabeledStatement {
+            label,
+            statement: Box::new(statement?),
+            line: node.start_position().row + 1,
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+        })
+    }
+
+    fn parse_compound_statement(&self, node: Node, source: &[u8]) -> Option<CompoundStatement> {
+        let statements = self.parse_function_body(node, source);
+
+        Some(CompoundStatement {
+            statements,
+            line: node.start_position().row + 1,
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+        })
     }
 }
 

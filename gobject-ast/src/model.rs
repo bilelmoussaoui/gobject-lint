@@ -167,6 +167,8 @@ pub struct FunctionInfo {
     /// FileModel.source
     pub body_start_byte: Option<usize>,
     pub body_end_byte: Option<usize>,
+    /// Parsed body statements (for definitions) - ordered list
+    pub body_statements: Vec<Statement>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,4 +221,136 @@ pub struct TypedefInfo {
     pub name: String,
     pub line: usize,
     pub target_type: String,
+}
+
+// ============================================================================
+// Statement and Expression AST
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Statement {
+    Declaration(VariableDecl),
+    Expression(ExpressionStmt),
+    If(IfStatement),
+    Return(ReturnStatement),
+    Goto(GotoStatement),
+    Labeled(LabeledStatement),
+    Compound(CompoundStatement),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpressionStmt {
+    pub expr: Expression,
+    pub line: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Expression {
+    Call(CallExpression),
+    Assignment(Assignment),
+    Binary(BinaryExpression),
+    Unary(UnaryExpression),
+    Identifier(String),
+    StringLiteral(String),
+    NumberLiteral(String),
+    Null,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallExpression {
+    pub function: String,
+    pub arguments: Vec<Argument>,
+    pub line: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Argument {
+    Expression(Box<Expression>),
+    // Add more specific types as needed
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Assignment {
+    pub lhs: String,      // Keep simple for now - just variable name
+    pub operator: String, // "=", "+=", etc.
+    pub rhs: Box<Expression>,
+    pub line: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BinaryExpression {
+    pub left: Box<Expression>,
+    pub operator: String,
+    pub right: Box<Expression>,
+    pub line: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnaryExpression {
+    pub operator: String,
+    pub operand: Box<Expression>,
+    pub line: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VariableDecl {
+    pub type_name: String,
+    pub name: String,
+    pub initializer: Option<Expression>,
+    pub line: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IfStatement {
+    pub condition: Expression,
+    pub then_body: Vec<Statement>,
+    pub else_body: Option<Vec<Statement>>,
+    pub line: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReturnStatement {
+    pub value: Option<Expression>,
+    pub line: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GotoStatement {
+    pub label: String,
+    pub line: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabeledStatement {
+    pub label: String,
+    pub statement: Box<Statement>,
+    pub line: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompoundStatement {
+    pub statements: Vec<Statement>,
+    pub line: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
 }
