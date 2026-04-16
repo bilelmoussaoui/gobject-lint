@@ -22,8 +22,8 @@ pub use field_access::FieldAccessExpression;
 pub use identifier::IdentifierExpression;
 pub use initializer_list::InitializerListExpression;
 pub use literal::{
-    BooleanExpression, CharLiteralExpression, NullExpression, NumberLiteralExpression,
-    StringLiteralExpression,
+    BooleanExpression, CharLiteralExpression, CommentExpression, GenericExpression, NullExpression,
+    NumberLiteralExpression, StringLiteralExpression,
 };
 pub use macro_call::MacroCallExpression;
 use serde::{Deserialize, Serialize};
@@ -54,6 +54,8 @@ pub enum Expression {
     InitializerList(InitializerListExpression),
     CharLiteral(CharLiteralExpression),
     Update(UpdateExpression),
+    Comment(CommentExpression),
+    Generic(GenericExpression),
 }
 
 impl Expression {
@@ -78,6 +80,8 @@ impl Expression {
             Expression::InitializerList(i) => (i.location.start_byte, i.location.end_byte),
             Expression::CharLiteral(c) => (c.location.start_byte, c.location.end_byte),
             Expression::Update(u) => (u.location.start_byte, u.location.end_byte),
+            Expression::Comment(c) => (c.location.start_byte, c.location.end_byte),
+            Expression::Generic(g) => (g.location.start_byte, g.location.end_byte),
         }
     }
 
@@ -101,6 +105,8 @@ impl Expression {
             Expression::InitializerList(i) => &i.location,
             Expression::CharLiteral(c) => &c.location,
             Expression::Update(u) => &u.location,
+            Expression::Comment(c) => &c.location,
+            Expression::Generic(g) => &g.location,
         }
     }
 

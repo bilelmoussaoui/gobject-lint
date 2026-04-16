@@ -7,10 +7,10 @@ pub mod types;
 
 pub use expression::{
     Argument, Assignment, BinaryExpression, BooleanExpression, CallExpression, CastExpression,
-    CharLiteralExpression, ConditionalExpression, Expression, FieldAccessExpression,
-    IdentifierExpression, InitializerListExpression, NullExpression, NumberLiteralExpression,
-    SizeofExpression, StringLiteralExpression, SubscriptExpression, UnaryExpression,
-    UpdateExpression,
+    CharLiteralExpression, CommentExpression, ConditionalExpression, Expression,
+    FieldAccessExpression, GenericExpression, IdentifierExpression, InitializerListExpression,
+    NullExpression, NumberLiteralExpression, SizeofExpression, StringLiteralExpression,
+    SubscriptExpression, UnaryExpression, UpdateExpression,
 };
 pub use operators::{AssignmentOp, BinaryOp, UnaryOp, UpdateOp};
 pub use project::{FileModel, Project};
