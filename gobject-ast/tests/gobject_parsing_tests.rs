@@ -356,6 +356,55 @@ fn test_signal_creation() {
 }
 
 #[test]
+fn test_signal_extraction() {
+    let project = parse_fixture("signals.c");
+    let file = project.files.values().next().expect("No files parsed");
+
+    // Get the GObject type
+    let gobject_type = &file.gobject_types[0];
+    assert_eq!(gobject_type.type_name, "MyObject");
+
+    // Find the class_init function
+    let class_init_name = gobject_type.class_init_function_name();
+    let class_init = file
+        .functions
+        .iter()
+        .find(|f| f.name == class_init_name)
+        .expect("No class_init found");
+
+    // Extract signals using the helper
+    let signals = gobject_type.extract_signals(class_init, &file.source);
+
+    assert_eq!(signals.len(), 2, "Expected 2 signals");
+
+    // Check first signal
+    let changed = &signals[0];
+    assert_eq!(changed.name, "changed");
+    assert!(changed.itype.is_some());
+    assert_eq!(changed.flags.len(), 1);
+    assert_eq!(
+        changed.flags[0],
+        gobject_ast::model::types::SignalFlag::RunLast
+    );
+    assert_eq!(changed.return_type, Some("G_TYPE_NONE".to_string()));
+    assert_eq!(changed.n_params, Some(0));
+    assert_eq!(changed.param_types.len(), 0);
+
+    // Check second signal
+    let activated = &signals[1];
+    assert_eq!(activated.name, "activated");
+    assert_eq!(activated.flags.len(), 1);
+    assert!(
+        activated
+            .flags
+            .contains(&gobject_ast::model::types::SignalFlag::RunFirst)
+    );
+    assert_eq!(activated.return_type, Some("G_TYPE_NONE".to_string()));
+    assert_eq!(activated.n_params, Some(1));
+    assert_eq!(activated.param_types, vec!["G_TYPE_INT"]);
+}
+
+#[test]
 fn test_interface_implementation() {
     let project = parse_fixture("interface_impl.c");
     let file = project.files.values().next().expect("No files parsed");

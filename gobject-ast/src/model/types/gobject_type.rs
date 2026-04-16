@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{FunctionInfo, Property, function::Parameter};
+use super::{FunctionInfo, Property, Signal, function::Parameter};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GObjectType {
@@ -66,6 +66,19 @@ impl GObjectType {
             })
             .iter()
             .filter_map(|call| Property::from_param_spec_call(call))
+            .collect()
+    }
+
+    /// Extract signals from a class_init function
+    /// Looks for g_signal_new* calls and extracts signal metadata
+    pub fn extract_signals(&self, class_init_func: &FunctionInfo, source: &[u8]) -> Vec<Signal> {
+        class_init_func
+            .find_calls_matching(|name| {
+                // Match g_signal_new, g_signal_newv, etc.
+                name.starts_with("g_signal_new")
+            })
+            .iter()
+            .filter_map(|call| Signal::from_g_signal_new_call(call, source))
             .collect()
     }
 }
