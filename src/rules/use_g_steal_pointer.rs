@@ -140,20 +140,25 @@ impl UseGStealPointer {
             return false;
         };
 
+        // Skip NULL initializers
+        if init_expr.is_null() {
+            return false;
+        }
+
         // Get the variable name from the initializer
         let Some(ptr_expr) = init_expr.extract_variable_name() else {
             return false;
         };
 
-        // Skip NULL assignments and dereferences
-        if self.is_null_text(&ptr_expr) || ptr_expr.starts_with('*') {
+        // Skip dereferences
+        if ptr_expr.starts_with('*') {
             return false;
         }
 
         let tmp_name = &decl.name;
 
         // s2: ptr_expr = NULL
-        if !self.is_null_assign(s2, &ptr_expr) {
+        if !s2.is_null_assignment_to(&ptr_expr) {
             return false;
         }
 
@@ -198,16 +203,12 @@ impl UseGStealPointer {
             return false;
         };
 
-        if self.is_null_text(&ptr_expr) {
-            return false;
-        }
-
         // Skip dereference expressions — g_steal_pointer (&*expr) is confusing
         if ptr_expr.starts_with('*') {
             return false;
         }
 
-        if !self.is_null_assign(s2, &ptr_expr) {
+        if !s2.is_null_assignment_to(&ptr_expr) {
             return false;
         }
 
@@ -268,7 +269,7 @@ impl UseGStealPointer {
         }
 
         // then_body[1]: expr = NULL
-        if !self.is_null_assign(&if_stmt.then_body[1], &expr_text) {
+        if !if_stmt.then_body[1].is_null_assignment_to(&expr_text) {
             return false;
         }
 
@@ -276,7 +277,7 @@ impl UseGStealPointer {
         if else_body.len() != 1 {
             return false;
         }
-        if !self.is_null_assign(&else_body[0], &dest_expr) {
+        if !else_body[0].is_null_assignment_to(&dest_expr) {
             return false;
         }
 
@@ -356,11 +357,12 @@ impl UseGStealPointer {
                 return false;
             };
 
-            if self.is_null_text(&ptr_expr) || ptr_expr.starts_with('*') {
+            // Skip dereference expressions
+            if ptr_expr.starts_with('*') {
                 return false;
             }
 
-            if !self.is_null_assign(&if_stmt.then_body[1], &ptr_expr) {
+            if !if_stmt.then_body[1].is_null_assignment_to(&ptr_expr) {
                 return false;
             }
 
@@ -416,17 +418,23 @@ impl UseGStealPointer {
                 return false;
             };
 
+            // Skip NULL initializers
+            if init_expr.is_null() {
+                return false;
+            }
+
             let Some(ptr_expr) = init_expr.extract_variable_name() else {
                 return false;
             };
 
-            if self.is_null_text(&ptr_expr) || ptr_expr.starts_with('*') {
+            // Skip dereference expressions
+            if ptr_expr.starts_with('*') {
                 return false;
             }
 
             let tmp_name = &decl.name;
 
-            if !self.is_null_assign(&if_stmt.then_body[1], &ptr_expr) {
+            if !if_stmt.then_body[1].is_null_assignment_to(&ptr_expr) {
                 return false;
             }
 
@@ -505,9 +513,9 @@ impl UseGStealPointer {
         let rhs = match &*assign.rhs {
             Expression::Identifier(id) => id.name.clone(),
             Expression::FieldAccess(f) => f.text.clone(),
-            Expression::Null(_) => "NULL".to_string(),
-            Expression::Call(_) => {
-                // For g_strdup() etc, we don't want to suggest g_steal_pointer
+            Expression::Null(_) | Expression::Call(_) => {
+                // For NULL or function calls like g_strdup(), we don't want to suggest
+                // g_steal_pointer
                 return None;
             }
             _ => {
@@ -516,18 +524,6 @@ impl UseGStealPointer {
         };
 
         Some((assign.lhs.clone(), rhs))
-    }
-
-    /// Returns true if stmt is `expected_expr = NULL;`
-    fn is_null_assign(&self, stmt: &Statement, expected_expr: &str) -> bool {
-        let Some((lhs, rhs)) = self.extract_assignment(stmt) else {
-            return false;
-        };
-        lhs == expected_expr && self.is_null_text(&rhs)
-    }
-
-    fn is_null_text(&self, text: &str) -> bool {
-        text == "NULL"
     }
 
     /// Find the position of opening and closing braces around a block of

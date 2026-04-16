@@ -10,6 +10,14 @@ pub struct CallExpression {
 }
 
 impl CallExpression {
+    /// Get the expression for the argument at the given index
+    /// Automatically unwraps Argument::Expression
+    pub fn get_arg(&self, index: usize) -> Option<&Expression> {
+        match self.arguments.get(index)? {
+            Argument::Expression(expr) => Some(expr.as_ref()),
+        }
+    }
+
     /// Get argument as source text
     pub fn get_arg_text(&self, index: usize, source: &[u8]) -> Option<String> {
         self.arguments.get(index)?.to_source_string(source)

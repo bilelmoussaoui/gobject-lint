@@ -171,13 +171,31 @@ impl Expression {
     }
 
     /// Check if this expression is NULL
+    /// Handles both Expression::Null and the identifier "NULL" (common in C
+    /// code)
     pub fn is_null(&self) -> bool {
         matches!(self, Expression::Null(_))
+            || matches!(self, Expression::Identifier(id) if id.name == "NULL")
     }
 
     /// Check if this expression is the number 0
     pub fn is_zero(&self) -> bool {
         matches!(self, Expression::NumberLiteral(n) if n.value.trim() == "0")
+    }
+
+    /// Convert simple expressions (identifier, number literal, boolean) to
+    /// strings Useful for comparing return values or simple constants
+    pub fn to_simple_string(&self) -> Option<String> {
+        match self {
+            Expression::Identifier(id) => Some(id.name.clone()),
+            Expression::NumberLiteral(n) => Some(n.value.clone()),
+            Expression::Boolean(b) => Some(if b.value {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }),
+            _ => None,
+        }
     }
 
     /// Check if this expression is a string literal

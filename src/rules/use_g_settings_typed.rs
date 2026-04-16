@@ -74,8 +74,10 @@ impl UseGSettingsTyped {
         }
 
         // Check if third argument is g_variant_new call
-        let gobject_ast::Argument::Expression(third_expr) = &call.arguments[2];
-        let Expression::Call(variant_call) = third_expr.as_ref() else {
+        let Some(third_expr) = call.get_arg(2) else {
+            return;
+        };
+        let Expression::Call(variant_call) = third_expr else {
             return;
         };
 
@@ -138,8 +140,10 @@ impl UseGSettingsTyped {
         }
 
         // Check if first argument is g_settings_get_value call
-        let gobject_ast::Argument::Expression(first_expr) = &call.arguments[0];
-        let Expression::Call(inner_call) = first_expr.as_ref() else {
+        let Some(first_expr) = call.get_arg(0) else {
+            return;
+        };
+        let Expression::Call(inner_call) = first_expr else {
             return;
         };
 
@@ -209,8 +213,8 @@ impl UseGSettingsTyped {
         }
 
         // Check if first argument is a string literal
-        let gobject_ast::Argument::Expression(first_expr) = &variant_call.arguments[0];
-        let Expression::StringLiteral(string_lit) = first_expr.as_ref() else {
+        let first_expr = variant_call.get_arg(0)?;
+        let Expression::StringLiteral(string_lit) = first_expr else {
             return None;
         };
 

@@ -53,8 +53,10 @@ impl UseGNew {
         }
 
         // Check if argument is sizeof(Type)
-        let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
-        let Expression::Sizeof(sizeof_expr) = arg_expr.as_ref() else {
+        let Some(arg_expr) = call.get_arg(0) else {
+            return;
+        };
+        let Expression::Sizeof(sizeof_expr) = arg_expr else {
             return;
         };
 

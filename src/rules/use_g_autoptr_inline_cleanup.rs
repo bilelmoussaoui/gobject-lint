@@ -203,17 +203,14 @@ impl UseGAutoptrInlineCleanup {
             stmt.walk(&mut |s| {
                 if let Statement::Expression(expr_stmt) = s
                     && let Expression::Call(call) = &expr_stmt.expr
-                {
                     // Check if this is a cleanup call with our variable
-                    if call.is_cleanup_call() && !call.arguments.is_empty() {
-                        let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
-                        // Check for var or &var
-                        if let Some(arg_var) = arg_expr.extract_variable_name()
-                            && arg_var == var_name
-                        {
-                            found = true;
-                        }
-                    }
+                    && call.is_cleanup_call()
+                    && let Some(arg_expr) = call.get_arg(0)
+                    // Check for var or &var
+                    && let Some(arg_var) = arg_expr.extract_variable_name()
+                    && arg_var == var_name
+                {
+                    found = true;
                 }
             });
             if found {

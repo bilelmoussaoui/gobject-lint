@@ -55,13 +55,15 @@ impl UseGValueSetStaticString {
         }
 
         // Check if second argument is a string literal
-        let gobject_ast::Argument::Expression(second_expr) = &call.arguments[1];
+        let Some(second_expr) = call.get_arg(1) else {
+            return;
+        };
         if !second_expr.is_string_literal() {
             return;
         }
 
         // Get the string literal for the message
-        let Expression::StringLiteral(string_lit) = second_expr.as_ref() else {
+        let Expression::StringLiteral(string_lit) = second_expr else {
             unreachable!();
         };
 

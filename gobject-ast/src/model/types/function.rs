@@ -124,6 +124,58 @@ impl FunctionInfo {
             _ => {}
         }
     }
+
+    /// Collect all return values from the function body
+    pub fn collect_return_values(&self) -> Vec<&Expression> {
+        let mut values = Vec::new();
+        self.collect_return_values_recursive(&self.body_statements, &mut values);
+        values
+    }
+
+    fn collect_return_values_recursive<'a>(
+        &'a self,
+        statements: &'a [Statement],
+        values: &mut Vec<&'a Expression>,
+    ) {
+        for stmt in statements {
+            match stmt {
+                Statement::Return(ret_stmt) => {
+                    if let Some(value) = &ret_stmt.value {
+                        values.push(value);
+                    }
+                }
+                Statement::If(if_stmt) => {
+                    self.collect_return_values_recursive(&if_stmt.then_body, values);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.collect_return_values_recursive(else_body, values);
+                    }
+                }
+                Statement::Compound(compound) => {
+                    self.collect_return_values_recursive(&compound.statements, values);
+                }
+                Statement::Labeled(labeled) => {
+                    self.collect_return_values_recursive(
+                        std::slice::from_ref(&labeled.statement),
+                        values,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Check if all return statements match the given predicate
+    /// Returns false if there are no return statements
+    pub fn all_returns_match<F>(&self, predicate: F) -> bool
+    where
+        F: Fn(&Expression) -> bool,
+    {
+        let values = self.collect_return_values();
+        if values.is_empty() {
+            return false;
+        }
+        values.iter().all(|v| predicate(v))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

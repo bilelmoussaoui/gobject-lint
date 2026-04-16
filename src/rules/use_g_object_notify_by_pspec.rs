@@ -53,13 +53,15 @@ impl UseGObjectNotifyByPspec {
         }
 
         // Check if second argument is a string literal
-        let gobject_ast::Argument::Expression(property_expr) = &call.arguments[1];
+        let Some(property_expr) = call.get_arg(1) else {
+            return;
+        };
         if !property_expr.is_string_literal() {
             return;
         }
 
         // Get the string literal value
-        let Expression::StringLiteral(string_lit) = property_expr.as_ref() else {
+        let Expression::StringLiteral(string_lit) = property_expr else {
             unreachable!();
         };
 

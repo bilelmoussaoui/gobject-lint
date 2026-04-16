@@ -1,4 +1,4 @@
-use gobject_ast::{Expression, Statement};
+use gobject_ast::Statement;
 
 use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
@@ -63,7 +63,6 @@ impl GErrorInit {
         let is_initialized_to_null = match &decl.initializer {
             None => false,
             Some(expr) if expr.is_null() || expr.is_zero() => true,
-            Some(Expression::Identifier(i)) if i.name == "NULL" => true,
             // Skip it - the fix would insert `= NULL` producing invalid code
             Some(_) => return,
         };

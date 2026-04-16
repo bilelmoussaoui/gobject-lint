@@ -197,13 +197,9 @@ impl UseClearFunctions {
     }
 
     fn has_null_assignment(&self, statements: &[Statement], var_name: &str) -> bool {
-        statements.iter().any(|stmt| {
-            stmt.is_assignment_to(var_name, |expr| {
-                expr.is_null()
-                    || expr.is_zero()
-                    || matches!(expr, Expression::Identifier(id) if id.name == "NULL")
-            })
-        })
+        statements
+            .iter()
+            .any(|stmt| stmt.is_assignment_to(var_name, |expr| expr.is_null() || expr.is_zero()))
     }
 
     fn suggest_clear_function(&self, unref_function: &str) -> &str {

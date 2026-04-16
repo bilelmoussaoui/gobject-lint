@@ -74,16 +74,11 @@ impl UseGClearList {
         source: &[u8],
         violations: &mut Vec<Violation>,
     ) {
-        for i in 0..statements.len().saturating_sub(1) {
-            let first = &statements[i];
-            let second = &statements[i + 1];
-
+        Statement::for_each_pair(statements, |first, second| {
             // Check if first is g_list_free or g_slist_free
             if let Some((var_name, list_type)) = self.extract_list_free(first, source) {
                 // Check if second is assignment to NULL
-                if let Some(assign_var) = self.extract_null_assignment(second)
-                    && assign_var.trim() == var_name.trim()
-                {
+                if second.is_null_assignment_to(&var_name) {
                     let clear_fn = if list_type == "GList" {
                         "g_clear_list"
                     } else {
@@ -111,7 +106,7 @@ impl UseGClearList {
                     ));
                 }
             }
-        }
+        });
     }
 
     fn extract_list_free(&self, stmt: &Statement, source: &[u8]) -> Option<(String, &'static str)> {
@@ -129,16 +124,5 @@ impl UseGClearList {
 
         let var_name = call.get_arg_text(0, source)?;
         Some((var_name, list_type))
-    }
-
-    fn extract_null_assignment(&self, stmt: &Statement) -> Option<String> {
-        if let Statement::Expression(expr_stmt) = stmt
-            && let gobject_ast::Expression::Assignment(assignment) = &expr_stmt.expr
-            && (assignment.rhs.is_null() || assignment.rhs.is_zero())
-        {
-            Some(assignment.lhs.clone())
-        } else {
-            None
-        }
     }
 }

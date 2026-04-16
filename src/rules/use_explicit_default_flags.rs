@@ -109,27 +109,25 @@ impl UseExplicitDefaultFlags {
         // Find the matching replacement rule
         for &(target_func, arg_pos, replacement_const) in FLAG_REPLACEMENTS {
             if call.function == target_func {
-                if arg_pos < call.arguments.len() {
-                    let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[arg_pos];
+                if let Some(arg_expr) = call.get_arg(arg_pos)
+                    && arg_expr.is_zero()
+                {
+                    let fix = Fix::new(
+                        arg_expr.location().start_byte,
+                        arg_expr.location().end_byte,
+                        replacement_const.to_string(),
+                    );
 
-                    if arg_expr.is_zero() {
-                        let fix = Fix::new(
-                            arg_expr.location().start_byte,
-                            arg_expr.location().end_byte,
-                            replacement_const.to_string(),
-                        );
-
-                        violations.push(self.violation_with_fix(
-                            file_path,
-                            call.location.line,
-                            call.location.column,
-                            format!(
-                                "Use {} instead of 0 for {}() flags parameter",
-                                replacement_const, target_func
-                            ),
-                            fix,
-                        ));
-                    }
+                    violations.push(self.violation_with_fix(
+                        file_path,
+                        call.location.line,
+                        call.location.column,
+                        format!(
+                            "Use {} instead of 0 for {}() flags parameter",
+                            replacement_const, target_func
+                        ),
+                        fix,
+                    ));
                 }
                 break;
             }

@@ -99,8 +99,8 @@ impl UseGSourceOnce {
             return None;
         }
 
-        let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
-        if let Expression::Identifier(id) = arg_expr.as_ref() {
+        let arg_expr = call.get_arg(0)?;
+        if let Expression::Identifier(id) = arg_expr {
             Some(id.name.clone())
         } else {
             None
@@ -130,18 +130,19 @@ impl UseGSourceOnce {
 
                 if func.is_definition {
                     // Check if all returns are FALSE/G_SOURCE_REMOVE/0
-                    let return_values = self.collect_all_return_values(&func.body_statements);
+                    let return_exprs = func.collect_return_values();
 
                     // Must have at least one return statement
-                    if return_values.is_empty() {
+                    if return_exprs.is_empty() {
                         return None;
                     }
 
                     // All returns must be FALSE or G_SOURCE_REMOVE or 0
-                    if !return_values
-                        .iter()
-                        .all(|r| r == "FALSE" || r == "G_SOURCE_REMOVE" || r == "0" || r == "false")
-                    {
+                    if !return_exprs.iter().all(|expr| {
+                        expr.to_simple_string().is_some_and(|s| {
+                            s == "FALSE" || s == "G_SOURCE_REMOVE" || s == "0" || s == "false"
+                        })
+                    }) {
                         return None;
                     }
 
@@ -152,10 +153,9 @@ impl UseGSourceOnce {
                     }
 
                     // Fix: Remove all return statements (entire lines)
-                    let return_locations = self.collect_all_return_locations(&func.body_statements);
-                    for location in return_locations {
+                    for ret_expr in func.collect_return_values() {
                         let (line_start, line_end) =
-                            self.find_line_bounds(location.start_byte, &file.source);
+                            ret_expr.location().find_line_bounds(&file.source);
                         fixes.push(Fix::new(line_start, line_end, String::new()));
                     }
 
@@ -173,55 +173,6 @@ impl UseGSourceOnce {
             Some(fixes)
         } else {
             None
-        }
-    }
-
-    fn collect_all_return_values(&self, statements: &[Statement]) -> Vec<String> {
-        let mut returns = Vec::new();
-
-        for stmt in statements {
-            stmt.walk(&mut |s| {
-                if let Statement::Return(ret_stmt) = s
-                    && let Some(value) = &ret_stmt.value
-                {
-                    // Get the return value as a string
-                    if let Some(val_str) = self.expr_to_simple_string(value) {
-                        returns.push(val_str);
-                    }
-                }
-            });
-        }
-
-        returns
-    }
-
-    fn collect_all_return_locations(
-        &self,
-        statements: &[Statement],
-    ) -> Vec<gobject_ast::SourceLocation> {
-        let mut locations = Vec::new();
-
-        for stmt in statements {
-            stmt.walk(&mut |s| {
-                if let Statement::Return(ret_stmt) = s {
-                    locations.push(ret_stmt.location.clone());
-                }
-            });
-        }
-
-        locations
-    }
-
-    fn expr_to_simple_string(&self, expr: &Expression) -> Option<String> {
-        match expr {
-            Expression::Identifier(id) => Some(id.name.clone()),
-            Expression::NumberLiteral(n) => Some(n.value.clone()),
-            Expression::Boolean(b) => Some(if b.value {
-                "true".to_string()
-            } else {
-                "false".to_string()
-            }),
-            _ => None,
         }
     }
 
@@ -391,47 +342,11 @@ impl UseGSourceOnce {
         if let Statement::Expression(expr_stmt) = stmt
             && let Expression::Call(call) = &expr_stmt.expr
             && (call.function == "g_idle_add" || call.function == "g_timeout_add")
-            && !call.arguments.is_empty()
+            && let Some(arg_expr) = call.get_arg(0)
+            && let Expression::Identifier(id) = arg_expr
         {
-            let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
-            if let Expression::Identifier(id) = arg_expr.as_ref() {
-                return id.name == callback_name;
-            }
+            return id.name == callback_name;
         }
         false
-    }
-
-    fn find_line_bounds(&self, start_byte: usize, source: &[u8]) -> (usize, usize) {
-        // Find the start of the line
-        let mut line_start = start_byte;
-        while line_start > 0 && source[line_start - 1] != b'\n' {
-            line_start -= 1;
-        }
-
-        // Check if the previous line is empty (only whitespace)
-        if line_start > 0 {
-            let mut prev_line_start = line_start - 1; // Skip the '\n'
-            while prev_line_start > 0 && source[prev_line_start - 1] != b'\n' {
-                prev_line_start -= 1;
-            }
-
-            // Check if the line is only whitespace
-            let prev_line = &source[prev_line_start..line_start - 1];
-            if prev_line.iter().all(|&b| b == b' ' || b == b'\t') {
-                line_start = prev_line_start;
-            }
-        }
-
-        // Find the end of the line (including newline)
-        let mut line_end = start_byte;
-        while line_end < source.len() && source[line_end] != b'\n' {
-            line_end += 1;
-        }
-        // Include the newline character
-        if line_end < source.len() && source[line_end] == b'\n' {
-            line_end += 1;
-        }
-
-        (line_start, line_end)
     }
 }

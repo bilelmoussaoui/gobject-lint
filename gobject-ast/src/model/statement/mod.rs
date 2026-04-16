@@ -141,4 +141,39 @@ impl Statement {
         }
         false
     }
+
+    /// Extract the assignment expression if this is an assignment statement
+    pub fn extract_assignment(&self) -> Option<&crate::model::Assignment> {
+        if let Statement::Expression(expr_stmt) = self {
+            if let Expression::Assignment(assign) = &expr_stmt.expr {
+                return Some(assign);
+            }
+        }
+        None
+    }
+
+    /// Check if this statement assigns NULL to the target variable
+    pub fn is_null_assignment_to(&self, var_name: &str) -> bool {
+        self.is_assignment_to(var_name, |expr| expr.is_null())
+    }
+
+    /// Iterate over consecutive pairs of statements
+    pub fn for_each_pair<F>(statements: &[Statement], mut f: F)
+    where
+        F: FnMut(&Statement, &Statement),
+    {
+        for i in 0..statements.len().saturating_sub(1) {
+            f(&statements[i], &statements[i + 1]);
+        }
+    }
+
+    /// Iterate over consecutive triples of statements
+    pub fn for_each_triple<F>(statements: &[Statement], mut f: F)
+    where
+        F: FnMut(&Statement, &Statement, &Statement),
+    {
+        for i in 0..statements.len().saturating_sub(2) {
+            f(&statements[i], &statements[i + 1], &statements[i + 2]);
+        }
+    }
 }

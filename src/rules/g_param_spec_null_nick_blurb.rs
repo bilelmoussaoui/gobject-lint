@@ -72,8 +72,12 @@ impl GParamSpecNullNickBlurb {
         }
 
         // Create fix to replace non-NULL arguments with NULL
-        let gobject_ast::Argument::Expression(nick_expr) = &call.arguments[1];
-        let gobject_ast::Argument::Expression(blurb_expr) = &call.arguments[2];
+        let Some(nick_expr) = call.get_arg(1) else {
+            return;
+        };
+        let Some(blurb_expr) = call.get_arg(2) else {
+            return;
+        };
 
         let string_fix = if !nick_is_null && !blurb_is_null {
             // Replace both nick and blurb with NULL

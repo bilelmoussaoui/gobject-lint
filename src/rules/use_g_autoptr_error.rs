@@ -95,15 +95,11 @@ impl UseGAutoptrError {
                 if let Statement::Expression(expr_stmt) = s
                     && let Expression::Call(call) = &expr_stmt.expr
                     && call.function == "g_error_free"
-                    && !call.arguments.is_empty()
+                    && let Some(arg_expr) = call.get_arg(0)
+                    && let Some(arg_var) = arg_expr.extract_variable_name()
+                    && arg_var == var_name
                 {
-                    // Check if argument matches var_name
-                    let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
-                    if let Some(arg_var) = arg_expr.extract_variable_name()
-                        && arg_var == var_name
-                    {
-                        found = true;
-                    }
+                    found = true;
                 }
             });
             if found {

@@ -78,10 +78,11 @@ impl GParamSpecStaticNameCanonical {
         let replacement = format!("\"{}\"", canonical_name);
 
         // Find the actual string literal to replace
-        let name_arg = &call.arguments[0];
-        let gobject_ast::Argument::Expression(expr) = name_arg;
+        let Some(expr) = call.get_arg(0) else {
+            return;
+        };
 
-        let string_lit_location = match expr.as_ref() {
+        let string_lit_location = match expr {
             Expression::StringLiteral(lit) => &lit.location,
             Expression::MacroCall(macro_call) => {
                 // Find the string literal inside the macro

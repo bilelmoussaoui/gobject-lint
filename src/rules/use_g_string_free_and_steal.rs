@@ -54,8 +54,10 @@ impl UseGStringFreeAndSteal {
         }
 
         // Check if second argument is FALSE/false/0
-        let gobject_ast::Argument::Expression(second_expr) = &call.arguments[1];
-        let is_false = match second_expr.as_ref() {
+        let Some(second_expr) = call.get_arg(1) else {
+            return;
+        };
+        let is_false = match second_expr {
             Expression::Boolean(b) => !b.value,
             Expression::NumberLiteral(n) => n.value == "0",
             _ => false,

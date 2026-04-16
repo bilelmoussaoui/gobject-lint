@@ -211,13 +211,11 @@ impl UseGAutoptrGotoCleanup {
             if let Statement::Expression(expr_stmt) = s
                 && let Expression::Call(call) = &expr_stmt.expr
                 && call.is_cleanup_call()
-                && !call.arguments.is_empty()
-            {
-                let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
+                && let Some(arg_expr) = call.get_arg(0)
                 // Extract variable name (handle &var or var)
-                if let Some(var_name) = arg_expr.extract_variable_name() {
-                    cleanup_vars.insert(var_name.to_string());
-                }
+                && let Some(var_name) = arg_expr.extract_variable_name()
+            {
+                cleanup_vars.insert(var_name.to_string());
             }
         });
         cleanup_vars

@@ -208,13 +208,9 @@ impl UseGClearHandleId {
     )> {
         let mut results = Vec::new();
 
-        for i in 0..statements.len().saturating_sub(1) {
-            let first = &statements[i];
-            let second = &statements[i + 1];
-
+        Statement::for_each_pair(statements, |first, second| {
             if let Some((var_name, cleanup_func)) = self.extract_handle_cleanup(first, source)
-                && let Some(assign_var) = self.extract_zero_assignment(second)
-                && assign_var.trim() == var_name.trim()
+                && second.is_assignment_to(&var_name, |expr| expr.is_zero())
             {
                 results.push((
                     var_name,
@@ -223,7 +219,7 @@ impl UseGClearHandleId {
                     second.location().clone(),
                 ));
             }
-        }
+        });
 
         results
     }
@@ -236,24 +232,14 @@ impl UseGClearHandleId {
             "g_source_remove" | "g_source_destroy"
         );
 
-        if !is_handle_cleanup || call.arguments.is_empty() {
+        if !is_handle_cleanup {
             return None;
         }
 
-        let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
+        let arg_expr = call.get_arg(0)?;
         let var_name = arg_expr.location().as_str(source)?.trim().to_string();
 
         Some((var_name, call.function.clone()))
-    }
-
-    fn extract_zero_assignment(&self, stmt: &Statement) -> Option<String> {
-        if let Statement::Expression(expr_stmt) = stmt
-            && let Expression::Assignment(assign) = &expr_stmt.expr
-            && assign.rhs.is_zero()
-        {
-            return Some(assign.lhs.clone());
-        }
-        None
     }
 
     fn extract_id_from_condition(&self, condition: &Expression) -> Option<String> {

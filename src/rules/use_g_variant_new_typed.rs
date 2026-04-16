@@ -55,13 +55,15 @@ impl UseGVariantNewTyped {
         }
 
         // Check if first argument is a string literal
-        let gobject_ast::Argument::Expression(first_expr) = &call.arguments[0];
+        let Some(first_expr) = call.get_arg(0) else {
+            return;
+        };
         if !first_expr.is_string_literal() {
             return;
         }
 
         // Get the string literal value
-        let Expression::StringLiteral(string_lit) = first_expr.as_ref() else {
+        let Expression::StringLiteral(string_lit) = first_expr else {
             unreachable!();
         };
 

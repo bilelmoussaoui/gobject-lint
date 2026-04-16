@@ -1,4 +1,4 @@
-use gobject_ast::{AssignmentOp, Expression, Statement, UnaryOp};
+use gobject_ast::{Expression, Statement, UnaryOp};
 
 use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
@@ -46,23 +46,14 @@ impl UseGClearWeakPointer {
         file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
-        let mut i = 0;
-        while i < statements.len() {
-            // Look for g_object_remove_weak_pointer followed by NULL assignment
-            if i + 1 < statements.len()
-                && self.try_remove_weak_then_null(
-                    &statements[i],
-                    &statements[i + 1],
-                    file_path,
-                    violations,
-                )
-            {
-                i += 2;
-                continue;
-            }
+        // Check consecutive pairs for the pattern
+        Statement::for_each_pair(statements, |s1, s2| {
+            self.try_remove_weak_then_null(s1, s2, file_path, violations);
+        });
 
-            // Recursively check nested statements
-            match &statements[i] {
+        // Recursively check nested statements
+        for stmt in statements {
+            match stmt {
                 Statement::If(if_stmt) => {
                     self.check_statements(&if_stmt.then_body, file_path, violations);
                     if let Some(else_body) = &if_stmt.else_body {
@@ -81,8 +72,6 @@ impl UseGClearWeakPointer {
                 }
                 _ => {}
             }
-
-            i += 1;
         }
     }
 
@@ -93,33 +82,33 @@ impl UseGClearWeakPointer {
         s2: &Statement,
         file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
-    ) -> bool {
+    ) {
         // First statement must be g_object_remove_weak_pointer call
         let Statement::Expression(expr_stmt) = s1 else {
-            return false;
+            return;
         };
 
         let Expression::Call(call) = &expr_stmt.expr else {
-            return false;
+            return;
         };
 
         if call.function != "g_object_remove_weak_pointer" {
-            return false;
+            return;
         }
 
         // Need at least 2 arguments
         if call.arguments.len() < 2 {
-            return false;
+            return;
         }
 
         // Extract the variable from the second argument
         let Some(var_name) = self.extract_weak_pointer_var(&call.arguments[1]) else {
-            return false;
+            return;
         };
 
         // Second statement must be var = NULL
-        if !self.is_null_assignment(s2, &var_name) {
-            return false;
+        if !s2.is_null_assignment_to(&var_name) {
+            return;
         }
 
         // Create a fix
@@ -140,7 +129,6 @@ impl UseGClearWeakPointer {
             ),
             fix,
         ));
-        true
     }
 
     /// Extract variable name from the second argument of
@@ -163,19 +151,5 @@ impl UseGClearWeakPointer {
         }
 
         None
-    }
-
-    /// Check if statement is `var = NULL`
-    fn is_null_assignment(&self, stmt: &Statement, var_name: &str) -> bool {
-        let Statement::Expression(expr_stmt) = stmt else {
-            return false;
-        };
-
-        let Expression::Assignment(assign) = &expr_stmt.expr else {
-            return false;
-        };
-
-        // Check left side matches var_name and right side is NULL
-        assign.lhs == var_name && assign.operator == AssignmentOp::Assign && assign.rhs.is_null()
     }
 }

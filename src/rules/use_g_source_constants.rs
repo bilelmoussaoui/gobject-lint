@@ -80,8 +80,8 @@ impl UseGSourceConstants {
         }
 
         // Get the callback argument (should be an identifier)
-        let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[callback_arg_index];
-        if let Expression::Identifier(id) = arg_expr.as_ref() {
+        let arg_expr = call.get_arg(callback_arg_index)?;
+        if let Expression::Identifier(id) = arg_expr {
             Some(id.name.clone())
         } else {
             None

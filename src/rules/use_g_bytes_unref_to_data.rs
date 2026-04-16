@@ -52,15 +52,9 @@ impl UseGBytesUnrefToData {
         violations: &mut Vec<Violation>,
     ) {
         // Check consecutive statements at this level
-        for i in 0..statements.len().saturating_sub(1) {
-            self.try_bytes_pattern(
-                file_path,
-                &statements[i],
-                &statements[i + 1],
-                source,
-                violations,
-            );
-        }
+        Statement::for_each_pair(statements, |stmt1, stmt2| {
+            self.try_bytes_pattern(file_path, stmt1, stmt2, source, violations);
+        });
 
         // Recurse into nested statement blocks
         for stmt in statements {

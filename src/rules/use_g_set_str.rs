@@ -187,8 +187,9 @@ impl UseGSetStr {
             }
 
             // Check if second argument is g_free
-            let gobject_ast::Argument::Expression(second_arg) = &call.arguments[1];
-            if let Expression::Identifier(id) = &**second_arg {
+            let second_arg = call.get_arg(1)?;
+
+            if let Expression::Identifier(id) = second_arg {
                 if id.name != "g_free" {
                     return None;
                 }
@@ -197,8 +198,8 @@ impl UseGSetStr {
             }
 
             // First argument is &var - extract var
-            let gobject_ast::Argument::Expression(first_arg) = &call.arguments[0];
-            if let Expression::Unary(unary) = &**first_arg
+            let first_arg = call.get_arg(0)?;
+            if let Expression::Unary(unary) = first_arg
                 && unary.operator == UnaryOp::AddressOf
             {
                 return Some(self.expr_to_string(&unary.operand));

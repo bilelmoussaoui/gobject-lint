@@ -192,11 +192,7 @@ impl UseGObjectNewWithProperties {
         }
 
         // Get the first argument (the object)
-        if call.arguments.is_empty() {
-            return None;
-        }
-
-        let gobject_ast::Argument::Expression(expr) = &call.arguments[0];
+        let expr = call.get_arg(0)?;
         expr.extract_variable_name()
     }
 }
