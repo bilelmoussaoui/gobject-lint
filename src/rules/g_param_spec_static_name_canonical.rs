@@ -1,4 +1,4 @@
-use gobject_ast::{CallExpression, Expression};
+use gobject_ast::{CallExpression, Expression, types::Property};
 
 use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
@@ -57,21 +57,22 @@ impl GParamSpecStaticNameCanonical {
             return;
         }
 
-        // Extract the property name, handling macros like I_("name")
-        let Some(name_value) = call.extract_string_from_arg(0) else {
+        // Parse the property using the AST helpers
+        let Some(property) = Property::from_param_spec_call(call) else {
             return;
         };
 
-        if !name_value.contains('_') {
+        // Check if the property name contains underscores
+        if !property.name.contains('_') {
             return; // Name is already canonical
         }
 
         // Check if flags contain G_PARAM_STATIC_NAME or G_PARAM_STATIC_STRINGS
-        let flags_arg = call.arguments.last().unwrap();
-        let gobject_ast::Argument::Expression(flags_expr) = flags_arg;
+        use gobject_ast::types::ParamFlag;
+        let has_static_name = property.flags.contains(&ParamFlag::StaticName)
+            || property.flags.contains(&ParamFlag::StaticStrings);
 
-        let has_static_name = flags_expr.contains_identifier("G_PARAM_STATIC_NAME")
-            || flags_expr.contains_identifier("G_PARAM_STATIC_STRINGS");
+        let name_value = &property.name;
 
         // Name is non-canonical - create a fix
         let canonical_name = name_value.replace('_', "-");

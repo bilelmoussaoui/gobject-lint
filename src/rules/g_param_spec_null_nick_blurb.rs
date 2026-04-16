@@ -1,4 +1,4 @@
-use gobject_ast::CallExpression;
+use gobject_ast::{CallExpression, types::Property};
 
 use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
@@ -55,8 +55,14 @@ impl GParamSpecNullNickBlurb {
             return;
         }
 
-        let nick_is_null = call.arguments[1].is_null();
-        let blurb_is_null = call.arguments[2].is_null();
+        // Parse the property using the AST helpers
+        let Some(property) = Property::from_param_spec_call(call) else {
+            return;
+        };
+
+        // Check if nick/blurb are NULL using the parsed Property
+        let nick_is_null = property.nick.is_none();
+        let blurb_is_null = property.blurb.is_none();
 
         // Collect which parameters need fixing
         let mut issues = Vec::new();
@@ -107,22 +113,13 @@ impl GParamSpecNullNickBlurb {
         // STATIC_NAME is present (name is always a literal).
         let mut fixes = vec![string_fix];
 
-        if call.arguments.len() >= 4 {
+        if let Some(new_flags) = self.compute_new_flags(&property.flags) {
             let gobject_ast::Argument::Expression(flags_expr) = call.arguments.last().unwrap();
-            let flags_identifiers = flags_expr.collect_identifiers();
-            let flags_text = if flags_identifiers.is_empty() {
-                "0".to_string()
-            } else {
-                flags_identifiers.join(" | ")
-            };
-
-            if let Some(new_flags) = self.compute_new_flags(&flags_text) {
-                fixes.push(Fix::new(
-                    flags_expr.location().start_byte,
-                    flags_expr.location().end_byte,
-                    new_flags,
-                ));
-            }
+            fixes.push(Fix::new(
+                flags_expr.location().start_byte,
+                flags_expr.location().end_byte,
+                new_flags,
+            ));
         }
 
         violations.push(self.violation_with_fixes(
@@ -140,27 +137,49 @@ impl GParamSpecNullNickBlurb {
 
     /// After nick and blurb are set to NULL, compute the correct replacement
     /// flags string. Returns `None` if the flags are already correct.
-    fn compute_new_flags(&self, flags_text: &str) -> Option<String> {
-        const REMOVE: &[&str] = &[
-            "G_PARAM_STATIC_NICK",
-            "G_PARAM_STATIC_BLURB",
-            "G_PARAM_STATIC_STRINGS",
-        ];
+    fn compute_new_flags(&self, current_flags: &[gobject_ast::types::ParamFlag]) -> Option<String> {
+        use gobject_ast::types::ParamFlag;
 
-        let parts: Vec<&str> = flags_text.split('|').map(|s| s.trim()).collect();
-        let needs_removal = parts.iter().any(|p| REMOVE.contains(p));
-        let has_name = parts.contains(&"G_PARAM_STATIC_NAME");
+        // Check if we need to remove any flags
+        let needs_removal = current_flags.iter().any(|f| {
+            matches!(
+                f,
+                ParamFlag::StaticNick | ParamFlag::StaticBlurb | ParamFlag::StaticStrings
+            )
+        });
+        let has_name = current_flags
+            .iter()
+            .any(|f| matches!(f, ParamFlag::StaticName));
 
         if !needs_removal && has_name {
-            return None;
+            return None; // Already correct
         }
 
-        let mut new_parts: Vec<&str> = parts.into_iter().filter(|p| !REMOVE.contains(p)).collect();
+        // Filter out STATIC_NICK, STATIC_BLURB, and STATIC_STRINGS
+        let mut new_flags: Vec<ParamFlag> = current_flags
+            .iter()
+            .filter(|f| {
+                !matches!(
+                    f,
+                    ParamFlag::StaticNick | ParamFlag::StaticBlurb | ParamFlag::StaticStrings
+                )
+            })
+            .cloned()
+            .collect();
 
-        if !new_parts.contains(&"G_PARAM_STATIC_NAME") {
-            new_parts.push("G_PARAM_STATIC_NAME");
+        // Ensure STATIC_NAME is present
+        if !new_flags.iter().any(|f| matches!(f, ParamFlag::StaticName)) {
+            new_flags.push(ParamFlag::StaticName);
         }
 
-        Some(new_parts.join(" | "))
+        Some(if new_flags.is_empty() {
+            "0".to_string()
+        } else {
+            new_flags
+                .iter()
+                .map(|f| f.as_str())
+                .collect::<Vec<_>>()
+                .join(" | ")
+        })
     }
 }

@@ -56,6 +56,25 @@ impl ParamFlag {
             _ => ParamFlag::Unknown(name.to_string()),
         }
     }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            ParamFlag::Readable => "G_PARAM_READABLE",
+            ParamFlag::Writable => "G_PARAM_WRITABLE",
+            ParamFlag::ReadWrite => "G_PARAM_READWRITE",
+            ParamFlag::Construct => "G_PARAM_CONSTRUCT",
+            ParamFlag::ConstructOnly => "G_PARAM_CONSTRUCT_ONLY",
+            ParamFlag::LaxValidation => "G_PARAM_LAX_VALIDATION",
+            ParamFlag::StaticName => "G_PARAM_STATIC_NAME",
+            ParamFlag::Private => "G_PARAM_PRIVATE",
+            ParamFlag::StaticNick => "G_PARAM_STATIC_NICK",
+            ParamFlag::StaticBlurb => "G_PARAM_STATIC_BLURB",
+            ParamFlag::StaticStrings => "G_PARAM_STATIC_STRINGS",
+            ParamFlag::ExplicitNotify => "G_PARAM_EXPLICIT_NOTIFY",
+            ParamFlag::Deprecated => "G_PARAM_DEPRECATED",
+            ParamFlag::Unknown(name) => name.as_str(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
