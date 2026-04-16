@@ -208,23 +208,37 @@ impl Parser {
             return None;
         }
 
-        // Handle standalone enum Name { ... }; - parse as declaration first
+        // Handle standalone enum Name { ... }; or anonymous enum { ... }; - parse as
+        // declaration first
         if let Some(Statement::Declaration(_)) = self.parse_statement(node, source) {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "enum_specifier" {
-                    if let Some(name_node) = child.child_by_field_name("name") {
-                        let name = std::str::from_utf8(&source[name_node.byte_range()]).ok()?;
-                        if let Some(body) = child.child_by_field_name("body") {
-                            let values = self.extract_enum_values(body, source);
-                            return Some(EnumInfo {
-                                name: name.to_owned(),
-                                line: child.start_position().row + 1,
-                                values,
-                                body_start_byte: body.start_byte(),
-                                body_end_byte: body.end_byte(),
-                            });
-                        }
+                    if let Some(body) = child.child_by_field_name("body") {
+                        let values = self.extract_enum_values(body, source);
+
+                        // Try to get the name from the name field, or generate one for anonymous
+                        // enums
+                        let name = if let Some(name_node) = child.child_by_field_name("name") {
+                            std::str::from_utf8(&source[name_node.byte_range()])
+                                .ok()?
+                                .to_owned()
+                        } else {
+                            // Anonymous enum - generate a name based on the first value
+                            if let Some(first_value) = values.first() {
+                                format!("anonymous_{}", first_value.name)
+                            } else {
+                                "anonymous_enum".to_owned()
+                            }
+                        };
+
+                        return Some(EnumInfo {
+                            name,
+                            line: child.start_position().row + 1,
+                            values,
+                            body_start_byte: body.start_byte(),
+                            body_end_byte: body.end_byte(),
+                        });
                     }
                 }
             }

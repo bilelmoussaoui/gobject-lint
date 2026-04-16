@@ -8,7 +8,15 @@ pub struct GObjectType {
     pub type_macro: String, // e.g., "CLUTTER_TYPE_INPUT_DEVICE_TOOL"
     pub kind: GObjectTypeKind,
     pub class_struct: Option<ClassStruct>, // For derivable types
+    pub interfaces: Vec<InterfaceImplementation>, // G_IMPLEMENT_INTERFACE
+    pub has_private: bool,                 // G_ADD_PRIVATE in G_DEFINE_TYPE_WITH_CODE
     pub line: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterfaceImplementation {
+    pub interface_type: String, // e.g., "GTK_TYPE_EDITABLE"
+    pub init_function: String,  // e.g., "mask_entry_editable_init"
 }
 
 impl GObjectType {
@@ -31,6 +39,15 @@ impl GObjectType {
                 function_prefix, ..
             }
             | GObjectTypeKind::DefineAbstractType {
+                function_prefix, ..
+            }
+            | GObjectTypeKind::DefineTypeWithCode {
+                function_prefix, ..
+            }
+            | GObjectTypeKind::DefineBoxedType {
+                function_prefix, ..
+            }
+            | GObjectTypeKind::DefinePointerType {
                 function_prefix, ..
             } => function_prefix,
         };
@@ -97,5 +114,15 @@ pub enum GObjectTypeKind {
     DefineAbstractType {
         function_prefix: String,
         parent_type: String,
+    },
+    DefineTypeWithCode {
+        function_prefix: String,
+        parent_type: String,
+    },
+    DefineBoxedType {
+        function_prefix: String,
+    },
+    DefinePointerType {
+        function_prefix: String,
     },
 }

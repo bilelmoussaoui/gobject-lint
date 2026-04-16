@@ -270,6 +270,36 @@ impl Parser {
                 }
                 _ => {}
             }
+        } else if node.kind() == "enum_specifier" {
+            // Handle standalone anonymous enum { ... };
+            // This is not wrapped in a declaration node, so extract_enum won't find it
+            if let Some(body) = node.child_by_field_name("body") {
+                let values = self.extract_enum_values(body, source);
+
+                // Try to get the name from the name field, or generate one for anonymous enums
+                let name = if let Some(name_node) = node.child_by_field_name("name") {
+                    if let Ok(n) = std::str::from_utf8(&source[name_node.byte_range()]) {
+                        n.to_owned()
+                    } else {
+                        return; // Invalid UTF-8
+                    }
+                } else {
+                    // Anonymous enum - generate a name based on the first value
+                    if let Some(first_value) = values.first() {
+                        format!("anonymous_{}", first_value.name)
+                    } else {
+                        "anonymous_enum".to_owned()
+                    }
+                };
+
+                file_model.enums.push(crate::model::types::EnumInfo {
+                    name,
+                    line: node.start_position().row + 1,
+                    values,
+                    body_start_byte: body.start_byte(),
+                    body_end_byte: body.end_byte(),
+                });
+            }
         }
 
         // Only recurse for nodes that may contain top-level items

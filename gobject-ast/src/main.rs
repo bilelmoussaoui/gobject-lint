@@ -102,8 +102,31 @@ fn print_project(project: &Project) {
                     gobject_ast::GObjectTypeKind::DefineAbstractType { parent_type, .. } => {
                         format!("G_DEFINE_ABSTRACT_TYPE (parent: {})", parent_type)
                     }
+                    gobject_ast::GObjectTypeKind::DefineTypeWithCode { parent_type, .. } => {
+                        format!("G_DEFINE_TYPE_WITH_CODE (parent: {})", parent_type)
+                    }
+                    gobject_ast::GObjectTypeKind::DefineBoxedType { .. } => {
+                        "G_DEFINE_BOXED_TYPE".to_string()
+                    }
+                    gobject_ast::GObjectTypeKind::DefinePointerType { .. } => {
+                        "G_DEFINE_POINTER_TYPE".to_string()
+                    }
                 };
                 println!("    {} - {} (line {})", gt.type_name, kind_str, gt.line);
+
+                if !gt.interfaces.is_empty() {
+                    println!("      Interfaces: {}", gt.interfaces.len());
+                    for iface in &gt.interfaces {
+                        println!(
+                            "        {} -> {}",
+                            iface.interface_type, iface.init_function
+                        );
+                    }
+                }
+
+                if gt.has_private {
+                    println!("      Has private data: yes");
+                }
 
                 if let Some(ref class_struct) = gt.class_struct {
                     println!(

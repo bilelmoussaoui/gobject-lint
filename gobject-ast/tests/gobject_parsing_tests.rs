@@ -362,15 +362,63 @@ fn test_interface_implementation() {
 
     // Should have a G_DEFINE_TYPE_WITH_CODE macro
     assert_eq!(file.gobject_types.len(), 1);
+    let gobj = &file.gobject_types[0];
 
-    // Should have the interface init function
-    let iface_init = file
+    // Check that it detected the interface implementation
+    assert_eq!(
+        gobj.interfaces.len(),
+        1,
+        "Expected 1 interface implementation"
+    );
+    assert_eq!(gobj.interfaces[0].interface_type, "MY_TYPE_INTERFACE");
+    assert_eq!(gobj.interfaces[0].init_function, "my_interface_init");
+
+    // Should have the interface init function (definition)
+    let iface_init_funcs: Vec<_> = file
         .functions
         .iter()
-        .find(|f| f.name == "my_interface_init")
-        .expect("No interface init found");
+        .filter(|f| f.name == "my_interface_init")
+        .collect();
 
-    assert!(iface_init.is_definition);
+    assert!(!iface_init_funcs.is_empty(), "No interface init found");
+    assert!(
+        iface_init_funcs.iter().any(|f| f.is_definition),
+        "Expected at least one definition"
+    );
+}
+
+#[test]
+fn test_interface_impl_multiple() {
+    let project = parse_fixture("multi_interface.c");
+    let file = project.files.values().next().expect("No files parsed");
+
+    assert_eq!(file.gobject_types.len(), 1);
+    let gobj = &file.gobject_types[0];
+
+    // Check type kind
+    assert!(matches!(
+        gobj.kind,
+        gobject_ast::model::types::GObjectTypeKind::DefineTypeWithCode { .. }
+    ));
+
+    // Check that it has private data
+    assert!(
+        gobj.has_private,
+        "Expected has_private to be true with G_ADD_PRIVATE"
+    );
+
+    // Check multiple interfaces
+    assert_eq!(
+        gobj.interfaces.len(),
+        2,
+        "Expected 2 interface implementations"
+    );
+
+    assert_eq!(gobj.interfaces[0].interface_type, "GTK_TYPE_EDITABLE");
+    assert_eq!(gobj.interfaces[0].init_function, "my_editable_init");
+
+    assert_eq!(gobj.interfaces[1].interface_type, "GTK_TYPE_SCROLLABLE");
+    assert_eq!(gobj.interfaces[1].init_function, "my_scrollable_init");
 }
 
 #[test]

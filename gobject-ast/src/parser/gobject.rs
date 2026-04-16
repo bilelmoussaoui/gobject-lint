@@ -20,8 +20,15 @@ impl Parser {
             "G_DECLARE_FINAL_TYPE" | "G_DECLARE_DERIVABLE_TYPE" | "G_DECLARE_INTERFACE" => {
                 self.extract_g_declare(node, source, directive_text)
             }
-            "G_DEFINE_TYPE" | "G_DEFINE_TYPE_WITH_PRIVATE" | "G_DEFINE_ABSTRACT_TYPE" => {
+            "G_DEFINE_TYPE"
+            | "G_DEFINE_TYPE_WITH_PRIVATE"
+            | "G_DEFINE_ABSTRACT_TYPE"
+            | "G_DEFINE_TYPE_WITH_CODE"
+            | "G_DEFINE_FINAL_TYPE_WITH_CODE" => {
                 self.extract_g_define(node, source, directive_text)
+            }
+            "G_DEFINE_BOXED_TYPE" | "G_DEFINE_POINTER_TYPE" => {
+                self.extract_g_define_simple(node, source, directive_text)
             }
             _ => None,
         }
@@ -78,6 +85,8 @@ impl Parser {
                 type_macro,
                 kind,
                 class_struct: None,
+                interfaces: Vec::new(),
+                has_private: false,
                 line: parent.start_position().row + 1,
             });
         }
@@ -103,7 +112,29 @@ impl Parser {
                     function_prefix: function_prefix.to_owned(),
                     parent_type: parent_type.to_owned(),
                 },
+                "G_DEFINE_TYPE_WITH_CODE" | "G_DEFINE_FINAL_TYPE_WITH_CODE" => {
+                    GObjectTypeKind::DefineTypeWithCode {
+                        function_prefix: function_prefix.to_owned(),
+                        parent_type: parent_type.to_owned(),
+                    }
+                }
+                "G_DEFINE_BOXED_TYPE" => GObjectTypeKind::DefineBoxedType {
+                    function_prefix: function_prefix.to_owned(),
+                },
+                "G_DEFINE_POINTER_TYPE" => GObjectTypeKind::DefinePointerType {
+                    function_prefix: function_prefix.to_owned(),
+                },
                 _ => return None,
+            };
+
+            // For G_DEFINE_TYPE_WITH_CODE, extract interfaces and has_private
+            let (interfaces, has_private) = if matches!(
+                macro_name,
+                "G_DEFINE_TYPE_WITH_CODE" | "G_DEFINE_FINAL_TYPE_WITH_CODE"
+            ) {
+                self.extract_code_block_info_from_parent(parent, source, &arg_values)
+            } else {
+                (Vec::new(), false)
             };
 
             return Some(GObjectType {
@@ -111,6 +142,8 @@ impl Parser {
                 type_macro,
                 kind,
                 class_struct: None,
+                interfaces,
+                has_private,
                 line: parent.start_position().row + 1,
             });
         }
@@ -272,6 +305,8 @@ impl Parser {
             type_macro,
             kind,
             class_struct: None,
+            interfaces: Vec::new(),
+            has_private: false,
             line: node.start_position().row + 1,
         })
     }
@@ -308,6 +343,206 @@ impl Parser {
                 function_prefix: function_prefix.to_owned(),
                 parent_type: parent_type.to_owned(),
             },
+            "G_DEFINE_TYPE_WITH_CODE" | "G_DEFINE_FINAL_TYPE_WITH_CODE" => {
+                GObjectTypeKind::DefineTypeWithCode {
+                    function_prefix: function_prefix.to_owned(),
+                    parent_type: parent_type.to_owned(),
+                }
+            }
+            _ => return None,
+        };
+
+        // For G_DEFINE_TYPE_WITH_CODE, parse the code block for interfaces and private
+        let (interfaces, has_private) = if matches!(
+            macro_name,
+            "G_DEFINE_TYPE_WITH_CODE" | "G_DEFINE_FINAL_TYPE_WITH_CODE"
+        ) {
+            self.extract_code_block_info(args, source)
+        } else {
+            (Vec::new(), false)
+        };
+
+        Some(GObjectType {
+            type_name: type_name.to_owned(),
+            type_macro,
+            kind,
+            class_struct: None,
+            interfaces,
+            has_private,
+            line: node.start_position().row + 1,
+        })
+    }
+
+    fn extract_code_block_info(
+        &self,
+        args_node: Node,
+        source: &[u8],
+    ) -> (Vec<crate::model::types::InterfaceImplementation>, bool) {
+        use crate::model::types::InterfaceImplementation;
+
+        let mut interfaces = Vec::new();
+        let mut has_private = false;
+
+        // Walk through all arguments after the first 3 to find G_IMPLEMENT_INTERFACE
+        // and G_ADD_PRIVATE
+        let mut cursor = args_node.walk();
+        for arg in args_node.children(&mut cursor) {
+            if arg.kind() == "call_expression" {
+                if let Some(func_node) = arg.child_by_field_name("function") {
+                    let func_name =
+                        std::str::from_utf8(&source[func_node.byte_range()]).unwrap_or("");
+
+                    if func_name == "G_IMPLEMENT_INTERFACE" {
+                        // Extract interface_type and init_function
+                        if let Some(iface_args) = arg.child_by_field_name("arguments") {
+                            let mut iface_arg_values = Vec::new();
+                            self.collect_identifiers(iface_args, source, &mut iface_arg_values);
+
+                            if iface_arg_values.len() >= 2 {
+                                interfaces.push(InterfaceImplementation {
+                                    interface_type: iface_arg_values[0].to_owned(),
+                                    init_function: iface_arg_values[1].to_owned(),
+                                });
+                            }
+                        }
+                    } else if func_name == "G_ADD_PRIVATE" {
+                        has_private = true;
+                    }
+                }
+            }
+        }
+
+        (interfaces, has_private)
+    }
+
+    fn extract_code_block_info_from_parent(
+        &self,
+        parent: Node,
+        source: &[u8],
+        _arg_values: &[&str],
+    ) -> (Vec<crate::model::types::InterfaceImplementation>, bool) {
+        use crate::model::types::InterfaceImplementation;
+
+        let mut interfaces = Vec::new();
+        let mut has_private = false;
+
+        // Get the arguments node from the parent call_expression
+        let args_node = if let Some(args) = parent.child_by_field_name("arguments") {
+            args
+        } else {
+            return (interfaces, has_private);
+        };
+
+        // Walk the arguments node to find G_IMPLEMENT_INTERFACE and G_ADD_PRIVATE macro
+        // calls
+        fn walk_for_macros(
+            node: Node,
+            source: &[u8],
+            interfaces: &mut Vec<InterfaceImplementation>,
+            has_private: &mut bool,
+            parser: &Parser,
+        ) {
+            // Handle normal call_expression nodes
+            if node.kind() == "call_expression" {
+                if let Some(func_node) = node.child_by_field_name("function") {
+                    let func_name =
+                        std::str::from_utf8(&source[func_node.byte_range()]).unwrap_or("");
+
+                    if func_name == "G_ADD_PRIVATE" {
+                        *has_private = true;
+                    } else if func_name == "G_IMPLEMENT_INTERFACE" {
+                        // Sometimes tree-sitter parses it as a proper call_expression
+                        if let Some(args_node) = node.child_by_field_name("arguments") {
+                            let mut iface_args = Vec::new();
+                            parser.collect_identifiers(args_node, source, &mut iface_args);
+
+                            if iface_args.len() >= 2 {
+                                interfaces.push(InterfaceImplementation {
+                                    interface_type: iface_args[0].to_owned(),
+                                    init_function: iface_args[1].to_owned(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Handle ERROR nodes - sometimes tree-sitter can't parse G_IMPLEMENT_INTERFACE
+            // properly It creates an ERROR node with the identifier, followed
+            // by an argument_list sibling
+            if node.kind() == "ERROR" {
+                // Check if this ERROR node contains G_IMPLEMENT_INTERFACE identifier
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        let ident = std::str::from_utf8(&source[child.byte_range()]).unwrap_or("");
+                        if ident == "G_IMPLEMENT_INTERFACE" {
+                            // Look for the next sibling which should be an argument_list
+                            if let Some(next_sibling) = node.next_sibling() {
+                                if next_sibling.kind() == "argument_list" {
+                                    let mut iface_args = Vec::new();
+                                    parser.collect_identifiers(
+                                        next_sibling,
+                                        source,
+                                        &mut iface_args,
+                                    );
+
+                                    if iface_args.len() >= 2 {
+                                        interfaces.push(InterfaceImplementation {
+                                            interface_type: iface_args[0].to_owned(),
+                                            init_function: iface_args[1].to_owned(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Recurse into children
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                walk_for_macros(child, source, interfaces, has_private, parser);
+            }
+        }
+
+        walk_for_macros(args_node, source, &mut interfaces, &mut has_private, self);
+
+        (interfaces, has_private)
+    }
+
+    fn extract_g_define_simple(
+        &self,
+        node: Node,
+        source: &[u8],
+        macro_name: &str,
+    ) -> Option<GObjectType> {
+        // G_DEFINE_BOXED_TYPE (TypeName, function_prefix, copy_func, free_func)
+        // G_DEFINE_POINTER_TYPE (TypeName, function_prefix)
+        let args = node.child_by_field_name("arguments")?;
+
+        // Collect identifiers from the arguments using our AST walker
+        let mut arg_values = Vec::new();
+        self.collect_identifiers(args, source, &mut arg_values);
+
+        if arg_values.len() < 2 {
+            return None;
+        }
+
+        let type_name = arg_values[0];
+        let function_prefix = arg_values[1];
+
+        // Generate type macro from type name
+        let type_macro = format!("TYPE_{}", type_name.to_uppercase());
+
+        let kind = match macro_name {
+            "G_DEFINE_BOXED_TYPE" => GObjectTypeKind::DefineBoxedType {
+                function_prefix: function_prefix.to_owned(),
+            },
+            "G_DEFINE_POINTER_TYPE" => GObjectTypeKind::DefinePointerType {
+                function_prefix: function_prefix.to_owned(),
+            },
             _ => return None,
         };
 
@@ -316,6 +551,8 @@ impl Parser {
             type_macro,
             kind,
             class_struct: None,
+            interfaces: Vec::new(),
+            has_private: false,
             line: node.start_position().row + 1,
         })
     }
