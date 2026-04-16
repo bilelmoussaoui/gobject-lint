@@ -1,10 +1,16 @@
 use tree_sitter::Node;
 
-use crate::model::{CallExpression, Argument};
-use crate::parser::Parser;
+use crate::{
+    model::{Argument, CallExpression},
+    parser::Parser,
+};
 
 impl Parser {
-    pub(crate) fn parse_call_expression(&self, node: Node, source: &[u8]) -> Option<CallExpression> {
+    pub(crate) fn parse_call_expression(
+        &self,
+        node: Node,
+        source: &[u8],
+    ) -> Option<CallExpression> {
         let function_node = node.child_by_field_name("function")?;
         let function = std::str::from_utf8(&source[function_node.byte_range()])
             .ok()?

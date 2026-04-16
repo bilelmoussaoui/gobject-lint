@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::Expression;
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGNew;
@@ -34,16 +34,8 @@ impl Rule for UseGNew {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
+                for call in func.find_calls(&["g_malloc", "g_malloc0"]) {
+                    self.check_call(path, call, violations);
                 }
             }
         }
@@ -51,116 +43,52 @@ impl Rule for UseGNew {
 }
 
 impl UseGNew {
-    fn check_node(
+    fn check_call(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        file_path: &std::path::Path,
+        call: &gobject_ast::CallExpression,
         violations: &mut Vec<Violation>,
     ) {
-        // Look for g_malloc/g_malloc0 calls
-        if node.kind() == "call_expression"
-            && let Some((malloc_func, type_name, call_node)) =
-                self.extract_malloc_with_sizeof(ast_context, node, ctx.source)
-        {
-            let position = call_node.start_position();
-            let suggested_func = if malloc_func == "g_malloc0" {
-                "g_new0"
-            } else {
-                "g_new"
-            };
-
-            // Remove any parentheses from type name that might come from sizeof parsing
-            let clean_type = type_name.trim_matches(|c| c == '(' || c == ')');
-            let replacement = format!("{} ({}, 1)", suggested_func, clean_type);
-
-            let fix = Fix::from_node(call_node, ctx, &replacement);
-
-            violations.push(self.violation_with_fix(
-                ctx.file_path,
-                ctx.base_line + position.row,
-                position.column + 1,
-                format!(
-                    "Use {} instead of {}(sizeof({})) for type safety",
-                    replacement, malloc_func, type_name
-                ),
-                fix,
-            ));
+        // Need exactly 1 argument
+        if call.arguments.len() != 1 {
+            return;
         }
 
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, ctx, violations);
-        }
-    }
-
-    /// Extract g_malloc/g_malloc0 call with sizeof argument
-    /// Returns (malloc_function, type_name, call_node)
-    fn extract_malloc_with_sizeof<'a>(
-        &self,
-        ast_context: &AstContext,
-        call_node: Node<'a>,
-        source: &'a [u8],
-    ) -> Option<(&'static str, &'a str, Node<'a>)> {
-        let function = call_node.child_by_field_name("function")?;
-        let func_name = ast_context.get_node_text(function, source);
-
-        let malloc_func = match func_name {
-            "g_malloc" => "g_malloc",
-            "g_malloc0" => "g_malloc0",
-            _ => return None,
+        // Check if argument is sizeof(Type)
+        let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
+        let Expression::Sizeof(sizeof_expr) = arg_expr.as_ref() else {
+            return;
         };
 
-        // Get the arguments
-        let args = call_node.child_by_field_name("arguments")?;
+        // Extract the type - only works for simple types/identifiers
+        let Some(type_name) = sizeof_expr.type_name() else {
+            // Complex expression, not a simple type - skip
+            return;
+        };
 
-        // Look for sizeof(...) as the argument
-        let mut cursor = args.walk();
-        for child in args.children(&mut cursor) {
-            if child.kind() == "sizeof_expression"
-                && let Some(type_name) = self.extract_sizeof_type(ast_context, child, source)
-            {
-                return Some((malloc_func, type_name, call_node));
-            }
-        }
+        let suggested_func = if call.function == "g_malloc0" {
+            "g_new0"
+        } else {
+            "g_new"
+        };
 
-        None
-    }
+        let replacement = format!("{} ({}, 1)", suggested_func, type_name);
 
-    /// Extract the type from sizeof(Type) or sizeof (Type)
-    fn extract_sizeof_type<'a>(
-        &self,
-        ast_context: &AstContext,
-        sizeof_node: Node,
-        source: &'a [u8],
-    ) -> Option<&'a str> {
-        // sizeof can have different children depending on whether it's sizeof(type) or
-        // sizeof(expr) We want to extract the type
-        let mut cursor = sizeof_node.walk();
-        for child in sizeof_node.children(&mut cursor) {
-            // Skip the 'sizeof' keyword and parentheses
-            if child.kind() == "sizeof" || child.kind() == "(" || child.kind() == ")" {
-                continue;
-            }
+        let fix = Fix::new(
+            call.location.start_byte,
+            call.location.end_byte,
+            replacement.clone(),
+        );
 
-            // Get the type or expression
-            let text = ast_context.get_node_text(child, source);
-
-            // Clean up the type name (remove spaces, handle pointer types)
-            let cleaned = text.trim();
-
-            // Don't suggest for complex expressions, only simple types
-            if !cleaned.contains('+')
-                && !cleaned.contains('-')
-                && !cleaned.contains('*')
-                && !cleaned.contains('/')
-                && !cleaned.contains('[')
-            {
-                return Some(cleaned);
-            }
-        }
-
-        None
+        violations.push(self.violation_with_fix(
+            file_path,
+            call.location.line,
+            call.location.column,
+            format!(
+                "Use {} instead of {}(sizeof({})) for type safety",
+                replacement, call.function, type_name
+            ),
+            fix,
+        ));
     }
 }

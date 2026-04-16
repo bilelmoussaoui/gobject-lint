@@ -1,10 +1,16 @@
 use tree_sitter::Node;
 
-use crate::model::{ConditionalExpression, Expression};
-use crate::parser::Parser;
+use crate::{
+    model::{ConditionalExpression, Expression},
+    parser::Parser,
+};
 
 impl Parser {
-    pub(crate) fn parse_conditional_expression(&self, node: Node, source: &[u8]) -> Option<Expression> {
+    pub(crate) fn parse_conditional_expression(
+        &self,
+        node: Node,
+        source: &[u8],
+    ) -> Option<Expression> {
         let condition_node = node.child_by_field_name("condition")?;
         let condition = self.parse_expression(condition_node, source)?;
 

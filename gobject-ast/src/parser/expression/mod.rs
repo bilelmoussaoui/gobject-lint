@@ -1,16 +1,17 @@
-mod call;
 mod assignment;
 mod binary;
-mod unary;
+mod call;
 mod cast;
 mod conditional;
+mod sizeof;
 mod subscript;
+mod unary;
 mod update;
 
 use tree_sitter::Node;
 
-use crate::model::Expression;
 use super::Parser;
+use crate::model::Expression;
 
 impl Parser {
     pub(super) fn parse_expression(&self, node: Node, source: &[u8]) -> Option<Expression> {
@@ -88,15 +89,9 @@ impl Parser {
             })),
             "cast_expression" => self.parse_cast_expression(node, source),
             "conditional_expression" => self.parse_conditional_expression(node, source),
-            "sizeof_expression" => {
-                let text = std::str::from_utf8(&source[node.byte_range()])
-                    .ok()?
-                    .to_owned();
-                Some(Expression::Sizeof(SizeofExpression {
-                    text,
-                    location: self.node_location(node),
-                }))
-            }
+            "sizeof_expression" => self
+                .parse_sizeof_expression(node, source)
+                .map(Expression::Sizeof),
             "subscript_expression" => self.parse_subscript_expression(node, source),
             "initializer_list" => {
                 let text = std::str::from_utf8(&source[node.byte_range()])

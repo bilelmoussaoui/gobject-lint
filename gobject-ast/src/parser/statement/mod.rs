@@ -1,15 +1,15 @@
-mod expression_stmt;
-mod if_stmt;
-mod return_stmt;
-mod goto_stmt;
-mod labeled_stmt;
 mod compound_stmt;
+mod expression_stmt;
+mod goto_stmt;
+mod if_stmt;
+mod labeled_stmt;
+mod return_stmt;
 mod variable_decl;
 
 use tree_sitter::Node;
 
-use crate::model::Statement;
 use super::Parser;
+use crate::model::Statement;
 
 impl Parser {
     pub(super) fn parse_statement(&self, node: Node, source: &[u8]) -> Option<Statement> {

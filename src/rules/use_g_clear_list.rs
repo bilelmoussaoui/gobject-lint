@@ -115,11 +115,7 @@ impl UseGClearList {
         }
     }
 
-    fn extract_list_free(
-        &self,
-        stmt: &Statement,
-        source: &[u8],
-    ) -> Option<(String, &'static str)> {
+    fn extract_list_free(&self, stmt: &Statement, source: &[u8]) -> Option<(String, &'static str)> {
         let call = stmt.extract_call()?;
 
         let list_type = match call.function.as_str() {

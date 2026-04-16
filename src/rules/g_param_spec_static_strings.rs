@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::CallExpression;
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct GParamSpecStaticStrings;
@@ -34,16 +34,14 @@ impl Rule for GParamSpecStaticStrings {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
+                // Find all g_param_spec_* calls (but skip g_param_spec_override and
+                // g_param_spec_internal)
+                for call in func.find_calls_matching(|name| {
+                    name.starts_with("g_param_spec_")
+                        && name != "g_param_spec_override"
+                        && name != "g_param_spec_internal"
+                }) {
+                    self.check_call(path, call, violations);
                 }
             }
         }
@@ -51,108 +49,41 @@ impl Rule for GParamSpecStaticStrings {
 }
 
 impl GParamSpecStaticStrings {
-    fn check_node(
+    fn check_call(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        file_path: &std::path::Path,
+        call: &CallExpression,
         violations: &mut Vec<Violation>,
     ) {
-        // Look for g_param_spec_* calls
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let func_name = ast_context.get_node_text(function, ctx.source);
-
-            if func_name.starts_with("g_param_spec_")
-                && func_name != "g_param_spec_override"
-                && func_name != "g_param_spec_internal"
-            {
-                // Check if this g_param_spec call has string literals and missing
-                // G_PARAM_STATIC_STRINGS
-                if let Some((
-                    flags_arg,
-                    flags_arg_text,
-                    is_satisfied,
-                    nick_is_literal,
-                    blurb_is_literal,
-                )) = self.check_param_spec_flags(ast_context, node, ctx.source)
-                    && !is_satisfied
-                {
-                    let needed = self.needed_flags(nick_is_literal, blurb_is_literal);
-                    let fix = Fix::from_node(
-                        flags_arg,
-                        ctx,
-                        self.build_fixed_flags(flags_arg_text, nick_is_literal, blurb_is_literal),
-                    );
-
-                    violations.push(self.violation_with_fix(
-                        ctx.file_path,
-                        ctx.base_line + node.start_position().row,
-                        node.start_position().column + 1,
-                        format!(
-                            "Add {} to {} flags (saves memory for static strings)",
-                            needed, func_name
-                        ),
-                        fix,
-                    ));
-                }
-            }
-        }
-
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, ctx, violations);
-        }
-    }
-
-    /// Check if g_param_spec_* has string literals and whether it already has
-    /// the minimal required static-string flags.
-    ///
-    /// Returns `(flags_node, flags_text, is_satisfied, nick_is_literal,
-    /// blurb_is_literal)`.
-    fn check_param_spec_flags<'a>(
-        &self,
-        ast_context: &AstContext,
-        call_node: Node<'a>,
-        source: &'a [u8],
-    ) -> Option<(Node<'a>, &'a str, bool, bool, bool)> {
-        let args = call_node.child_by_field_name("arguments")?;
-
-        let mut cursor = args.walk();
-        let arguments: Vec<Node> = args
-            .children(&mut cursor)
-            .filter(|c| c.kind() != "(" && c.kind() != ")" && c.kind() != ",")
-            .collect();
-
         // g_param_spec_*(name, nick, blurb, ..., flags) — need at least 4 args
-        if arguments.len() < 4 {
-            return None;
+        if call.arguments.len() < 4 {
+            return;
         }
 
-        let name_is_literal = arguments[0].kind() == "string_literal";
-        let nick_is_literal = arguments[1].kind() == "string_literal";
-        let blurb_is_literal = arguments[2].kind() == "string_literal";
+        // Check if arguments are string literals or NULL
+        let name_is_literal = call.arguments[0].is_string_or_macro_string();
+        let nick_is_literal = call.arguments[1].is_string_or_macro_string();
+        let blurb_is_literal = call.arguments[2].is_string_or_macro_string();
 
-        let nick_text = ast_context.get_node_text(arguments[1], source);
-        let blurb_text = ast_context.get_node_text(arguments[2], source);
+        let nick_is_null = call.arguments[1].is_null();
+        let blurb_is_null = call.arguments[2].is_null();
 
         // Only check when name is a string literal and nick/blurb are literals or NULL
         if !name_is_literal
-            || (!nick_is_literal && !ast_context.is_null_literal(nick_text))
-            || (!blurb_is_literal && !ast_context.is_null_literal(blurb_text))
+            || (!nick_is_literal && !nick_is_null)
+            || (!blurb_is_literal && !blurb_is_null)
         {
-            return None;
+            return;
         }
 
-        let flags_arg = *arguments.last()?;
-        let flags_text = ast_context.get_node_text(flags_arg, source);
+        // Get the flags argument (last argument)
+        let gobject_ast::Argument::Expression(flags_expr) = call.arguments.last().unwrap();
 
-        let has_static_strings = flags_text.contains("G_PARAM_STATIC_STRINGS");
-        let has_static_name = flags_text.contains("G_PARAM_STATIC_NAME");
-        let has_static_nick = flags_text.contains("G_PARAM_STATIC_NICK");
-        let has_static_blurb = flags_text.contains("G_PARAM_STATIC_BLURB");
+        // Check what static flags are present
+        let has_static_strings = flags_expr.contains_identifier("G_PARAM_STATIC_STRINGS");
+        let has_static_name = flags_expr.contains_identifier("G_PARAM_STATIC_NAME");
+        let has_static_nick = flags_expr.contains_identifier("G_PARAM_STATIC_NICK");
+        let has_static_blurb = flags_expr.contains_identifier("G_PARAM_STATIC_BLURB");
 
         // Is the minimal required set of static flags already present?
         let is_satisfied = if has_static_strings {
@@ -170,13 +101,37 @@ impl GParamSpecStaticStrings {
             has_static_name
         };
 
-        Some((
-            flags_arg,
-            flags_text,
-            is_satisfied,
-            nick_is_literal,
-            blurb_is_literal,
-        ))
+        if is_satisfied {
+            return;
+        }
+
+        // Build the fix
+        let flags_identifiers = flags_expr.collect_identifiers();
+        let flags_text = if flags_identifiers.is_empty() {
+            "0".to_string()
+        } else {
+            flags_identifiers.join(" | ")
+        };
+
+        let needed = self.needed_flags(nick_is_literal, blurb_is_literal);
+        let replacement = self.build_fixed_flags(&flags_text, nick_is_literal, blurb_is_literal);
+
+        let fix = Fix::new(
+            flags_expr.location().start_byte,
+            flags_expr.location().end_byte,
+            replacement,
+        );
+
+        violations.push(self.violation_with_fix(
+            file_path,
+            call.location.line,
+            call.location.column,
+            format!(
+                "Add {} to {} flags (saves memory for static strings)",
+                needed, call.function
+            ),
+            fix,
+        ));
     }
 
     /// Return the flag expression that should be added, given which args are

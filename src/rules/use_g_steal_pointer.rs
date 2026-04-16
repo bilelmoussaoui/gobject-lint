@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::{Expression, Statement};
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGStealPointer;
@@ -29,84 +29,63 @@ impl Rule for UseGStealPointer {
         violations: &mut Vec<Violation>,
     ) {
         for (path, file) in ast_context.iter_c_files() {
+            // Read the source file
+            let source = std::fs::read(path).ok();
+            let source_slice = source.as_deref().unwrap_or(&[]);
+
             for func in &file.functions {
                 if !func.is_definition {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
-                }
+                self.check_function(func, path, source_slice, violations);
             }
         }
     }
 }
 
 impl UseGStealPointer {
-    fn check_node(
+    fn check_function(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        func: &gobject_ast::FunctionInfo,
+        file_path: &std::path::Path,
+        source: &[u8],
         violations: &mut Vec<Violation>,
     ) {
-        if node.kind() == "compound_statement" {
-            self.check_compound(ast_context, node, ctx, violations);
-            return;
-        }
-
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, ctx, violations);
-        }
+        self.check_statements(&func.body_statements, file_path, source, violations);
     }
 
-    fn check_compound(
+    fn check_statements(
         &self,
-        ast_context: &AstContext,
-        compound: Node,
-        ctx: &CheckContext,
+        statements: &[Statement],
+        file_path: &std::path::Path,
+        source: &[u8],
         violations: &mut Vec<Violation>,
     ) {
-        let mut cursor = compound.walk();
-        let stmts: Vec<Node> = compound
-            .children(&mut cursor)
-            .filter(|n| n.kind() != "{" && n.kind() != "}" && n.kind() != "comment")
-            .collect();
-
         let mut i = 0;
-        while i < stmts.len() {
+        while i < statements.len() {
             // Try if/else steal: if (expr) { dest = expr; expr = NULL; } else { dest =
             // NULL; }
-            if self.try_if_else_steal(ast_context, stmts[i], ctx, violations) {
+            if self.try_if_else_steal(&statements[i], file_path, source, violations) {
                 i += 1;
                 continue;
             }
 
-            // Try if-without-else steal with brace removal:
+            // Try if-without-else steal:
             //   if (c) { dest = ptr; ptr = NULL; }
             //   if (c) { T *tmp = ptr; ptr = NULL; return tmp; }
-            if self.try_if_no_else_steal(ast_context, stmts[i], ctx, violations) {
+            if self.try_if_no_else_steal(&statements[i], file_path, source, violations) {
                 i += 1;
                 continue;
             }
 
             // Try 3-statement pattern: T *tmp = ptr; ptr = NULL; return tmp;
-            if i + 2 < stmts.len()
+            if i + 2 < statements.len()
                 && self.try_declare_null_return(
-                    ast_context,
-                    stmts[i],
-                    stmts[i + 1],
-                    stmts[i + 2],
-                    ctx,
+                    &statements[i],
+                    &statements[i + 1],
+                    &statements[i + 2],
+                    file_path,
                     violations,
                 )
             {
@@ -115,15 +94,35 @@ impl UseGStealPointer {
             }
 
             // Try 2-statement pattern: other = ptr; ptr = NULL;
-            if i + 1 < stmts.len()
-                && self.try_assign_null(ast_context, stmts[i], stmts[i + 1], ctx, violations)
+            if i + 1 < statements.len()
+                && self.try_assign_null(&statements[i], &statements[i + 1], file_path, violations)
             {
                 i += 2;
                 continue;
             }
 
             // Recurse into nested blocks
-            self.check_node(ast_context, stmts[i], ctx, violations);
+            match &statements[i] {
+                Statement::Compound(compound) => {
+                    self.check_statements(&compound.statements, file_path, source, violations);
+                }
+                Statement::If(if_stmt) => {
+                    self.check_statements(&if_stmt.then_body, file_path, source, violations);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.check_statements(else_body, file_path, source, violations);
+                    }
+                }
+                Statement::Labeled(labeled) => {
+                    self.check_statements(
+                        std::slice::from_ref(&labeled.statement),
+                        file_path,
+                        source,
+                        violations,
+                    );
+                }
+                _ => {}
+            }
+
             i += 1;
         }
     }
@@ -131,46 +130,61 @@ impl UseGStealPointer {
     /// Matches: `T *tmp = ptr_expr; ptr_expr = NULL; return tmp;`
     fn try_declare_null_return(
         &self,
-        ast_context: &AstContext,
-        s1: Node,
-        s2: Node,
-        s3: Node,
-        ctx: &CheckContext,
+        s1: &Statement,
+        s2: &Statement,
+        s3: &Statement,
+        file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) -> bool {
-        if s1.kind() != "declaration" {
-            return false;
-        }
-
-        let Some((tmp_name, ptr_expr)) = self.extract_decl_init(ast_context, s1, ctx.source) else {
+        // s1: T *tmp = ptr_expr
+        let Statement::Declaration(decl) = s1 else {
             return false;
         };
 
-        if !self.is_null_assign(ast_context, s2, ptr_expr, ctx.source) {
-            return false;
-        }
-
-        if s3.kind() != "return_statement" {
-            return false;
-        }
-
-        let mut cursor = s3.walk();
-        let ret_val = s3
-            .children(&mut cursor)
-            .find(|n| n.kind() != "return" && n.kind() != ";");
-        let Some(ret_val) = ret_val else {
+        let Some(init_expr) = &decl.initializer else {
             return false;
         };
-        if ast_context.get_node_text(ret_val, ctx.source) != tmp_name {
+
+        // Get the variable name from the initializer
+        let Some(ptr_expr) = init_expr.extract_variable_name() else {
+            return false;
+        };
+
+        // Skip NULL assignments and dereferences
+        if self.is_null_text(&ptr_expr) || ptr_expr.starts_with('*') {
+            return false;
+        }
+
+        let tmp_name = &decl.name;
+
+        // s2: ptr_expr = NULL
+        if !self.is_null_assign(s2, &ptr_expr) {
+            return false;
+        }
+
+        // s3: return tmp
+        let Statement::Return(ret) = s3 else {
+            return false;
+        };
+
+        if let Some(Expression::Identifier(id)) = &ret.value {
+            if id.name != *tmp_name {
+                return false;
+            }
+        } else {
             return false;
         }
 
         let replacement = format!("return g_steal_pointer (&{ptr_expr});");
-        let fix = Fix::from_range(s1.start_byte(), s3.end_byte(), ctx, &replacement);
+        let fix = Fix::new(
+            s1.location().start_byte,
+            s3.location().end_byte,
+            replacement.clone(),
+        );
         violations.push(self.violation_with_fix(
-            ctx.file_path,
-            ctx.base_line + s1.start_position().row,
-            s1.start_position().column + 1,
+            file_path,
+            s1.location().line,
+            s1.location().column,
             format!("Use {replacement} instead of copying {ptr_expr} and setting it to NULL"),
             fix,
         ));
@@ -180,18 +194,16 @@ impl UseGStealPointer {
     /// Matches: `other_expr = ptr_expr; ptr_expr = NULL;`
     fn try_assign_null(
         &self,
-        ast_context: &AstContext,
-        s1: Node,
-        s2: Node,
-        ctx: &CheckContext,
+        s1: &Statement,
+        s2: &Statement,
+        file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) -> bool {
-        let Some((other_expr, ptr_expr)) = self.extract_assignment(ast_context, s1, ctx.source)
-        else {
+        let Some((other_expr, ptr_expr)) = self.extract_assignment(s1) else {
             return false;
         };
 
-        if self.is_null_text(ptr_expr) {
+        if self.is_null_text(&ptr_expr) {
             return false;
         }
 
@@ -200,44 +212,45 @@ impl UseGStealPointer {
             return false;
         }
 
-        if !self.is_null_assign(ast_context, s2, ptr_expr, ctx.source) {
+        if !self.is_null_assign(s2, &ptr_expr) {
             return false;
         }
 
         let replacement = format!("{other_expr} = g_steal_pointer (&{ptr_expr});");
-        let fix = Fix::from_range(s1.start_byte(), s2.end_byte(), ctx, &replacement);
+        let fix = Fix::new(
+            s1.location().start_byte,
+            s2.location().end_byte,
+            replacement.clone(),
+        );
         violations.push(self.violation_with_fix(
-            ctx.file_path,
-            ctx.base_line + s1.start_position().row,
-            s1.start_position().column + 1,
+            file_path,
+            s1.location().line,
+            s1.location().column,
             format!("Use g_steal_pointer (&{ptr_expr}) instead of copying and setting to NULL"),
             fix,
         ));
         true
     }
 
-    /// Matches:
-    /// ```c
-    /// if (expr) { dest = expr; expr = NULL; } else { dest = NULL; }
-    /// ```
-    /// Condition may be bare `expr` or `expr != NULL` / `NULL != expr`.
+    /// Matches: if (expr) { dest = expr; expr = NULL; } else { dest = NULL; }
     fn try_if_else_steal(
         &self,
-        ast_context: &AstContext,
-        if_node: Node,
-        ctx: &CheckContext,
+        stmt: &Statement,
+        file_path: &std::path::Path,
+        _source: &[u8],
         violations: &mut Vec<Violation>,
     ) -> bool {
-        if if_node.kind() != "if_statement" {
-            return false;
-        }
-
-        // Extract the tested expression from the condition
-        let Some(condition) = if_node.child_by_field_name("condition") else {
+        let Statement::If(if_stmt) = stmt else {
             return false;
         };
-        let Some(expr_text) = self.extract_condition_expr(ast_context, condition, ctx.source)
-        else {
+
+        // Must have else block
+        let Some(else_body) = &if_stmt.else_body else {
+            return false;
+        };
+
+        // Extract tested expression from condition
+        let Some(expr_text) = self.extract_condition_expr(&if_stmt.condition) else {
             return false;
         };
 
@@ -246,181 +259,230 @@ impl UseGStealPointer {
             return false;
         }
 
-        // Then-block: must be compound_statement with exactly 2 stmts
-        let Some(consequence) = if_node.child_by_field_name("consequence") else {
-            return false;
-        };
-        if consequence.kind() != "compound_statement" {
-            return false;
-        }
-        let mut cursor = consequence.walk();
-        let then_stmts: Vec<Node> = consequence
-            .children(&mut cursor)
-            .filter(|n| n.kind() != "{" && n.kind() != "}" && n.kind() != "comment")
-            .collect();
-        if then_stmts.len() != 2 {
+        // Then-block must have exactly 2 statements
+        if if_stmt.then_body.len() != 2 {
             return false;
         }
 
-        // then_stmts[0]: dest = expr
-        let Some((dest_expr, rhs)) =
-            self.extract_assignment(ast_context, then_stmts[0], ctx.source)
-        else {
+        // then_body[0]: dest = expr
+        let Some((dest_expr, rhs)) = self.extract_assignment(&if_stmt.then_body[0]) else {
             return false;
         };
         if rhs != expr_text {
             return false;
         }
 
-        // then_stmts[1]: expr = NULL
-        if !self.is_null_assign(ast_context, then_stmts[1], expr_text, ctx.source) {
+        // then_body[1]: expr = NULL
+        if !self.is_null_assign(&if_stmt.then_body[1], &expr_text) {
             return false;
         }
 
-        // Else-block: must exist and contain exactly 1 stmt: dest = NULL
-        let Some(alternative) = if_node.child_by_field_name("alternative") else {
-            return false;
-        };
-        let mut cursor = alternative.walk();
-        let else_body = alternative
-            .children(&mut cursor)
-            .find(|n| n.kind() == "compound_statement");
-        let Some(else_body) = else_body else {
-            return false;
-        };
-        let mut cursor = else_body.walk();
-        let else_stmts: Vec<Node> = else_body
-            .children(&mut cursor)
-            .filter(|n| n.kind() != "{" && n.kind() != "}" && n.kind() != "comment")
-            .collect();
-        if else_stmts.len() != 1 {
+        // Else-block must have exactly 1 statement: dest = NULL
+        if else_body.len() != 1 {
             return false;
         }
-        if !self.is_null_assign(ast_context, else_stmts[0], dest_expr, ctx.source) {
+        if !self.is_null_assign(&else_body[0], &dest_expr) {
             return false;
         }
 
         let replacement = format!("{dest_expr} = g_steal_pointer (&{expr_text});");
-        let fix = Fix::from_range(if_node.start_byte(), if_node.end_byte(), ctx, &replacement);
+        let fix = Fix::new(
+            if_stmt.location.start_byte,
+            if_stmt.location.end_byte,
+            replacement.clone(),
+        );
         violations.push(self.violation_with_fix(
-            ctx.file_path,
-            ctx.base_line + if_node.start_position().row,
-            if_node.start_position().column + 1,
+            file_path,
+            if_stmt.location.line,
+            if_stmt.location.column,
             format!("Use g_steal_pointer (&{expr_text}) instead of if/else copy-and-NULL pattern"),
             fix,
         ));
         true
     }
 
-    /// Matches an if-without-else whose braced body contains a steal pattern.
-    /// If the condition tests the same variable being stolen, removes the
-    /// entire if. Otherwise, just removes the braces:
-    ///   `if (ptr) { dest = ptr; ptr = NULL; }` → `dest =
-    /// g_steal_pointer(&ptr);`   `if (c) { dest = ptr; ptr = NULL; }`   →
-    /// `if (c)\n  dest = g_steal_pointer(&ptr);`
+    /// Extract the tested pointer expression from an if-condition
+    /// Handles bare `expr`, `expr != NULL`, and `NULL != expr`
+    fn extract_condition_expr(&self, condition: &Expression) -> Option<String> {
+        match condition {
+            Expression::Identifier(id) => Some(id.name.clone()),
+            Expression::FieldAccess(f) => Some(f.text.clone()),
+            Expression::Binary(bin) => {
+                if bin.operator == "!=" {
+                    // Check for expr != NULL or NULL != expr
+                    if matches!(&*bin.right, Expression::Null(_)) {
+                        // expr != NULL, return left side
+                        return self.extract_simple_expr(&bin.left);
+                    }
+                    if matches!(&*bin.left, Expression::Null(_)) {
+                        // NULL != expr, return right side
+                        return self.extract_simple_expr(&bin.right);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn extract_simple_expr(&self, expr: &Expression) -> Option<String> {
+        match expr {
+            Expression::Identifier(id) => Some(id.name.clone()),
+            Expression::FieldAccess(f) => Some(f.text.clone()),
+            _ => None,
+        }
+    }
+
+    /// Matches if-without-else with steal pattern in body
+    /// if (c) { dest = ptr; ptr = NULL; } or if (c) { T *tmp = ptr; ptr = NULL;
+    /// return tmp; }
     fn try_if_no_else_steal(
         &self,
-        ast_context: &AstContext,
-        if_node: Node,
-        ctx: &CheckContext,
+        stmt: &Statement,
+        file_path: &std::path::Path,
+        source: &[u8],
         violations: &mut Vec<Violation>,
     ) -> bool {
-        if if_node.kind() != "if_statement" {
+        let Statement::If(if_stmt) = stmt else {
             return false;
-        }
+        };
+
         // Must have no else
-        if if_node.child_by_field_name("alternative").is_some() {
-            return false;
-        }
-        let Some(condition) = if_node.child_by_field_name("condition") else {
-            return false;
-        };
-        let Some(consequence) = if_node.child_by_field_name("consequence") else {
-            return false;
-        };
-        if consequence.kind() != "compound_statement" {
+        if if_stmt.else_body.is_some() {
             return false;
         }
 
-        let mut cursor = consequence.walk();
-        let stmts: Vec<Node> = consequence
-            .children(&mut cursor)
-            .filter(|n| n.kind() != "{" && n.kind() != "}" && n.kind() != "comment")
-            .collect();
+        // Try to extract condition expression
+        let condition_expr = self.extract_condition_expr(&if_stmt.condition);
 
-        // Try to extract the condition expression
-        let condition_expr = self.extract_condition_expr(ast_context, condition, ctx.source);
-
-        // 2-stmt: dest = ptr; ptr = NULL;
-        if stmts.len() == 2 {
-            let Some((other_expr, ptr_expr)) =
-                self.extract_assignment(ast_context, stmts[0], ctx.source)
-            else {
+        // Pattern 1: 2 statements - dest = ptr; ptr = NULL;
+        if if_stmt.then_body.len() == 2 {
+            let Some((dest_expr, ptr_expr)) = self.extract_assignment(&if_stmt.then_body[0]) else {
                 return false;
             };
-            if self.is_null_text(ptr_expr) || ptr_expr.starts_with('*') {
+
+            if self.is_null_text(&ptr_expr) || ptr_expr.starts_with('*') {
                 return false;
             }
-            if !self.is_null_assign(ast_context, stmts[1], ptr_expr, ctx.source) {
+
+            if !self.is_null_assign(&if_stmt.then_body[1], &ptr_expr) {
                 return false;
             }
-            let replacement = format!("{other_expr} = g_steal_pointer (&{ptr_expr});");
+
+            let replacement = format!("{dest_expr} = g_steal_pointer (&{ptr_expr});");
 
             // If condition tests the same variable being stolen, remove entire if
-            let (start, end) = if condition_expr == Some(ptr_expr) {
-                (if_node.start_byte(), if_node.end_byte())
+            // Otherwise just replace the body
+            let fix = if condition_expr.as_ref() == Some(&ptr_expr) {
+                Fix::new(
+                    if_stmt.location.start_byte,
+                    if_stmt.location.end_byte,
+                    replacement.clone(),
+                )
+            } else if if_stmt.then_has_braces {
+                // If it has braces, remove them and replace body with single statement
+                let body_start = if_stmt.then_body[0].location().start_byte;
+                let body_end = if_stmt.then_body[1].location().end_byte;
+                if let Some((open_brace, close_brace)) =
+                    self.find_braces(source, body_start, body_end)
+                {
+                    // The `{` is on its own line with indentation already in the source.
+                    // When we replace from `{` to `}`, that indentation before `{` stays in place.
+                    // So we don't add any extra indentation to the replacement.
+                    Fix::new(open_brace, close_brace + 1, replacement.clone())
+                } else {
+                    // Fallback: just replace the body
+                    Fix::new(body_start, body_end, replacement.clone())
+                }
             } else {
-                (consequence.start_byte(), consequence.end_byte())
+                // No braces, just replace the body
+                let body_start = if_stmt.then_body[0].location().start_byte;
+                let body_end = if_stmt.then_body[1].location().end_byte;
+                Fix::new(body_start, body_end, replacement.clone())
             };
 
-            let fix = Fix::from_range(start, end, ctx, &replacement);
             violations.push(self.violation_with_fix(
-                ctx.file_path,
-                ctx.base_line + stmts[0].start_position().row,
-                stmts[0].start_position().column + 1,
+                file_path,
+                if_stmt.then_body[0].location().line,
+                if_stmt.then_body[0].location().column,
                 format!("Use g_steal_pointer (&{ptr_expr}) instead of copying and setting to NULL"),
                 fix,
             ));
             return true;
         }
 
-        // 3-stmt: T *tmp = ptr; ptr = NULL; return tmp;
-        if stmts.len() == 3 {
-            let Some((tmp_name, ptr_expr)) =
-                self.extract_decl_init(ast_context, stmts[0], ctx.source)
-            else {
+        // Pattern 2: 3 statements - T *tmp = ptr; ptr = NULL; return tmp;
+        if if_stmt.then_body.len() == 3 {
+            let Statement::Declaration(decl) = &if_stmt.then_body[0] else {
                 return false;
             };
-            if !self.is_null_assign(ast_context, stmts[1], ptr_expr, ctx.source) {
-                return false;
-            }
-            if stmts[2].kind() != "return_statement" {
-                return false;
-            }
-            let mut cursor = stmts[2].walk();
-            let ret_val = stmts[2]
-                .children(&mut cursor)
-                .find(|n| n.kind() != "return" && n.kind() != ";");
-            let Some(ret_val) = ret_val else {
+
+            let Some(init_expr) = &decl.initializer else {
                 return false;
             };
-            if ast_context.get_node_text(ret_val, ctx.source) != tmp_name {
+
+            let Some(ptr_expr) = init_expr.extract_variable_name() else {
+                return false;
+            };
+
+            if self.is_null_text(&ptr_expr) || ptr_expr.starts_with('*') {
                 return false;
             }
+
+            let tmp_name = &decl.name;
+
+            if !self.is_null_assign(&if_stmt.then_body[1], &ptr_expr) {
+                return false;
+            }
+
+            // Third statement must be return tmp
+            let Statement::Return(ret) = &if_stmt.then_body[2] else {
+                return false;
+            };
+
+            if let Some(Expression::Identifier(id)) = &ret.value {
+                if id.name != *tmp_name {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+
             let replacement = format!("return g_steal_pointer (&{ptr_expr});");
 
             // If condition tests the same variable being stolen, remove entire if
-            let (start, end) = if condition_expr == Some(ptr_expr) {
-                (if_node.start_byte(), if_node.end_byte())
+            let fix = if condition_expr.as_ref() == Some(&ptr_expr) {
+                Fix::new(
+                    if_stmt.location.start_byte,
+                    if_stmt.location.end_byte,
+                    replacement.clone(),
+                )
+            } else if if_stmt.then_has_braces {
+                // If it has braces, remove them and replace body with single statement
+                let body_start = if_stmt.then_body[0].location().start_byte;
+                let body_end = if_stmt.then_body[2].location().end_byte;
+                if let Some((open_brace, close_brace)) =
+                    self.find_braces(source, body_start, body_end)
+                {
+                    // The `{` is on its own line with indentation already in the source.
+                    // When we replace from `{` to `}`, that indentation before `{` stays in place.
+                    // So we don't add any extra indentation to the replacement.
+                    Fix::new(open_brace, close_brace + 1, replacement.clone())
+                } else {
+                    // Fallback: just replace the body
+                    Fix::new(body_start, body_end, replacement.clone())
+                }
             } else {
-                (consequence.start_byte(), consequence.end_byte())
+                // No braces, just replace the body
+                let body_start = if_stmt.then_body[0].location().start_byte;
+                let body_end = if_stmt.then_body[2].location().end_byte;
+                Fix::new(body_start, body_end, replacement.clone())
             };
 
-            let fix = Fix::from_range(start, end, ctx, &replacement);
             violations.push(self.violation_with_fix(
-                ctx.file_path,
-                ctx.base_line + stmts[0].start_position().row,
-                stmts[0].start_position().column + 1,
+                file_path,
+                if_stmt.then_body[0].location().line,
+                if_stmt.then_body[0].location().column,
                 format!("Use {replacement} instead of copying {ptr_expr} and setting it to NULL"),
                 fix,
             ));
@@ -430,133 +492,88 @@ impl UseGStealPointer {
         false
     }
 
-    /// Extract the tested pointer expression from an if-condition.
-    /// Handles `(expr)`, `(expr != NULL)`, and `(NULL != expr)`.
-    fn extract_condition_expr<'a>(
-        &self,
-        ast_context: &AstContext,
-        condition: Node,
-        source: &'a [u8],
-    ) -> Option<&'a str> {
-        if condition.kind() != "parenthesized_expression" {
+    /// Extract (lhs, rhs) from assignment statement
+    fn extract_assignment(&self, stmt: &Statement) -> Option<(String, String)> {
+        let Statement::Expression(expr_stmt) = stmt else {
+            return None;
+        };
+
+        let Expression::Assignment(assign) = &expr_stmt.expr else {
+            return None;
+        };
+
+        if assign.operator != "=" {
             return None;
         }
-        let mut cursor = condition.walk();
-        let inner = condition
-            .children(&mut cursor)
-            .find(|n| n.kind() != "(" && n.kind() != ")")?;
 
-        if inner.kind() == "binary_expression" {
-            let op = inner.child_by_field_name("operator")?;
-            if ast_context.get_node_text(op, source) != "!=" {
+        // Get rhs as string - handle various expression types
+        let rhs = match &*assign.rhs {
+            Expression::Identifier(id) => id.name.clone(),
+            Expression::FieldAccess(f) => f.text.clone(),
+            Expression::Null(_) => "NULL".to_string(),
+            Expression::Call(_) => {
+                // For g_strdup() etc, we don't want to suggest g_steal_pointer
                 return None;
             }
-            let left = inner.child_by_field_name("left")?;
-            let right = inner.child_by_field_name("right")?;
-            let left_text = ast_context.get_node_text(left, source);
-            let right_text = ast_context.get_node_text(right, source);
-            if self.is_null_text(right_text) {
-                Some(left_text)
-            } else if self.is_null_text(left_text) {
-                Some(right_text)
-            } else {
-                None
+            _ => {
+                return None;
             }
-        } else {
-            Some(ast_context.get_node_text(inner, source))
-        }
+        };
+
+        Some((assign.lhs.clone(), rhs))
     }
 
-    /// Extract `(var_name, source_expr_text)` from `T *var = src;`
-    fn extract_decl_init<'a>(
-        &self,
-        ast_context: &AstContext,
-        decl: Node,
-        source: &'a [u8],
-    ) -> Option<(&'a str, &'a str)> {
-        let init_decl = decl.child_by_field_name("declarator")?;
-        if init_decl.kind() != "init_declarator" {
-            return None;
-        }
-
-        let value_node = init_decl.child_by_field_name("value")?;
-        let src_text = ast_context.get_node_text(value_node, source);
-
-        // Stealing NULL is pointless
-        if self.is_null_text(src_text) {
-            return None;
-        }
-
-        // Skip dereference expressions — g_steal_pointer (&*expr) is confusing;
-        // the caller already holds the pointer and should pass it directly.
-        if src_text.starts_with('*') {
-            return None;
-        }
-
-        let decl_node = init_decl.child_by_field_name("declarator")?;
-        let name_node = self.innermost_declarator(decl_node)?;
-        let var_name = ast_context.get_node_text(name_node, source);
-
-        Some((var_name, src_text))
-    }
-
-    /// Recursively unwrap pointer/parenthesized declarators to get the
-    /// identifier.
-    fn innermost_declarator<'a>(&self, node: Node<'a>) -> Option<Node<'a>> {
-        match node.kind() {
-            "identifier" => Some(node),
-            "pointer_declarator" | "parenthesized_declarator" => {
-                let inner = node.child_by_field_name("declarator")?;
-                self.innermost_declarator(inner)
-            }
-            _ => None,
-        }
-    }
-
-    /// Extract `(lhs_text, rhs_text)` from `expression_statement →
-    /// assignment_expression`
-    fn extract_assignment<'a>(
-        &self,
-        ast_context: &AstContext,
-        stmt: Node,
-        source: &'a [u8],
-    ) -> Option<(&'a str, &'a str)> {
-        if stmt.kind() != "expression_statement" {
-            return None;
-        }
-        let mut cursor = stmt.walk();
-        let expr = stmt
-            .children(&mut cursor)
-            .find(|n| n.kind() == "assignment_expression")?;
-
-        let op = expr.child_by_field_name("operator")?;
-        if ast_context.get_node_text(op, source) != "=" {
-            return None;
-        }
-
-        let lhs = expr.child_by_field_name("left")?;
-        let rhs = expr.child_by_field_name("right")?;
-        Some((
-            ast_context.get_node_text(lhs, source),
-            ast_context.get_node_text(rhs, source),
-        ))
-    }
-
-    /// Returns true if `stmt` is `expected_expr = NULL;`
-    fn is_null_assign(
-        &self,
-        ast_context: &AstContext,
-        stmt: Node,
-        expected_expr: &str,
-        source: &[u8],
-    ) -> bool {
-        let Some((lhs, rhs)) = self.extract_assignment(ast_context, stmt, source) else {
+    /// Returns true if stmt is `expected_expr = NULL;`
+    fn is_null_assign(&self, stmt: &Statement, expected_expr: &str) -> bool {
+        let Some((lhs, rhs)) = self.extract_assignment(stmt) else {
             return false;
         };
-        lhs == expected_expr && self.is_null_text(rhs)
+        lhs == expected_expr && self.is_null_text(&rhs)
     }
 
     fn is_null_text(&self, text: &str) -> bool {
         text == "NULL"
+    }
+
+    /// Find the position of opening and closing braces around a block of
+    /// statements Returns (opening_brace_pos, closing_brace_pos) or None if
+    /// not found
+    fn find_braces(
+        &self,
+        source: &[u8],
+        first_stmt_byte: usize,
+        last_stmt_byte: usize,
+    ) -> Option<(usize, usize)> {
+        // Search backwards from first statement to find '{'
+        let mut opening_brace = None;
+        for i in (0..first_stmt_byte).rev() {
+            if source[i] == b'{' {
+                opening_brace = Some(i);
+                break;
+            }
+            // Stop if we hit something that's not whitespace/newline
+            if source[i] != b' ' && source[i] != b'\t' && source[i] != b'\n' && source[i] != b'\r' {
+                break;
+            }
+        }
+
+        // Search forwards from last statement to find '}'
+        let mut closing_brace = None;
+        for (offset, byte) in source[last_stmt_byte..].iter().enumerate() {
+            if *byte == b'}' {
+                closing_brace = Some(last_stmt_byte + offset);
+                break;
+            }
+            // Stop if we hit something that's not whitespace/newline/semicolon
+            if *byte != b' ' && *byte != b'\t' && *byte != b'\n' && *byte != b'\r' && *byte != b';'
+            {
+                break;
+            }
+        }
+
+        match (opening_brace, closing_brace) {
+            (Some(open), Some(close)) => Some((open, close)),
+            _ => None,
+        }
     }
 }

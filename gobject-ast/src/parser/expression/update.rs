@@ -1,7 +1,9 @@
 use tree_sitter::Node;
 
-use crate::model::{Expression, UpdateExpression};
-use crate::parser::Parser;
+use crate::{
+    model::{Expression, UpdateExpression},
+    parser::Parser,
+};
 
 impl Parser {
     pub(crate) fn parse_update_expression(&self, node: Node, source: &[u8]) -> Option<Expression> {

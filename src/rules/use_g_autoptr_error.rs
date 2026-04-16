@@ -1,4 +1,4 @@
-use tree_sitter::Node;
+use gobject_ast::Statement;
 
 use super::Rule;
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
@@ -30,48 +30,29 @@ impl Rule for UseGAutoptrError {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    self.check_node(
-                        ast_context,
-                        tree.root_node(),
-                        func_source,
-                        path,
-                        func.line,
-                        violations,
-                    );
-                }
+                self.check_function(func, path, violations);
             }
         }
     }
 }
 
 impl UseGAutoptrError {
-    fn check_node(
+    fn check_function(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &[u8],
+        func: &gobject_ast::FunctionInfo,
         file_path: &std::path::Path,
-        base_line: usize,
         violations: &mut Vec<Violation>,
     ) {
-        // Look for GError* variable declarations
-        if node.kind() == "declaration"
-            && let Some((var_name, decl_node)) =
-                self.find_gerror_declaration(ast_context, node, source)
-        {
-            // Check if this variable is manually freed with g_error_free in the function
-            // We need to search the parent scope (function body)
-            if let Some(function_body) = self.find_parent_function_body(node)
-                && self.has_error_free_call(ast_context, function_body, var_name, source)
-            {
-                let position = decl_node.start_position();
+        // Find all GError* declarations
+        let gerror_vars = self.find_gerror_declarations(&func.body_statements);
+
+        // For each GError* variable, check if it's manually freed
+        for (var_name, location) in &gerror_vars {
+            if self.has_error_free_call(&func.body_statements, var_name) {
                 violations.push(self.violation(
                     file_path,
-                    base_line + position.row,
-                    position.column + 1,
+                    location.line,
+                    location.column,
                     format!(
                         "Consider using g_autoptr(GError) {} instead of manual g_error_free",
                         var_name
@@ -79,114 +60,92 @@ impl UseGAutoptrError {
                 ));
             }
         }
-
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, source, file_path, base_line, violations);
-        }
     }
 
-    fn find_gerror_declaration<'a>(
+    fn find_gerror_declarations(
         &self,
-        ast_context: &AstContext,
-        node: Node<'a>,
-        source: &'a [u8],
-    ) -> Option<(&'a str, Node<'a>)> {
-        // Look for: GError *var_name = NULL;
-        // Tree structure: declaration -> type: pointer_declarator -> declarator:
-        // identifier
-
-        // Get the type specifier
-        if let Some(type_node) = node.child_by_field_name("type") {
-            let type_text = ast_context.get_node_text(type_node, source);
-            if type_text.contains("GError") {
-                // Find the declarator
-                if let Some(declarator) = node.child_by_field_name("declarator")
-                    && let Some(var_name) =
-                        self.extract_pointer_var_name(ast_context, declarator, source)
-                {
-                    return Some((var_name, node));
-                }
-            }
-        }
-
-        None
+        statements: &[Statement],
+    ) -> Vec<(String, gobject_ast::SourceLocation)> {
+        let mut result = Vec::new();
+        self.collect_gerror_vars(statements, &mut result);
+        result
     }
 
-    fn extract_pointer_var_name<'a>(
+    fn collect_gerror_vars(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-    ) -> Option<&'a str> {
-        // Handle pointer_declarator and init_declarator
-        match node.kind() {
-            "pointer_declarator" => {
-                if let Some(declarator) = node.child_by_field_name("declarator") {
-                    return Some(ast_context.get_node_text(declarator, source));
+        statements: &[Statement],
+        result: &mut Vec<(String, gobject_ast::SourceLocation)>,
+    ) {
+        for stmt in statements {
+            match stmt {
+                Statement::Declaration(decl) => {
+                    // Check if type contains "GError"
+                    if decl.type_name.contains("GError") {
+                        result.push((decl.name.clone(), decl.location.clone()));
+                    }
                 }
-            }
-            "init_declarator" => {
-                if let Some(declarator) = node.child_by_field_name("declarator") {
-                    return self.extract_pointer_var_name(ast_context, declarator, source);
+                Statement::Compound(compound) => {
+                    self.collect_gerror_vars(&compound.statements, result);
                 }
-            }
-            "identifier" => {
-                return Some(ast_context.get_node_text(node, source));
-            }
-            _ => {}
-        }
-        None
-    }
-
-    fn find_parent_function_body<'a>(&self, mut node: Node<'a>) -> Option<Node<'a>> {
-        // Walk up the tree to find the function_definition
-        loop {
-            if let Some(parent) = node.parent() {
-                if parent.kind() == "function_definition" {
-                    return parent.child_by_field_name("body");
+                Statement::If(if_stmt) => {
+                    self.collect_gerror_vars(&if_stmt.then_body, result);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.collect_gerror_vars(else_body, result);
+                    }
                 }
-                node = parent;
-            } else {
-                return None;
+                Statement::Labeled(labeled) => {
+                    self.collect_gerror_vars(std::slice::from_ref(&labeled.statement), result);
+                }
+                _ => {}
             }
         }
     }
 
-    fn has_error_free_call(
-        &self,
-        ast_context: &AstContext,
-        body: Node,
-        var_name: &str,
-        source: &[u8],
-    ) -> bool {
-        self.find_error_free_call(ast_context, body, var_name, source)
+    fn has_error_free_call(&self, statements: &[Statement], var_name: &str) -> bool {
+        self.find_error_free_call(statements, var_name)
     }
 
-    fn find_error_free_call(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        var_name: &str,
-        source: &[u8],
-    ) -> bool {
-        let (is_cleanup, func_name) = ast_context.is_cleanup_call(node, source);
-        if is_cleanup
-            && func_name == "g_error_free"
-            && let Some(arguments) = node.child_by_field_name("arguments")
-        {
-            let args_text = ast_context.get_node_text(arguments, source);
-            if args_text.contains(var_name) {
-                return true;
-            }
-        }
+    fn find_error_free_call(&self, statements: &[Statement], var_name: &str) -> bool {
+        use gobject_ast::Expression;
 
-        // Recursively check children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if self.find_error_free_call(ast_context, child, var_name, source) {
-                return true;
+        for stmt in statements {
+            match stmt {
+                Statement::Expression(expr_stmt) => {
+                    if let Expression::Call(call) = &expr_stmt.expr
+                        && call.function == "g_error_free"
+                        && !call.arguments.is_empty()
+                    {
+                        // Check if argument matches var_name
+                        let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
+                        if let Some(arg_var) = arg_expr.extract_variable_name()
+                            && arg_var == var_name
+                        {
+                            return true;
+                        }
+                    }
+                }
+                Statement::Compound(compound) => {
+                    if self.find_error_free_call(&compound.statements, var_name) {
+                        return true;
+                    }
+                }
+                Statement::If(if_stmt) => {
+                    if self.find_error_free_call(&if_stmt.then_body, var_name) {
+                        return true;
+                    }
+                    if let Some(else_body) = &if_stmt.else_body
+                        && self.find_error_free_call(else_body, var_name)
+                    {
+                        return true;
+                    }
+                }
+                Statement::Labeled(labeled) => {
+                    if self.find_error_free_call(std::slice::from_ref(&labeled.statement), var_name)
+                    {
+                        return true;
+                    }
+                }
+                _ => {}
             }
         }
 

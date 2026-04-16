@@ -158,92 +158,10 @@ impl AstContext {
             .map(|(path, file)| (path.as_path(), file))
     }
 
-    /// Parse C source code with the internal tree-sitter parser
-    /// This is a convenience method for rules that need to parse function
-    /// bodies
-    pub fn parse_c_source(&self, source: &[u8]) -> Option<tree_sitter::Tree> {
-        TS_PARSER.with(|p| p.borrow_mut().parse(source, None))
-    }
-
-    // Common AST helper methods for rules
-
     /// Extract text from a tree-sitter node
     pub fn get_node_text<'a>(&self, node: tree_sitter::Node, source: &'a [u8]) -> &'a str {
         let text = &source[node.byte_range()];
         std::str::from_utf8(text).unwrap_or("")
-    }
-
-    /// Strip C type qualifiers and pointer sigils to get the bare type name.
-    /// e.g. `const GError *` → `GError`
-    pub fn extract_base_type(type_text: &str) -> &str {
-        type_text
-            .trim()
-            .trim_start_matches("const ")
-            .trim_end_matches('*')
-            .trim()
-    }
-
-    /// Find the compound_statement (function body) in an AST
-    pub fn find_body<'a>(&self, node: tree_sitter::Node<'a>) -> Option<tree_sitter::Node<'a>> {
-        if node.kind() == "compound_statement" {
-            return Some(node);
-        }
-
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if let Some(result) = self.find_body(child) {
-                return Some(result);
-            }
-        }
-
-        None
-    }
-
-    /// Extract variable name from a declarator (handles pointer_declarator ->
-    /// identifier)
-    pub fn extract_variable_name<'a>(
-        &self,
-        declarator: tree_sitter::Node,
-        source: &'a [u8],
-    ) -> Option<&'a str> {
-        // Handle pointer_declarator -> identifier
-        if let Some(inner) = declarator.child_by_field_name("declarator") {
-            if inner.kind() == "identifier" {
-                return Some(self.get_node_text(inner, source));
-            }
-            return self.extract_variable_name(inner, source);
-        }
-
-        if declarator.kind() == "identifier" {
-            return Some(self.get_node_text(declarator, source));
-        }
-
-        None
-    }
-
-    /// Check if text represents a NULL literal
-    pub fn is_null_literal(&self, text: &str) -> bool {
-        let trimmed = text.trim();
-        trimmed == "NULL" || trimmed == "0" || trimmed == "((void*)0)"
-    }
-
-    /// Find a call_expression node in the AST
-    pub fn find_call_expression<'a>(
-        &self,
-        node: tree_sitter::Node<'a>,
-    ) -> Option<tree_sitter::Node<'a>> {
-        if node.kind() == "call_expression" {
-            return Some(node);
-        }
-
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if let Some(result) = self.find_call_expression(child) {
-                return Some(result);
-            }
-        }
-
-        None
     }
 
     /// Check if a call expression is an allocation function
@@ -305,31 +223,5 @@ impl AstContext {
             }
         }
         (false, "")
-    }
-
-    /// Find a function call by name(s)
-    pub fn find_function_call_by_name<'a>(
-        &self,
-        node: tree_sitter::Node<'a>,
-        function_names: &[&str],
-        source: &[u8],
-    ) -> Option<tree_sitter::Node<'a>> {
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let func_name = self.get_node_text(function, source);
-            if function_names.contains(&func_name) {
-                return Some(node);
-            }
-        }
-
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if let Some(call) = self.find_function_call_by_name(child, function_names, source) {
-                return Some(call);
-            }
-        }
-
-        None
     }
 }

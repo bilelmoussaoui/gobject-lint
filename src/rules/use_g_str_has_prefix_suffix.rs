@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::{Expression, Statement};
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGStrHasPrefixSuffix;
@@ -34,266 +34,339 @@ impl Rule for UseGStrHasPrefixSuffix {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
-                }
+                self.check_statements(&func.body_statements, path, violations);
             }
         }
     }
 }
 
 impl UseGStrHasPrefixSuffix {
-    fn check_node(
+    fn check_statements(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        statements: &[Statement],
+        file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
-        if node.kind() == "binary_expression"
-            && let Some(operator) = node.child_by_field_name("operator")
-        {
-            let op_text = ast_context.get_node_text(operator, ctx.source);
-            if (op_text == "==" || op_text == "!=")
-                && let Some(left) = node.child_by_field_name("left")
-                && let Some(right) = node.child_by_field_name("right")
-            {
-                // strncmp(...) == 0  or  0 == strncmp(...)
-                self.check_strncmp_prefix(ast_context, left, right, op_text, ctx, node, violations);
-                self.check_strncmp_prefix(ast_context, right, left, op_text, ctx, node, violations);
-                // strcmp(...) == 0  or  0 == strcmp(...)
-                self.check_strcmp_suffix(ast_context, left, right, op_text, ctx, node, violations);
-                self.check_strcmp_suffix(ast_context, right, left, op_text, ctx, node, violations);
+        for stmt in statements {
+            // Check expressions in this statement
+            for expr in stmt.expressions() {
+                self.check_expression(expr, file_path, violations);
             }
-        }
 
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, ctx, violations);
+            // Recurse into nested statements
+            match stmt {
+                Statement::If(if_stmt) => {
+                    // Check the condition expression
+                    self.check_expression(&if_stmt.condition, file_path, violations);
+                    self.check_statements(&if_stmt.then_body, file_path, violations);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.check_statements(else_body, file_path, violations);
+                    }
+                }
+                Statement::Compound(compound) => {
+                    self.check_statements(&compound.statements, file_path, violations);
+                }
+                Statement::Labeled(labeled) => {
+                    self.check_statements(
+                        std::slice::from_ref(&labeled.statement),
+                        file_path,
+                        violations,
+                    );
+                }
+                _ => {}
+            }
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn check_strncmp_prefix(
+    fn check_expression(
         &self,
-        ast_context: &AstContext,
-        strncmp_side: Node,
-        value_side: Node,
-        operator: &str,
-        ctx: &CheckContext,
-        parent_node: Node,
+        expr: &Expression,
+        file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
-        if strncmp_side.kind() != "call_expression" {
-            return;
+        // Check if this is a binary expression with == or !=
+        if let Expression::Binary(bin) = expr
+            && (bin.operator == "==" || bin.operator == "!=")
+        {
+            // Check both sides for strcmp/strncmp patterns
+            self.check_for_prefix_pattern(
+                &bin.left,
+                &bin.right,
+                &bin.operator,
+                file_path,
+                &bin.location,
+                violations,
+            );
+            self.check_for_prefix_pattern(
+                &bin.right,
+                &bin.left,
+                &bin.operator,
+                file_path,
+                &bin.location,
+                violations,
+            );
+            self.check_for_suffix_pattern(
+                &bin.left,
+                &bin.right,
+                &bin.operator,
+                file_path,
+                &bin.location,
+                violations,
+            );
+            self.check_for_suffix_pattern(
+                &bin.right,
+                &bin.left,
+                &bin.operator,
+                file_path,
+                &bin.location,
+                violations,
+            );
         }
 
-        let Some(function) = strncmp_side.child_by_field_name("function") else {
+        // Recursively check sub-expressions
+        expr.walk(&mut |e| {
+            if !std::ptr::eq(e, expr) {
+                self.check_expression(e, file_path, violations);
+            }
+        });
+    }
+
+    /// Check for strncmp(str, "prefix", strlen("prefix")) == 0 pattern
+    fn check_for_prefix_pattern(
+        &self,
+        strncmp_side: &Expression,
+        value_side: &Expression,
+        operator: &str,
+        file_path: &std::path::Path,
+        location: &gobject_ast::SourceLocation,
+        violations: &mut Vec<Violation>,
+    ) {
+        // strncmp_side must be a call to strncmp
+        let Expression::Call(call) = strncmp_side else {
             return;
         };
-        if ast_context.get_node_text(function, ctx.source) != "strncmp" {
+
+        if call.function != "strncmp" {
             return;
         }
 
-        if ast_context.get_node_text(value_side, ctx.source).trim() != "0" {
+        // value_side must be 0
+        if !value_side.is_zero() {
             return;
         }
 
-        let Some(args) = strncmp_side.child_by_field_name("arguments") else {
+        // Must have 3 arguments
+        if call.arguments.len() != 3 {
+            return;
+        }
+
+        // Second argument must be a string literal
+        let Some(prefix_text) = call.arguments[1].extract_string_value() else {
             return;
         };
 
-        let mut cursor = args.walk();
-        let arguments: Vec<Node> = args
-            .children(&mut cursor)
-            .filter(|n| n.kind() != "(" && n.kind() != ")" && n.kind() != ",")
-            .collect();
-
-        if arguments.len() != 3 {
+        // Third argument must be strlen(prefix_text)
+        if !self.is_strlen_of(&call.arguments[2], &prefix_text) {
             return;
         }
 
-        let str_arg = ast_context.get_node_text(arguments[0], ctx.source);
-        let prefix_arg = arguments[1];
-        let len_arg = arguments[2];
+        // Get the string argument
+        let str_arg_text = self.arg_to_text(&call.arguments[0]);
 
-        if prefix_arg.kind() != "string_literal" {
-            return;
-        }
-        let prefix_text = ast_context.get_node_text(prefix_arg, ctx.source);
-
-        if !self.is_strlen_of(ast_context, len_arg, prefix_text, ctx.source) {
-            return;
-        }
-
-        let spacing = ctx.source_text(function.end_byte(), args.start_byte());
         let replacement = if operator == "==" {
-            format!("g_str_has_prefix{spacing}({str_arg}, {prefix_text})")
+            format!("g_str_has_prefix ({str_arg_text}, \"{prefix_text}\")")
         } else {
-            format!("!g_str_has_prefix{spacing}({str_arg}, {prefix_text})")
+            format!("!g_str_has_prefix ({str_arg_text}, \"{prefix_text}\")")
         };
 
-        let fix = Fix::from_node(parent_node, ctx, &replacement);
+        let fix = Fix::new(location.start_byte, location.end_byte, replacement.clone());
+
         violations.push(self.violation_with_fix(
-            ctx.file_path,
-            ctx.base_line + parent_node.start_position().row,
-            parent_node.start_position().column + 1,
+            file_path,
+            location.line,
+            location.column,
             format!("Use {replacement} instead of strncmp() {operator} 0"),
             fix,
         ));
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn check_strcmp_suffix(
+    /// Check for strcmp(str + strlen(str) - strlen("suffix"), "suffix") == 0
+    /// pattern
+    fn check_for_suffix_pattern(
         &self,
-        ast_context: &AstContext,
-        strcmp_side: Node,
-        value_side: Node,
+        strcmp_side: &Expression,
+        value_side: &Expression,
         operator: &str,
-        ctx: &CheckContext,
-        parent_node: Node,
+        file_path: &std::path::Path,
+        location: &gobject_ast::SourceLocation,
         violations: &mut Vec<Violation>,
     ) {
-        if strcmp_side.kind() != "call_expression" {
-            return;
-        }
-
-        let Some(function) = strcmp_side.child_by_field_name("function") else {
-            return;
-        };
-        if ast_context.get_node_text(function, ctx.source) != "strcmp" {
-            return;
-        }
-
-        if ast_context.get_node_text(value_side, ctx.source).trim() != "0" {
-            return;
-        }
-
-        let Some(args) = strcmp_side.child_by_field_name("arguments") else {
+        // strcmp_side must be a call to strcmp
+        let Expression::Call(call) = strcmp_side else {
             return;
         };
 
-        let mut cursor = args.walk();
-        let arguments: Vec<Node> = args
-            .children(&mut cursor)
-            .filter(|n| n.kind() != "(" && n.kind() != ")" && n.kind() != ",")
-            .collect();
-
-        if arguments.len() != 2 {
+        if call.function != "strcmp" {
             return;
         }
 
-        let offset_arg = arguments[0];
-        let suffix_arg = arguments[1];
-
-        if suffix_arg.kind() != "string_literal" {
+        // value_side must be 0
+        if !value_side.is_zero() {
             return;
         }
-        let suffix_text = ast_context.get_node_text(suffix_arg, ctx.source);
 
-        // First arg must be: <str_expr> + strlen(<str_expr>) - strlen("suffix")
-        let Some(str_expr) =
-            self.extract_suffix_base(ast_context, offset_arg, suffix_text, ctx.source)
-        else {
+        // Must have 2 arguments
+        if call.arguments.len() != 2 {
+            return;
+        }
+
+        // Second argument must be a string literal
+        let Some(suffix_text) = call.arguments[1].extract_string_value() else {
             return;
         };
 
-        let spacing = ctx.source_text(function.end_byte(), args.start_byte());
+        // First argument must be: str + strlen(str) - strlen("suffix")
+        let Some(str_expr) = self.extract_suffix_base(&call.arguments[0], &suffix_text) else {
+            return;
+        };
+
         let replacement = if operator == "==" {
-            format!("g_str_has_suffix{spacing}({str_expr}, {suffix_text})")
+            format!("g_str_has_suffix ({str_expr}, \"{suffix_text}\")")
         } else {
-            format!("!g_str_has_suffix{spacing}({str_expr}, {suffix_text})")
+            format!("!g_str_has_suffix ({str_expr}, \"{suffix_text}\")")
         };
 
-        let fix = Fix::from_node(parent_node, ctx, &replacement);
+        let fix = Fix::new(location.start_byte, location.end_byte, replacement.clone());
+
         violations.push(self.violation_with_fix(
-            ctx.file_path,
-            ctx.base_line + parent_node.start_position().row,
-            parent_node.start_position().column + 1,
+            file_path,
+            location.line,
+            location.column,
             format!("Use {replacement} instead of strcmp() {operator} 0"),
             fix,
         ));
     }
 
-    /// Validates that `node` is `<str_expr> + strlen(<str_expr>) -
+    /// Validates that arg is `<str_expr> + strlen(<str_expr>) -
     /// strlen("suffix")` and returns `str_expr` if so.
-    fn extract_suffix_base<'a>(
+    fn extract_suffix_base(
         &self,
-        ast_context: &AstContext,
-        node: Node,
+        arg: &gobject_ast::Argument,
         suffix_text: &str,
-        source: &'a [u8],
-    ) -> Option<&'a str> {
-        // Top level: X - strlen("suffix")
-        if node.kind() != "binary_expression" {
-            return None;
-        }
-        let op = node.child_by_field_name("operator")?;
-        if ast_context.get_node_text(op, source) != "-" {
-            return None;
-        }
-        let lhs = node.child_by_field_name("left")?;
-        let rhs = node.child_by_field_name("right")?;
+    ) -> Option<String> {
+        let gobject_ast::Argument::Expression(expr) = arg;
 
-        if !self.is_strlen_of(ast_context, rhs, suffix_text, source) {
+        // Top level: X - strlen("suffix")
+        let Expression::Binary(top_bin) = &**expr else {
+            return None;
+        };
+
+        if top_bin.operator != "-" {
+            return None;
+        }
+
+        // Right side must be strlen("suffix") - note suffix_text comes from
+        // extract_string_value so no quotes We need to wrap it in quotes for
+        // comparison since expr_to_text adds quotes
+        if !self.is_strlen_of_arg_by_value(&top_bin.right, suffix_text) {
             return None;
         }
 
         // Left side: <str_expr> + strlen(<str_expr>)
-        if lhs.kind() != "binary_expression" {
+        let Expression::Binary(inner_bin) = &*top_bin.left else {
             return None;
-        }
-        let inner_op = lhs.child_by_field_name("operator")?;
-        if ast_context.get_node_text(inner_op, source) != "+" {
-            return None;
-        }
-        let str_expr_node = lhs.child_by_field_name("left")?;
-        let strlen_node = lhs.child_by_field_name("right")?;
+        };
 
-        let str_expr = ast_context.get_node_text(str_expr_node, source);
-        if !self.is_strlen_of(ast_context, strlen_node, str_expr, source) {
+        if inner_bin.operator != "+" {
+            return None;
+        }
+
+        // Get str_expr from left side
+        let str_expr = self.expr_to_text(&inner_bin.left);
+
+        // Right side must be strlen(str_expr)
+        if !self.is_strlen_of_arg(&inner_bin.right, &str_expr) {
             return None;
         }
 
         Some(str_expr)
     }
 
-    /// Returns true if `node` is `strlen(expected_text)`
-    fn is_strlen_of(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        expected_text: &str,
-        source: &[u8],
-    ) -> bool {
-        if node.kind() != "call_expression" {
-            return false;
-        }
-        let Some(func) = node.child_by_field_name("function") else {
+    /// Returns true if arg is strlen(expected_text)
+    fn is_strlen_of(&self, arg: &gobject_ast::Argument, expected_text: &str) -> bool {
+        let gobject_ast::Argument::Expression(expr) = arg;
+
+        let Expression::Call(call) = &**expr else {
             return false;
         };
-        if ast_context.get_node_text(func, source) != "strlen" {
+
+        if call.function != "strlen" {
             return false;
         }
-        let Some(args) = node.child_by_field_name("arguments") else {
+
+        if call.arguments.len() != 1 {
+            return false;
+        }
+
+        // Extract string value and compare
+        if let Some(str_val) = call.arguments[0].extract_string_value() {
+            return str_val == expected_text;
+        }
+
+        false
+    }
+
+    /// Returns true if expr is strlen(expected_text_with_quotes)
+    fn is_strlen_of_arg(&self, expr: &Expression, expected_text_with_quotes: &str) -> bool {
+        let Expression::Call(call) = expr else {
             return false;
         };
-        let mut cursor = args.walk();
-        let inner_args: Vec<Node> = args
-            .children(&mut cursor)
-            .filter(|n| n.kind() != "(" && n.kind() != ")" && n.kind() != ",")
-            .collect();
-        if inner_args.len() != 1 {
+
+        if call.function != "strlen" {
             return false;
         }
-        ast_context.get_node_text(inner_args[0], source) == expected_text
+
+        if call.arguments.len() != 1 {
+            return false;
+        }
+
+        // For comparing with expr_to_text output which includes identifiers
+        self.arg_to_text(&call.arguments[0]) == expected_text_with_quotes
+    }
+
+    /// Returns true if expr is strlen("expected_string_value")
+    fn is_strlen_of_arg_by_value(&self, expr: &Expression, expected_string_value: &str) -> bool {
+        let Expression::Call(call) = expr else {
+            return false;
+        };
+
+        if call.function != "strlen" {
+            return false;
+        }
+
+        if call.arguments.len() != 1 {
+            return false;
+        }
+
+        // Extract string value and compare
+        if let Some(str_val) = call.arguments[0].extract_string_value() {
+            return str_val == expected_string_value;
+        }
+
+        false
+    }
+
+    fn arg_to_text(&self, arg: &gobject_ast::Argument) -> String {
+        let gobject_ast::Argument::Expression(expr) = arg;
+        self.expr_to_text(expr)
+    }
+
+    fn expr_to_text(&self, expr: &Expression) -> String {
+        match expr {
+            Expression::StringLiteral(s) => format!("\"{}\"", s.value),
+            Expression::Identifier(id) => id.name.clone(),
+            Expression::FieldAccess(f) => f.text.clone(),
+            _ => String::new(),
+        }
     }
 }

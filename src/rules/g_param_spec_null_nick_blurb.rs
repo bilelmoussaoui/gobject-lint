@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::CallExpression;
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct GParamSpecNullNickBlurb;
@@ -34,16 +34,11 @@ impl Rule for GParamSpecNullNickBlurb {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
+                // Find all g_param_spec_* calls (but skip g_param_spec_internal)
+                for call in func.find_calls_matching(|name| {
+                    name.starts_with("g_param_spec_") && name != "g_param_spec_internal"
+                }) {
+                    self.check_call(path, call, violations);
                 }
             }
         }
@@ -51,112 +46,94 @@ impl Rule for GParamSpecNullNickBlurb {
 }
 
 impl GParamSpecNullNickBlurb {
-    fn check_node(
+    fn check_call(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        file_path: &std::path::Path,
+        call: &CallExpression,
         violations: &mut Vec<Violation>,
     ) {
-        if node.kind() == "call_expression"
-            && let Some(function_node) = node.child_by_field_name("function")
-        {
-            let function_str = ast_context.get_node_text(function_node, ctx.source);
+        // g_param_spec_*(name, nick, blurb, ...) — need at least 3 args
+        if call.arguments.len() < 3 {
+            return;
+        }
 
-            if function_str.starts_with("g_param_spec_")
-                && function_str != "g_param_spec_internal"
-                && let Some(arguments_node) = node.child_by_field_name("arguments")
-            {
-                let mut args = Vec::new();
-                let mut cursor = arguments_node.walk();
-                for child in arguments_node.children(&mut cursor) {
-                    if child.is_named() && child.kind() != "," {
-                        args.push(child);
-                    }
-                }
+        let nick_is_null = call.arguments[1].is_null();
+        let blurb_is_null = call.arguments[2].is_null();
 
-                if args.len() >= 3 {
-                    let nick_arg = args[1];
-                    let blurb_arg = args[2];
+        // Collect which parameters need fixing
+        let mut issues = Vec::new();
+        if !nick_is_null {
+            issues.push("nick (parameter 2)");
+        }
+        if !blurb_is_null {
+            issues.push("blurb (parameter 3)");
+        }
 
-                    let nick_is_null =
-                        self.check_argument_is_null(ast_context, nick_arg, ctx.source);
-                    let blurb_is_null =
-                        self.check_argument_is_null(ast_context, blurb_arg, ctx.source);
+        if issues.is_empty() {
+            return; // Already correct
+        }
 
-                    let mut issues = Vec::new();
-                    if !nick_is_null {
-                        issues.push("nick (parameter 2)");
-                    }
-                    if !blurb_is_null {
-                        issues.push("blurb (parameter 3)");
-                    }
+        // Create fix to replace non-NULL arguments with NULL
+        let gobject_ast::Argument::Expression(nick_expr) = &call.arguments[1];
+        let gobject_ast::Argument::Expression(blurb_expr) = &call.arguments[2];
 
-                    if !issues.is_empty() {
-                        let string_fix = if !nick_is_null && !blurb_is_null {
-                            Fix::from_range(
-                                nick_arg.start_byte(),
-                                blurb_arg.end_byte(),
-                                ctx,
-                                "NULL, NULL",
-                            )
-                        } else if !nick_is_null {
-                            Fix::from_range(nick_arg.start_byte(), nick_arg.end_byte(), ctx, "NULL")
-                        } else {
-                            Fix::from_range(
-                                blurb_arg.start_byte(),
-                                blurb_arg.end_byte(),
-                                ctx,
-                                "NULL",
-                            )
-                        };
+        let string_fix = if !nick_is_null && !blurb_is_null {
+            // Replace both nick and blurb with NULL
+            Fix::new(
+                nick_expr.location().start_byte,
+                blurb_expr.location().end_byte,
+                "NULL, NULL",
+            )
+        } else if !nick_is_null {
+            // Replace only nick with NULL
+            Fix::new(
+                nick_expr.location().start_byte,
+                nick_expr.location().end_byte,
+                "NULL",
+            )
+        } else {
+            // Replace only blurb with NULL
+            Fix::new(
+                blurb_expr.location().start_byte,
+                blurb_expr.location().end_byte,
+                "NULL",
+            )
+        };
 
-                        // Also fix the flags: after this rule runs, both nick
-                        // and blurb will be NULL, so remove STATIC_NICK,
-                        // STATIC_BLURB, and STATIC_STRINGS, and ensure
-                        // STATIC_NAME is present (name is always a literal).
-                        let mut fixes = vec![string_fix];
-                        if let Some(flags_arg) = args.last()
-                            && args.len() >= 4
-                        {
-                            let flags_text = ast_context.get_node_text(*flags_arg, ctx.source);
-                            if let Some(new_flags) = self.compute_new_flags(flags_text) {
-                                fixes.push(Fix::from_node(*flags_arg, ctx, new_flags));
-                            }
-                        }
+        // Also fix the flags: after this rule runs, both nick and blurb will be NULL,
+        // so remove STATIC_NICK, STATIC_BLURB, and STATIC_STRINGS, and ensure
+        // STATIC_NAME is present (name is always a literal).
+        let mut fixes = vec![string_fix];
 
-                        violations.push(self.violation_with_fixes(
-                            ctx.file_path,
-                            ctx.base_line + node.start_position().row,
-                            node.start_position().column + 1,
-                            format!(
-                                "{} should have NULL for {}",
-                                function_str,
-                                issues.join(" and ")
-                            ),
-                            fixes,
-                        ));
-                    }
-                }
+        if call.arguments.len() >= 4 {
+            let gobject_ast::Argument::Expression(flags_expr) = call.arguments.last().unwrap();
+            let flags_identifiers = flags_expr.collect_identifiers();
+            let flags_text = if flags_identifiers.is_empty() {
+                "0".to_string()
+            } else {
+                flags_identifiers.join(" | ")
+            };
+
+            if let Some(new_flags) = self.compute_new_flags(&flags_text) {
+                fixes.push(Fix::new(
+                    flags_expr.location().start_byte,
+                    flags_expr.location().end_byte,
+                    new_flags,
+                ));
             }
         }
 
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, ctx, violations);
-        }
-    }
-
-    fn check_argument_is_null(
-        &self,
-        ast_context: &AstContext,
-        arg_node: Node,
-        source: &[u8],
-    ) -> bool {
-        let arg_str = ast_context.get_node_text(arg_node, source);
-        let arg_str = arg_str.trim();
-
-        arg_str == "NULL" || arg_str == "((void*)0)" || arg_str == "0"
+        violations.push(self.violation_with_fixes(
+            file_path,
+            call.location.line,
+            call.location.column,
+            format!(
+                "{} should have NULL for {}",
+                call.function,
+                issues.join(" and ")
+            ),
+            fixes,
+        ));
     }
 
     /// After nick and blurb are set to NULL, compute the correct replacement

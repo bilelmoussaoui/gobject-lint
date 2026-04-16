@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::{Expression, Statement};
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGStrcmp0;
@@ -34,128 +34,129 @@ impl Rule for UseGStrcmp0 {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), None, &ctx, violations);
-                }
+                self.check_statements(&func.body_statements, path, violations);
             }
         }
     }
 }
 
 impl UseGStrcmp0 {
-    fn check_node(
+    fn check_statements(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        parent: Option<Node>,
-        ctx: &CheckContext,
+        statements: &[Statement],
+        file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let func_name = ast_context.get_node_text(function, ctx.source);
-            if func_name == "strcmp" || func_name == "g_strcmp0" {
-                // Check if it's used in a proper comparison context
-                let (in_comparison, operator) = if let Some(p) = parent {
-                    if p.kind() == "binary_expression"
-                        && let Some(op) = p.child_by_field_name("operator")
-                    {
-                        let op_text = ast_context.get_node_text(op, ctx.source);
-                        (true, Some(op_text))
-                    } else {
-                        (false, None)
-                    }
-                } else {
-                    (false, None)
-                };
-
-                // Detect misuse: if (strcmp(a, b)) or if (!strcmp(a, b))
-                if !in_comparison {
-                    // Check if this is being returned directly (valid for comparison functions)
-                    let is_return_value = parent.is_some_and(|p| p.kind() == "return_statement");
-
-                    if !is_return_value {
-                        // Check if we're in a conditional context by traversing up the tree
-                        let mut current = parent;
-                        let mut is_negated = false;
-                        let mut found_condition = false;
-
-                        while let Some(p) = current {
-                            if p.kind() == "unary_expression" {
-                                is_negated = true;
-                            } else if p.kind() == "if_statement"
-                                || p.kind() == "while_statement"
-                                || p.kind() == "for_statement"
-                            {
-                                found_condition = true;
-                                break;
-                            } else if p.kind() == "binary_expression" {
-                                // Stop if we hit a binary expression (we're part of a larger
-                                // comparison)
-                                break;
-                            }
-                            current = p.parent();
-                        }
-
-                        if found_condition || is_negated {
-                            violations.push(self.violation(
-                                ctx.file_path,
-                                ctx.base_line + node.start_position().row,
-                                node.start_position().column + 1,
-                                format!(
-                                    "{}() returns 0 for equality — use '{}(...) == 0' or '{}(...) != 0' instead of bare boolean check",
-                                    func_name, func_name, func_name
-                                ),
-                            ));
-                        }
+        for stmt in statements {
+            match stmt {
+                Statement::If(if_stmt) => {
+                    // Check for misuse and proper use in condition
+                    self.check_condition(&if_stmt.condition, file_path, violations);
+                    self.check_statements(&if_stmt.then_body, file_path, violations);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.check_statements(else_body, file_path, violations);
                     }
                 }
-
-                // Only suggest g_strcmp0 for strcmp (not for g_strcmp0 itself)
-                if func_name == "strcmp" && in_comparison {
-                    let message = if let Some(op) = operator
-                        && (op == "==" || op == "!=")
-                    {
-                        "Consider g_strcmp0 instead of strcmp if arguments can be NULL (g_strcmp0 is NULL-safe)"
-                    } else {
-                        "Consider g_strcmp0 instead of strcmp if arguments can be NULL (g_strcmp0 is NULL-safe)"
-                    };
-
-                    let fix = Fix::from_node(function, ctx, "g_strcmp0");
-                    violations.push(self.violation_with_fix(
-                        ctx.file_path,
-                        ctx.base_line + node.start_position().row,
-                        node.start_position().column + 1,
-                        message.to_string(),
-                        fix,
-                    ));
+                Statement::Return(_) => {
+                    // strcmp/g_strcmp0 in return statements is OK (comparison
+                    // functions)
                 }
-            } else if func_name == "strncmp" {
-                // strncmp is trickier — don't auto-fix
-                violations.push(
-                    self.violation(
-                        ctx.file_path,
-                        ctx.base_line + node.start_position().row,
-                        node.start_position().column + 1,
-                        "Consider g_strcmp0 or check for NULL first instead of strncmp (if NULL-safety needed)"
-                            .to_string(),
-                    ),
-                );
+                Statement::Compound(compound) => {
+                    self.check_statements(&compound.statements, file_path, violations);
+                }
+                Statement::Labeled(labeled) => {
+                    self.check_statements(
+                        std::slice::from_ref(&labeled.statement),
+                        file_path,
+                        violations,
+                    );
+                }
+                _ => {}
             }
         }
+    }
 
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, Some(node), ctx, violations);
+    fn check_condition(
+        &self,
+        condition: &Expression,
+        file_path: &std::path::Path,
+        violations: &mut Vec<Violation>,
+    ) {
+        match condition {
+            // Bare call: if (strcmp(a, b)) or if (g_strcmp0(a, b))
+            Expression::Call(call) if self.is_str_compare(&call.function) => {
+                violations.push(self.violation(
+                    file_path,
+                    call.location.line,
+                    call.location.column,
+                    format!(
+                        "{}() returns 0 for equality — use '{}(...) == 0' or '{}(...) != 0' instead of bare boolean check",
+                        call.function, call.function, call.function
+                    ),
+                ));
+            }
+            // Negated call: if (!strcmp(a, b)) or if (!g_strcmp0(a, b))
+            Expression::Unary(unary) if unary.operator == "!" => {
+                if let Expression::Call(call) = &*unary.operand
+                    && self.is_str_compare(&call.function)
+                {
+                    violations.push(self.violation(
+                            file_path,
+                            call.location.line,
+                            call.location.column,
+                            format!(
+                                "{}() returns 0 for equality — use '{}(...) == 0' or '{}(...) != 0' instead of bare boolean check",
+                                call.function, call.function, call.function
+                            ),
+                        ));
+                }
+            }
+            // Binary expression: check for strcmp in proper comparison
+            Expression::Binary(bin) => {
+                self.check_strcmp_in_comparison(&bin.left, file_path, violations);
+                self.check_strcmp_in_comparison(&bin.right, file_path, violations);
+            }
+            _ => {}
         }
+    }
+
+    fn check_strcmp_in_comparison(
+        &self,
+        expr: &Expression,
+        file_path: &std::path::Path,
+        violations: &mut Vec<Violation>,
+    ) {
+        // Check for strcmp (not g_strcmp0) in a comparison context
+        if let Expression::Call(call) = expr {
+            if call.function == "strcmp" {
+                let message = "Consider g_strcmp0 instead of strcmp if arguments can be NULL (g_strcmp0 is NULL-safe)";
+
+                // Create fix to replace "strcmp" with "g_strcmp0"
+                let fix = Fix::new(
+                    call.location.start_byte,
+                    call.location.start_byte + "strcmp".len(),
+                    "g_strcmp0".to_string(),
+                );
+
+                violations.push(self.violation_with_fix(
+                    file_path,
+                    call.location.line,
+                    call.location.column,
+                    message.to_string(),
+                    fix,
+                ));
+            } else if call.function == "strncmp" {
+                violations.push(self.violation(
+                    file_path,
+                    call.location.line,
+                    call.location.column,
+                    "Consider g_strcmp0 or check for NULL first instead of strncmp (if NULL-safety needed)".to_string(),
+                ));
+            }
+        }
+    }
+
+    fn is_str_compare(&self, func_name: &str) -> bool {
+        func_name == "strcmp" || func_name == "g_strcmp0"
     }
 }

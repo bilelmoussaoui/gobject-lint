@@ -1,20 +1,19 @@
-mod expression_stmt;
-mod if_stmt;
-mod return_stmt;
-mod goto_stmt;
-mod labeled_stmt;
 mod compound_stmt;
+mod expression_stmt;
+mod goto_stmt;
+mod if_stmt;
+mod labeled_stmt;
+mod return_stmt;
 mod variable_decl;
 
-pub use expression_stmt::ExpressionStmt;
-pub use if_stmt::IfStatement;
-pub use return_stmt::ReturnStatement;
-pub use goto_stmt::GotoStatement;
-pub use labeled_stmt::LabeledStatement;
 pub use compound_stmt::CompoundStatement;
-pub use variable_decl::VariableDecl;
-
+pub use expression_stmt::ExpressionStmt;
+pub use goto_stmt::GotoStatement;
+pub use if_stmt::IfStatement;
+pub use labeled_stmt::LabeledStatement;
+pub use return_stmt::ReturnStatement;
 use serde::{Deserialize, Serialize};
+pub use variable_decl::VariableDecl;
 
 use crate::model::{CallExpression, Expression, SourceLocation};
 

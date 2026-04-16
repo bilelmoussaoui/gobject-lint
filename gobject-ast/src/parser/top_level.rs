@@ -1,7 +1,7 @@
 use tree_sitter::Node;
 
-use crate::model::*;
 use super::Parser;
+use crate::model::*;
 
 impl Parser {
     pub(super) fn extract_include(&self, node: Node, source: &[u8]) -> Option<Include> {
@@ -147,7 +147,11 @@ impl Parser {
         values
     }
 
-    pub(super) fn extract_gobject_type_declaration(&self, node: Node, source: &[u8]) -> Option<GObjectType> {
+    pub(super) fn extract_gobject_type_declaration(
+        &self,
+        node: Node,
+        source: &[u8],
+    ) -> Option<GObjectType> {
         let directive = node.child_by_field_name("directive")?;
         let directive_text = std::str::from_utf8(&source[directive.byte_range()]).ok()?;
 
@@ -224,7 +228,12 @@ impl Parser {
         })
     }
 
-    pub(super) fn extract_g_define(&self, node: Node, source: &[u8], macro_name: &str) -> Option<GObjectType> {
+    pub(super) fn extract_g_define(
+        &self,
+        node: Node,
+        source: &[u8],
+        macro_name: &str,
+    ) -> Option<GObjectType> {
         // G_DEFINE_TYPE (TypeName, function_prefix, PARENT_TYPE)
         let args = node.child_by_field_name("arguments")?;
         let mut cursor = args.walk();
@@ -273,7 +282,12 @@ impl Parser {
         })
     }
 
-    pub(super) fn collect_identifiers<'a>(&self, node: Node, source: &'a [u8], result: &mut Vec<&'a str>) {
+    pub(super) fn collect_identifiers<'a>(
+        &self,
+        node: Node,
+        source: &'a [u8],
+        result: &mut Vec<&'a str>,
+    ) {
         if node.kind() == "identifier" || node.kind() == "type_identifier" {
             if let Ok(text) = std::str::from_utf8(&source[node.byte_range()]) {
                 result.push(text);
@@ -393,7 +407,11 @@ impl Parser {
         vfuncs
     }
 
-    pub(super) fn extract_vfunc_from_field(&self, field_node: Node, source: &[u8]) -> Option<VirtualFunction> {
+    pub(super) fn extract_vfunc_from_field(
+        &self,
+        field_node: Node,
+        source: &[u8],
+    ) -> Option<VirtualFunction> {
         // A function pointer field looks like:
         // return_type (*name) (params);
         // In tree-sitter this is a field_declaration with a function_declarator
@@ -477,16 +495,27 @@ impl Parser {
         for child in params_node.children(&mut cursor) {
             if child.kind() == "parameter_declaration" {
                 let type_node = child.child_by_field_name("type");
-                let type_name = type_node
+                let mut type_name = type_node
                     .and_then(|t| std::str::from_utf8(&source[t.byte_range()]).ok())
-                    .unwrap_or_default();
+                    .unwrap_or_default()
+                    .to_owned();
 
                 let declarator = child.child_by_field_name("declarator");
-                let name = declarator.and_then(|d| self.extract_declarator_name(d, source));
+                let name = declarator
+                    .as_ref()
+                    .and_then(|d| self.extract_declarator_name(*d, source));
+
+                // If declarator is a pointer_declarator, append * to type_name
+                if let Some(decl) = declarator {
+                    let pointer_count = self.count_pointer_levels(decl);
+                    for _ in 0..pointer_count {
+                        type_name.push('*');
+                    }
+                }
 
                 parameters.push(Parameter {
                     name: name.map(ToOwned::to_owned),
-                    type_name: type_name.to_owned(),
+                    type_name,
                 });
             }
         }
@@ -494,7 +523,32 @@ impl Parser {
         parameters
     }
 
-    pub(super) fn extract_declarator_name<'a>(&self, declarator: Node, source: &'a [u8]) -> Option<&'a str> {
+    fn count_pointer_levels(&self, node: Node) -> usize {
+        let mut count = 0;
+        let mut current = node;
+
+        loop {
+            if current.kind() == "pointer_declarator" {
+                count += 1;
+                // Look for nested pointer or move to declarator field
+                if let Some(inner) = current.child_by_field_name("declarator") {
+                    current = inner;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        count
+    }
+
+    pub(super) fn extract_declarator_name<'a>(
+        &self,
+        declarator: Node,
+        source: &'a [u8],
+    ) -> Option<&'a str> {
         if let Some(inner) = declarator.child_by_field_name("declarator") {
             if inner.kind() == "identifier" {
                 let name = &source[inner.byte_range()];

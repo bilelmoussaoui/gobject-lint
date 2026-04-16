@@ -1,7 +1,6 @@
 use tree_sitter::Node;
 
-use crate::model::VariableDecl;
-use crate::parser::Parser;
+use crate::{model::VariableDecl, parser::Parser};
 
 impl Parser {
     pub(crate) fn parse_variable_decl(&self, node: Node, source: &[u8]) -> Option<VariableDecl> {
@@ -53,21 +52,25 @@ impl Parser {
         let mut dec_cursor = declarator.walk();
         let mut has_equals = false;
         for child in declarator.children(&mut dec_cursor) {
-            match child.kind() {
-                "pointer_declarator" | "identifier" => {
-                    // Extract identifier from declarator
-                    if let Some(id) = self.find_identifier(child, source) {
-                        var_name = Some(id);
+            if child.kind() == "=" {
+                has_equals = true;
+                continue;
+            }
+
+            if !has_equals {
+                // Before "=", extract variable name
+                match child.kind() {
+                    "pointer_declarator" | "identifier" | "array_declarator" => {
+                        if let Some(id) = self.find_identifier(child, source) {
+                            var_name = Some(id);
+                        }
                     }
+                    _ => {}
                 }
-                "=" => {
-                    has_equals = true;
-                }
-                _ => {
-                    // Only treat as initializer if we've seen an "=" sign
-                    if has_equals {
-                        initializer = self.parse_expression(child, source);
-                    }
+            } else {
+                // After "=", parse as initializer
+                if child.is_named() {
+                    initializer = self.parse_expression(child, source);
                 }
             }
         }

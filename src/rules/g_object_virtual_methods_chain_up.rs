@@ -1,4 +1,4 @@
-use tree_sitter::Node;
+use gobject_ast::Statement;
 
 use super::Rule;
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
@@ -41,25 +41,25 @@ impl Rule for GObjectVirtualMethodsChainUp {
                     continue;
                 };
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let root = tree.root_node();
+                // Verify it's a GObject virtual method (has at least one pointer parameter)
+                // Most GObject virtual methods take a GObject* or derived type as first
+                // parameter
+                let has_pointer_param = func.parameters.iter().any(|p| p.type_name.contains("*"));
+                if !has_pointer_param {
+                    continue;
+                }
 
-                    // Verify it's a GObject virtual method
-                    if !self.is_gobject_virtual_method_from_source(ast_context, root, func_source) {
-                        continue;
-                    }
-
-                    // Find the body
-                    if let Some(body) = ast_context.find_body(root)
-                        && !self.has_chainup_call(ast_context, body, func_source, method_type)
-                    {
-                        violations.push(self.violation(path, func.line, 1, format!(
-                                        "{} must chain up to parent class (e.g., G_OBJECT_CLASS (parent_class)->{} (object))",
-                                        func.name, method_type
-                                    )));
-                    }
+                // Check if it chains up to parent class
+                if !self.has_chainup_call(&func.body_statements, method_type) {
+                    violations.push(self.violation(
+                        path,
+                        func.line,
+                        1,
+                        format!(
+                            "{} must chain up to parent class (e.g., G_OBJECT_CLASS (parent_class)->{} (object))",
+                            func.name, method_type
+                        ),
+                    ));
                 }
             }
         }
@@ -67,87 +67,89 @@ impl Rule for GObjectVirtualMethodsChainUp {
 }
 
 impl GObjectVirtualMethodsChainUp {
-    fn find_function_declarator<'a>(&self, node: Node<'a>) -> Option<Node<'a>> {
-        if node.kind() == "function_declarator" {
-            return Some(node);
-        }
-
-        // Recursively search children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if let Some(result) = self.find_function_declarator(child) {
-                return Some(result);
-            }
-        }
-
-        None
-    }
-
-    fn is_gobject_parameter(
-        &self,
-        ast_context: &AstContext,
-        param_node: Node,
-        source: &[u8],
-    ) -> bool {
-        // Get the type of the parameter
-        let param_text = ast_context.get_node_text(param_node, source);
-
-        // Check if parameter type is GObject* or the parameter name is "object"
-        // Common patterns:
-        // - "GObject *object"
-        // - "GObject* object"
-        // - Any type ending with "Object *" (MetaObject*, MyObject*, etc.)
-        param_text.contains("GObject")
-            || (param_text.contains("Object") && param_text.contains('*'))
-            || param_text.contains("* object")
-            || param_text.contains("*object")
-    }
-
-    fn has_chainup_call(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &[u8],
-        method_type: &str,
-    ) -> bool {
-        // Pattern 1: Direct call - G_OBJECT_CLASS (xxx)->dispose/finalize
-        // Pattern 2: Indirect - variable assigned from parent class, then
-        // variable->dispose/finalize
-
-        if node.kind() == "field_expression" {
-            // Check if field name matches method_type (dispose/finalize)
-            if let Some(field) = node.child_by_field_name("field") {
-                let field_str = ast_context.get_node_text(field, source);
-
-                if field_str == method_type {
-                    // Check if the argument contains G_OBJECT_CLASS or similar parent class macro
-                    if let Some(argument) = node.child_by_field_name("argument") {
-                        let arg_text = ast_context.get_node_text(argument, source);
-
-                        // Pattern 1: Direct parent class cast
-                        if self.looks_like_parent_class_cast(arg_text) {
-                            return true;
-                        }
-
-                        // Pattern 2: Variable that looks like it holds a parent class
-                        // Examples: parent_object_class, parent_class, klass, object_class
-                        if self.looks_like_parent_class_variable(arg_text) {
-                            return true;
-                        }
-                    }
+    fn has_chainup_call(&self, statements: &[Statement], method_type: &str) -> bool {
+        for stmt in statements {
+            // Check expressions for field access like parent_class->dispose
+            for expr in stmt.expressions() {
+                if self.check_expression_for_chainup(expr, method_type) {
+                    return true;
                 }
             }
-        }
 
-        // Recursively check children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if self.has_chainup_call(ast_context, child, source, method_type) {
-                return true;
+            // Recursively check nested statements
+            match stmt {
+                Statement::If(if_stmt) => {
+                    if self.has_chainup_call(&if_stmt.then_body, method_type) {
+                        return true;
+                    }
+                    if let Some(else_body) = &if_stmt.else_body
+                        && self.has_chainup_call(else_body, method_type)
+                    {
+                        return true;
+                    }
+                }
+                Statement::Compound(compound) => {
+                    if self.has_chainup_call(&compound.statements, method_type) {
+                        return true;
+                    }
+                }
+                Statement::Labeled(labeled) => {
+                    if self.has_chainup_call(std::slice::from_ref(&labeled.statement), method_type)
+                    {
+                        return true;
+                    }
+                }
+                _ => {}
             }
         }
 
         false
+    }
+
+    fn check_expression_for_chainup(
+        &self,
+        expr: &gobject_ast::Expression,
+        method_type: &str,
+    ) -> bool {
+        use gobject_ast::Expression;
+
+        match expr {
+            // Field access: parent_class->dispose
+            Expression::FieldAccess(field) => {
+                // field.text contains the whole access like "parent_class->dispose"
+                // Check if it ends with ->method_type
+                let expected_suffix = format!("->{}", method_type);
+                if field.text.ends_with(&expected_suffix) {
+                    // Check if the base looks like a parent class
+                    if self.looks_like_parent_class_variable(&field.text)
+                        || self.looks_like_parent_class_cast(&field.text)
+                    {
+                        return true;
+                    }
+                }
+            }
+            // Call expression: might contain field access as part of it
+            Expression::Call(call) => {
+                // Check if the function itself is a field access
+                if call.function.contains("->")
+                    && call.function.ends_with(method_type)
+                    && (self.looks_like_parent_class_variable(&call.function)
+                        || self.looks_like_parent_class_cast(&call.function))
+                {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+
+        // Recursively check sub-expressions
+        let mut found = false;
+        expr.walk(&mut |e| {
+            if !std::ptr::eq(e, expr) && self.check_expression_for_chainup(e, method_type) {
+                found = true;
+            }
+        });
+        found
     }
 
     fn looks_like_parent_class_cast(&self, text: &str) -> bool {
@@ -180,25 +182,6 @@ impl GObjectVirtualMethodsChainUp {
             return true;
         }
 
-        false
-    }
-
-    fn is_gobject_virtual_method_from_source(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &[u8],
-    ) -> bool {
-        if let Some(func_decl) = self.find_function_declarator(node)
-            && let Some(parameters) = func_decl.child_by_field_name("parameters")
-        {
-            let mut cursor = parameters.walk();
-            for child in parameters.children(&mut cursor) {
-                if child.kind() == "parameter_declaration" {
-                    return self.is_gobject_parameter(ast_context, child, source);
-                }
-            }
-        }
         false
     }
 }

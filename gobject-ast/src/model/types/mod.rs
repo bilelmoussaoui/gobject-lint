@@ -1,13 +1,13 @@
-mod gobject_type;
-mod struct_info;
 mod enum_info;
-mod typedef;
 mod function;
+mod gobject_type;
 mod include;
+mod struct_info;
+mod typedef;
 
-pub use gobject_type::{GObjectType, GObjectTypeKind, ClassStruct, VirtualFunction};
-pub use struct_info::{StructInfo, Field};
 pub use enum_info::{EnumInfo, EnumValue};
-pub use typedef::TypedefInfo;
 pub use function::{FunctionInfo, Parameter};
+pub use gobject_type::{ClassStruct, GObjectType, GObjectTypeKind, VirtualFunction};
 pub use include::Include;
+pub use struct_info::{Field, StructInfo};
+pub use typedef::TypedefInfo;

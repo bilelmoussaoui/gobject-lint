@@ -105,11 +105,34 @@ fn run_fixture_tests(rule_name: &str, rule: &dyn Rule) {
         } else {
             let expected = fs::read_to_string(&stderr_file).unwrap_or_default();
             if actual_stderr.trim() != expected.trim() {
+                // Write both to temp files for diff
+                let expected_path = temp_dir.path().join("expected.stderr");
+                let actual_path = temp_dir.path().join("actual.stderr");
+                fs::write(&expected_path, &expected).expect("failed to write expected");
+                fs::write(&actual_path, &actual_stderr).expect("failed to write actual");
+
+                // Run diff to show the differences
+                let diff_output = std::process::Command::new("diff")
+                    .arg("-u")
+                    .arg("--label")
+                    .arg("expected")
+                    .arg("--label")
+                    .arg("actual")
+                    .arg(&expected_path)
+                    .arg(&actual_path)
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                    .unwrap_or_else(|_| {
+                        format!(
+                            "Failed to run diff\n--- expected ---\n{}\n--- got ---\n{}",
+                            expected.trim(),
+                            actual_stderr.trim()
+                        )
+                    });
+
                 failures.push(format!(
-                    "fixture {rule_name}/{stem}: violations mismatch\n\
-                     --- expected ---\n{}\n--- got ---\n{}",
-                    expected.trim(),
-                    actual_stderr.trim(),
+                    "fixture {rule_name}/{stem}: violations mismatch\n{}",
+                    diff_output
                 ));
             }
         }
@@ -123,11 +146,34 @@ fn run_fixture_tests(rule_name: &str, rule: &dyn Rule) {
             let expected_fixed = fs::read_to_string(&fixed_file).expect("failed to read .fixed.c");
 
             if actual_fixed != expected_fixed {
+                // Write both to temp files for diff
+                let expected_path = temp_dir.path().join("expected.c");
+                let actual_path = temp_dir.path().join("actual.c");
+                fs::write(&expected_path, &expected_fixed).expect("failed to write expected");
+                fs::write(&actual_path, &actual_fixed).expect("failed to write actual");
+
+                // Run diff to show the differences
+                let diff_output = std::process::Command::new("diff")
+                    .arg("-u")
+                    .arg("--label")
+                    .arg("expected")
+                    .arg("--label")
+                    .arg("actual")
+                    .arg(&expected_path)
+                    .arg(&actual_path)
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                    .unwrap_or_else(|_| {
+                        format!(
+                            "Failed to run diff\n--- expected ---\n{}\n--- got ---\n{}",
+                            expected_fixed.trim(),
+                            actual_fixed.trim()
+                        )
+                    });
+
                 failures.push(format!(
-                    "fixture {rule_name}/{stem}: fix output mismatch\n\
-                     --- expected ---\n{}\n--- got ---\n{}",
-                    expected_fixed.trim(),
-                    actual_fixed.trim(),
+                    "fixture {rule_name}/{stem}: fix output mismatch\n{}",
+                    diff_output
                 ));
             }
 
@@ -150,11 +196,34 @@ fn run_fixture_tests(rule_name: &str, rule: &dyn Rule) {
             } else {
                 let expected = fs::read_to_string(&fixed_stderr_file).unwrap_or_default();
                 if actual_fixed_stderr.trim() != expected.trim() {
+                    // Write both to temp files for diff
+                    let expected_path = temp_dir_fixed.path().join("expected.stderr");
+                    let actual_path = temp_dir_fixed.path().join("actual.stderr");
+                    fs::write(&expected_path, &expected).expect("failed to write expected");
+                    fs::write(&actual_path, &actual_fixed_stderr).expect("failed to write actual");
+
+                    // Run diff to show the differences
+                    let diff_output = std::process::Command::new("diff")
+                        .arg("-u")
+                        .arg("--label")
+                        .arg("expected")
+                        .arg("--label")
+                        .arg("actual")
+                        .arg(&expected_path)
+                        .arg(&actual_path)
+                        .output()
+                        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                        .unwrap_or_else(|_| {
+                            format!(
+                                "Failed to run diff\n--- expected ---\n{}\n--- got ---\n{}",
+                                expected.trim(),
+                                actual_fixed_stderr.trim()
+                            )
+                        });
+
                     failures.push(format!(
-                        "fixture {rule_name}/{stem}: post-fix violations mismatch\n\
-                         --- expected ---\n{}\n--- got ---\n{}",
-                        expected.trim(),
-                        actual_fixed_stderr.trim(),
+                        "fixture {rule_name}/{stem}: post-fix violations mismatch\n{}",
+                        diff_output
                     ));
                 }
             }

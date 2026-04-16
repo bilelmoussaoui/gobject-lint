@@ -1,6 +1,6 @@
-use tree_sitter::Node;
+use gobject_ast::{Expression, Statement};
 
-use super::{CheckContext, Fix, Rule};
+use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGClearWeakPointer;
@@ -34,164 +34,150 @@ impl Rule for UseGClearWeakPointer {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_node(ast_context, tree.root_node(), &ctx, violations);
-                }
+                // Walk through function body looking for the pattern
+                self.check_statements(&func.body_statements, path, violations);
             }
         }
     }
 }
 
 impl UseGClearWeakPointer {
-    fn check_node(
+    fn check_statements(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        statements: &[Statement],
+        file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
-        // Look for g_object_remove_weak_pointer followed by NULL assignment
-        if node.kind() == "expression_statement"
-            && let Some(call) = ast_context.find_call_expression(node)
-            && let Some(function) = call.child_by_field_name("function")
-        {
-            let func_name = ast_context.get_node_text(function, ctx.source);
+        let mut i = 0;
+        while i < statements.len() {
+            // Look for g_object_remove_weak_pointer followed by NULL assignment
+            if i + 1 < statements.len()
+                && self.try_remove_weak_then_null(
+                    &statements[i],
+                    &statements[i + 1],
+                    file_path,
+                    violations,
+                )
+            {
+                i += 2;
+                continue;
+            }
 
-            if func_name == "g_object_remove_weak_pointer" {
-                // Extract the variable being cleaned up
-                if let Some(var_name) = self.extract_weak_pointer_var(ast_context, call, ctx.source)
-                {
-                    // Check if next statement is var = NULL
-                    if let Some(parent) = node.parent()
-                        && parent.kind() == "compound_statement"
-                        && let Some(next_sibling) = self.find_next_statement(parent, node)
-                        && self.is_null_assignment(ast_context, next_sibling, &var_name, ctx.source)
-                    {
-                        // Found the pattern! Create a fix
-                        let replacement = format!("g_clear_weak_pointer (&{});", var_name);
-
-                        let fix = Fix::from_range(
-                            node.start_byte(),
-                            next_sibling.end_byte(),
-                            ctx,
-                            &replacement,
-                        );
-
-                        violations.push(self.violation_with_fix(
-                            ctx.file_path,
-                            ctx.base_line + node.start_position().row,
-                            node.start_position().column + 1,
-                            format!(
-                                "Use {} instead of g_object_remove_weak_pointer + NULL assignment",
-                                replacement.trim_end_matches(';')
-                            ),
-                            fix,
-                        ));
+            // Recursively check nested statements
+            match &statements[i] {
+                Statement::If(if_stmt) => {
+                    self.check_statements(&if_stmt.then_body, file_path, violations);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.check_statements(else_body, file_path, violations);
                     }
                 }
+                Statement::Compound(compound) => {
+                    self.check_statements(&compound.statements, file_path, violations);
+                }
+                Statement::Labeled(labeled) => {
+                    self.check_statements(
+                        std::slice::from_ref(&labeled.statement),
+                        file_path,
+                        violations,
+                    );
+                }
+                _ => {}
             }
-        }
 
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.check_node(ast_context, child, ctx, violations);
+            i += 1;
         }
     }
 
-    /// Extract variable name from g_object_remove_weak_pointer call
-    /// Pattern: g_object_remove_weak_pointer(G_OBJECT(obj), (gpointer*)&obj)
-    fn extract_weak_pointer_var(
+    /// Matches `g_object_remove_weak_pointer(obj, &var); var = NULL;`
+    fn try_remove_weak_then_null(
         &self,
-        ast_context: &AstContext,
-        call: Node,
-        source: &[u8],
-    ) -> Option<String> {
-        let args = call.child_by_field_name("arguments")?;
+        s1: &Statement,
+        s2: &Statement,
+        file_path: &std::path::Path,
+        violations: &mut Vec<Violation>,
+    ) -> bool {
+        // First statement must be g_object_remove_weak_pointer call
+        let Statement::Expression(expr_stmt) = s1 else {
+            return false;
+        };
 
-        // Collect arguments
-        let mut cursor = args.walk();
-        let mut arguments = Vec::new();
-        for child in args.children(&mut cursor) {
-            if child.kind() != "(" && child.kind() != ")" && child.kind() != "," {
-                arguments.push(child);
-            }
+        let Expression::Call(call) = &expr_stmt.expr else {
+            return false;
+        };
+
+        if call.function != "g_object_remove_weak_pointer" {
+            return false;
         }
 
         // Need at least 2 arguments
-        if arguments.len() < 2 {
-            return None;
+        if call.arguments.len() < 2 {
+            return false;
         }
 
-        // Second argument should be (gpointer*)&var or &var
-        let second_arg_text = ast_context.get_node_text(arguments[1], source);
+        // Extract the variable from the second argument
+        let Some(var_name) = self.extract_weak_pointer_var(&call.arguments[1]) else {
+            return false;
+        };
 
-        // Remove casts and address-of operator
-        let cleaned = second_arg_text
-            .replace("(gpointer*)", "")
-            .replace("(gpointer *)", "")
-            .replace("&", "")
-            .trim()
-            .to_string();
-
-        if cleaned.is_empty() {
-            return None;
+        // Second statement must be var = NULL
+        if !self.is_null_assignment(s2, &var_name) {
+            return false;
         }
 
-        Some(cleaned)
+        // Create a fix
+        let replacement = format!("g_clear_weak_pointer (&{});", var_name);
+        let fix = Fix::new(
+            s1.location().start_byte,
+            s2.location().end_byte,
+            replacement.clone(),
+        );
+
+        violations.push(self.violation_with_fix(
+            file_path,
+            s1.location().line,
+            s1.location().column,
+            format!(
+                "Use {} instead of g_object_remove_weak_pointer + NULL assignment",
+                replacement.trim_end_matches(';')
+            ),
+            fix,
+        ));
+        true
     }
 
-    /// Find the next statement sibling
-    fn find_next_statement<'a>(&self, parent: Node<'a>, current: Node<'a>) -> Option<Node<'a>> {
-        let mut cursor = parent.walk();
-        let mut found_current = false;
+    /// Extract variable name from the second argument of
+    /// g_object_remove_weak_pointer Pattern: (gpointer*)&var or &var
+    fn extract_weak_pointer_var(&self, arg: &gobject_ast::Argument) -> Option<String> {
+        let gobject_ast::Argument::Expression(expr) = arg;
 
-        for child in parent.children(&mut cursor) {
-            if found_current && child.kind().ends_with("_statement") {
-                return Some(child);
-            }
-            if child == current {
-                found_current = true;
-            }
+        // Handle cast expressions: (gpointer*)&var
+        let inner_expr = if let Expression::Cast(cast) = expr.as_ref() {
+            &cast.operand
+        } else {
+            expr
+        };
+
+        // Handle unary & operator: &var
+        if let Expression::Unary(unary) = inner_expr.as_ref()
+            && unary.operator == "&"
+        {
+            return unary.operand.extract_variable_name();
         }
 
         None
     }
 
-    /// Check if a statement is var = NULL
-    fn is_null_assignment(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        var_name: &str,
-        source: &[u8],
-    ) -> bool {
-        if node.kind() == "expression_statement" {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() == "assignment_expression"
-                    && let Some(left) = child.child_by_field_name("left")
-                {
-                    let left_text = ast_context.get_node_text(left, source);
-                    if left_text == var_name
-                        && let Some(right) = child.child_by_field_name("right")
-                    {
-                        let right_text = ast_context.get_node_text(right, source);
-                        if ast_context.is_null_literal(right_text) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        false
+    /// Check if statement is `var = NULL`
+    fn is_null_assignment(&self, stmt: &Statement, var_name: &str) -> bool {
+        let Statement::Expression(expr_stmt) = stmt else {
+            return false;
+        };
+
+        let Expression::Assignment(assign) = &expr_stmt.expr else {
+            return false;
+        };
+
+        // Check left side matches var_name and right side is NULL
+        assign.lhs == var_name && assign.operator == "=" && assign.rhs.is_null()
     }
 }

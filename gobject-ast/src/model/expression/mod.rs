@@ -1,38 +1,43 @@
-mod identifier;
-mod field_access;
-mod literal;
-mod call;
 mod assignment;
 mod binary;
-mod unary;
+mod call;
 mod cast;
 mod conditional;
+mod field_access;
+mod identifier;
+mod initializer_list;
+mod literal;
+mod macro_call;
 mod sizeof;
 mod subscript;
-mod initializer_list;
+mod unary;
 mod update;
 
-pub use identifier::IdentifierExpression;
-pub use field_access::FieldAccessExpression;
-pub use literal::{StringLiteralExpression, NumberLiteralExpression, CharLiteralExpression, NullExpression, BooleanExpression};
-pub use call::{CallExpression, Argument};
 pub use assignment::Assignment;
 pub use binary::BinaryExpression;
-pub use unary::UnaryExpression;
+pub use call::{Argument, CallExpression};
 pub use cast::CastExpression;
 pub use conditional::ConditionalExpression;
-pub use sizeof::SizeofExpression;
-pub use subscript::SubscriptExpression;
+pub use field_access::FieldAccessExpression;
+pub use identifier::IdentifierExpression;
 pub use initializer_list::InitializerListExpression;
-pub use update::UpdateExpression;
-
+pub use literal::{
+    BooleanExpression, CharLiteralExpression, NullExpression, NumberLiteralExpression,
+    StringLiteralExpression,
+};
+pub use macro_call::MacroCallExpression;
 use serde::{Deserialize, Serialize};
+pub use sizeof::{SizeofExpression, SizeofOperand};
+pub use subscript::SubscriptExpression;
+pub use unary::UnaryExpression;
+pub use update::UpdateExpression;
 
 use crate::model::SourceLocation;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expression {
     Call(CallExpression),
+    MacroCall(MacroCallExpression),
     Assignment(Assignment),
     Binary(BinaryExpression),
     Unary(UnaryExpression),
@@ -56,6 +61,7 @@ impl Expression {
     pub fn byte_range(&self) -> (usize, usize) {
         match self {
             Expression::Call(c) => (c.location.start_byte, c.location.end_byte),
+            Expression::MacroCall(m) => (m.location.start_byte, m.location.end_byte),
             Expression::Assignment(a) => (a.location.start_byte, a.location.end_byte),
             Expression::Binary(b) => (b.location.start_byte, b.location.end_byte),
             Expression::Unary(u) => (u.location.start_byte, u.location.end_byte),
@@ -78,6 +84,7 @@ impl Expression {
     pub fn location(&self) -> &SourceLocation {
         match self {
             Expression::Call(c) => &c.location,
+            Expression::MacroCall(m) => &m.location,
             Expression::Assignment(a) => &a.location,
             Expression::Binary(b) => &b.location,
             Expression::Unary(u) => &u.location,
@@ -114,6 +121,12 @@ impl Expression {
         match self {
             Expression::Call(call) => {
                 for arg in &call.arguments {
+                    let Argument::Expression(e) = arg;
+                    e.walk(f);
+                }
+            }
+            Expression::MacroCall(macro_call) => {
+                for arg in &macro_call.arguments {
                     let Argument::Expression(e) = arg;
                     e.walk(f);
                 }
@@ -170,5 +183,48 @@ impl Expression {
     /// Check if this expression is a string literal
     pub fn is_string_literal(&self) -> bool {
         matches!(self, Expression::StringLiteral(_))
+    }
+
+    /// Extract string literal value, unwrapping macro calls like I_("string")
+    /// Returns the string without quotes
+    pub fn extract_string_value(&self) -> Option<String> {
+        match self {
+            Expression::StringLiteral(lit) => Some(lit.value.trim_matches('"').to_string()),
+            Expression::MacroCall(macro_call) => {
+                macro_call.extract_string_literal().map(|s| s.to_string())
+            }
+            _ => None,
+        }
+    }
+
+    /// Check if this is a string literal or a macro wrapping a string literal
+    pub fn is_string_or_macro_string(&self) -> bool {
+        self.extract_string_value().is_some()
+    }
+
+    /// Check if this expression contains an identifier with the given name
+    /// Recursively searches through the entire expression tree
+    pub fn contains_identifier(&self, name: &str) -> bool {
+        let mut found = false;
+        self.walk(&mut |e| {
+            if let Expression::Identifier(id) = e {
+                if id.name == name {
+                    found = true;
+                }
+            }
+        });
+        found
+    }
+
+    /// Collect all identifiers in this expression
+    /// Returns a list of all identifier names found in the expression tree
+    pub fn collect_identifiers(&self) -> Vec<String> {
+        let mut identifiers = Vec::new();
+        self.walk(&mut |e| {
+            if let Expression::Identifier(id) = e {
+                identifiers.push(id.name.clone());
+            }
+        });
+        identifiers
     }
 }

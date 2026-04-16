@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use tree_sitter::Node;
+use gobject_ast::Statement;
 
 use super::Rule;
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
@@ -32,18 +32,7 @@ impl Rule for UseGAutoptrGotoCleanup {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    self.check_function(
-                        ast_context,
-                        tree.root_node(),
-                        func_source,
-                        path,
-                        func.line,
-                        violations,
-                    );
-                }
+                self.check_function(func, path, violations);
             }
         }
     }
@@ -52,315 +41,305 @@ impl Rule for UseGAutoptrGotoCleanup {
 impl UseGAutoptrGotoCleanup {
     fn check_function(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &[u8],
+        func: &gobject_ast::FunctionInfo,
         file_path: &std::path::Path,
-        base_line: usize,
         violations: &mut Vec<Violation>,
     ) {
-        // Find the function body
-        if let Some(body) = ast_context.find_body(node) {
-            // Find all allocated variables (g_object_new, g_new, etc.)
-            let allocated_vars = self.find_allocated_variables(ast_context, body, source);
+        // Find all allocated variables (g_object_new, g_new, etc.)
+        let allocated_vars = self.find_allocated_variables(&func.body_statements);
 
-            // Find all goto statements and the labels they target
-            let goto_labels = self.find_goto_labels(ast_context, body, source);
+        // Find all goto statements and the labels they target
+        let goto_labels = self.find_goto_labels(&func.body_statements);
 
-            // Find cleanup labels (labels that unref/free variables)
-            let cleanup_labels = self.find_cleanup_labels(ast_context, body, source);
+        // Find cleanup labels (labels that unref/free variables)
+        let cleanup_labels = self.find_cleanup_labels(&func.body_statements);
 
-            // Match: if allocated var has goto to cleanup label that frees it
-            for (var_name, (var_type, decl_node)) in &allocated_vars {
-                for goto_label in &goto_labels {
-                    if let Some(cleanup_vars) = cleanup_labels.get(goto_label)
-                        && cleanup_vars.contains(var_name)
-                    {
-                        // Extract base type name (strip pointer and qualifiers)
-                        let base_type = AstContext::extract_base_type(var_type);
-                        let position = decl_node.start_position();
-                        violations.push(self.violation(
-                                file_path,
-                                base_line + position.row,
-                                position.column + 1,
-                                format!(
-                                    "Consider using g_autoptr({}) {} and g_steal_pointer to avoid goto cleanup",
-                                    base_type, var_name
-                                ),
-                            ));
-                    }
+        // Match: if allocated var has goto to cleanup label that frees it
+        for (var_name, (var_type, location)) in &allocated_vars {
+            for goto_label in &goto_labels {
+                if let Some(cleanup_vars) = cleanup_labels.get(goto_label)
+                    && cleanup_vars.contains(var_name)
+                {
+                    // Extract base type name (strip pointer and qualifiers)
+                    let base_type = self.extract_base_type(var_type);
+                    violations.push(self.violation(
+                        file_path,
+                        location.line,
+                        location.column,
+                        format!(
+                            "Consider using g_autoptr({}) {} and g_steal_pointer to avoid goto cleanup",
+                            base_type, var_name
+                        ),
+                    ));
                 }
             }
         }
     }
 
+    fn extract_base_type(&self, type_name: &str) -> String {
+        // Extract base type from "const Foo *" -> "Foo"
+        type_name
+            .trim()
+            .trim_start_matches("const")
+            .trim()
+            .trim_end_matches('*')
+            .trim()
+            .to_string()
+    }
+
     /// Find variables allocated with g_object_new, g_new, etc.
-    /// Returns map of var_name -> (type_name, decl_node)
-    fn find_allocated_variables<'a>(
+    /// Returns map of var_name -> (type_name, location)
+    fn find_allocated_variables(
         &self,
-        ast_context: &AstContext,
-        body: Node<'a>,
-        source: &'a [u8],
-    ) -> HashMap<&'a str, (&'a str, Node<'a>)> {
+        statements: &[Statement],
+    ) -> HashMap<String, (String, gobject_ast::SourceLocation)> {
         let mut result = HashMap::new();
 
         // First pass: find all local pointer declarations
         let mut local_vars = HashMap::new();
-        self.collect_local_pointer_declarations(ast_context, body, source, &mut local_vars);
+        self.collect_local_pointer_declarations(statements, &mut local_vars);
 
         // Second pass: find assignments to those variables from allocation functions
-        self.collect_allocated_vars(ast_context, body, source, &local_vars, &mut result);
+        self.collect_allocated_vars(statements, &local_vars, &mut result);
 
         result
     }
 
-    fn collect_local_pointer_declarations<'a>(
+    fn collect_local_pointer_declarations(
         &self,
-        ast_context: &AstContext,
-        node: Node<'a>,
-        source: &'a [u8],
-        result: &mut HashMap<&'a str, (&'a str, Node<'a>)>,
+        statements: &[Statement],
+        result: &mut HashMap<String, (String, gobject_ast::SourceLocation)>,
     ) {
-        if node.kind() == "declaration" {
-            // Look for: Type *var = NULL; or Type *var = some_function();
-            // We collect all pointer declarations, will filter by allocation later
-            if let Some(type_node) = node.child_by_field_name("type") {
-                let type_text = ast_context.get_node_text(type_node, source);
-
-                // Find all declarators in this declaration (could be multiple: Type *a = NULL,
-                // *b = NULL;)
-                let mut cursor = node.walk();
-                for child in node.children(&mut cursor) {
-                    if (child.kind() == "init_declarator" || child.kind() == "pointer_declarator")
-                        && let Some(var_name) =
-                            self.extract_var_name_from_declarator(ast_context, child, source)
-                    {
-                        // Only track simple identifiers, not field expressions
-                        if !var_name.contains("->") && !var_name.contains(".") {
-                            result.insert(var_name, (type_text, node));
+        for stmt in statements {
+            match stmt {
+                Statement::Declaration(decl) => {
+                    // Only track pointer types
+                    if decl.type_name.contains('*') {
+                        // Skip field access names
+                        if !decl.name.contains("->") && !decl.name.contains('.') {
+                            result.insert(
+                                decl.name.clone(),
+                                (decl.type_name.clone(), decl.location.clone()),
+                            );
                         }
                     }
                 }
-            }
-        }
-
-        // Recurse only one level (don't go into nested blocks)
-        if node.kind() == "compound_statement" || node.kind() == "function_definition" {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() == "declaration" {
-                    self.collect_local_pointer_declarations(ast_context, child, source, result);
+                Statement::Compound(compound) => {
+                    self.collect_local_pointer_declarations(&compound.statements, result);
                 }
+                Statement::If(if_stmt) => {
+                    self.collect_local_pointer_declarations(&if_stmt.then_body, result);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.collect_local_pointer_declarations(else_body, result);
+                    }
+                }
+                Statement::Labeled(labeled) => {
+                    self.collect_local_pointer_declarations(
+                        std::slice::from_ref(&labeled.statement),
+                        result,
+                    );
+                }
+                _ => {}
             }
         }
     }
 
-    fn extract_var_name_from_declarator<'a>(
+    fn collect_allocated_vars(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-    ) -> Option<&'a str> {
-        match node.kind() {
-            "init_declarator" => {
-                if let Some(declarator) = node.child_by_field_name("declarator") {
-                    return self.extract_var_name_from_declarator(ast_context, declarator, source);
-                }
-            }
-            "pointer_declarator" => {
-                if let Some(declarator) = node.child_by_field_name("declarator") {
-                    return self.extract_var_name_from_declarator(ast_context, declarator, source);
-                }
-            }
-            "identifier" => {
-                return Some(ast_context.get_node_text(node, source));
-            }
-            _ => {}
-        }
-        None
-    }
-
-    fn collect_allocated_vars<'a>(
-        &self,
-        ast_context: &AstContext,
-        node: Node<'a>,
-        source: &'a [u8],
-        local_vars: &HashMap<&'a str, (&'a str, Node<'a>)>,
-        result: &mut HashMap<&'a str, (&'a str, Node<'a>)>,
+        statements: &[Statement],
+        local_vars: &HashMap<String, (String, gobject_ast::SourceLocation)>,
+        result: &mut HashMap<String, (String, gobject_ast::SourceLocation)>,
     ) {
-        // Look for assignments or initializations of local vars with allocation calls
+        use gobject_ast::Expression;
 
-        // Pattern 1: Type *var = allocation_call();
-        if node.kind() == "declaration"
-            && let Some(init_declarator) = self.find_init_declarator(node)
-            && let Some(value) = init_declarator.child_by_field_name("value")
-            && ast_context.is_allocation_call(value, source)
-            && let Some(declarator) = init_declarator.child_by_field_name("declarator")
-            && let Some(var_name) = self.extract_var_name(ast_context, declarator, source)
-            && let Some((type_text, decl_node)) = local_vars.get(&var_name)
-        {
-            result.insert(var_name, (type_text, *decl_node));
-        }
-
-        // Pattern 2: var = allocation_call();
-        if node.kind() == "assignment_expression"
-            && let Some(left) = node.child_by_field_name("left")
-        {
-            let var_name = ast_context.get_node_text(left, source);
-            // Only simple identifiers, not field expressions
-            if !var_name.contains("->")
-                && !var_name.contains(".")
-                && let Some(right) = node.child_by_field_name("right")
-                && ast_context.is_allocation_call(right, source)
-                && let Some((type_text, decl_node)) = local_vars.get(&var_name)
-            {
-                result.insert(var_name, (type_text, *decl_node));
-            }
-        }
-
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.collect_allocated_vars(ast_context, child, source, local_vars, result);
-        }
-    }
-
-    fn find_init_declarator<'a>(&self, node: Node<'a>) -> Option<Node<'a>> {
-        let mut cursor = node.walk();
-        #[allow(clippy::manual_find)]
-        for child in node.children(&mut cursor) {
-            if child.kind() == "init_declarator" {
-                return Some(child);
-            }
-        }
-        None
-    }
-
-    fn extract_var_name<'a>(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-    ) -> Option<&'a str> {
-        match node.kind() {
-            "pointer_declarator" => {
-                if let Some(declarator) = node.child_by_field_name("declarator") {
-                    return self.extract_var_name(ast_context, declarator, source);
+        for stmt in statements {
+            match stmt {
+                // Pattern 1: Type *var = allocation_call();
+                Statement::Declaration(decl) => {
+                    if let Some(Expression::Call(call)) = &decl.initializer
+                        && self.is_allocation_call(&call.function)
+                        && let Some((type_text, location)) = local_vars.get(&decl.name)
+                    {
+                        result.insert(decl.name.clone(), (type_text.clone(), location.clone()));
+                    }
                 }
+                // Pattern 2: var = allocation_call();
+                Statement::Expression(expr_stmt) => {
+                    if let Expression::Assignment(assign) = &expr_stmt.expr
+                        && let Expression::Call(call) = &*assign.rhs
+                        && self.is_allocation_call(&call.function)
+                    {
+                        // Only simple identifiers, not field expressions
+                        if !assign.lhs.contains("->")
+                            && !assign.lhs.contains('.')
+                            && let Some((type_text, location)) = local_vars.get(&assign.lhs)
+                        {
+                            result
+                                .insert(assign.lhs.clone(), (type_text.clone(), location.clone()));
+                        }
+                    }
+                }
+                // Recurse
+                Statement::Compound(compound) => {
+                    self.collect_allocated_vars(&compound.statements, local_vars, result);
+                }
+                Statement::If(if_stmt) => {
+                    self.collect_allocated_vars(&if_stmt.then_body, local_vars, result);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.collect_allocated_vars(else_body, local_vars, result);
+                    }
+                }
+                Statement::Labeled(labeled) => {
+                    self.collect_allocated_vars(
+                        std::slice::from_ref(&labeled.statement),
+                        local_vars,
+                        result,
+                    );
+                }
+                _ => {}
             }
-            "identifier" => {
-                return Some(ast_context.get_node_text(node, source));
-            }
-            _ => {}
         }
-        None
+    }
+
+    fn is_allocation_call(&self, func_name: &str) -> bool {
+        // Functions that allocate GObject types
+        matches!(
+            func_name,
+            "g_object_new"
+                | "g_object_new_with_properties"
+                | "g_type_create_instance"
+                | "g_new"
+                | "g_new0"
+                | "g_try_new"
+                | "g_try_new0"
+                | "g_file_new_for_path"
+                | "g_file_new_for_uri"
+        ) || func_name.ends_with("_new")
+            || func_name.ends_with("_get_instance")
     }
 
     /// Find all goto statements and collect the labels they target
-    fn find_goto_labels<'a>(
-        &self,
-        ast_context: &AstContext,
-        body: Node,
-        source: &'a [u8],
-    ) -> Vec<&'a str> {
-        let mut labels = Vec::new();
-        self.collect_goto_labels(ast_context, body, source, &mut labels);
+    fn find_goto_labels(&self, statements: &[Statement]) -> HashSet<String> {
+        let mut labels = HashSet::new();
+        self.collect_goto_labels(statements, &mut labels);
         labels
     }
 
-    fn collect_goto_labels<'a>(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-        labels: &mut Vec<&'a str>,
-    ) {
-        if node.kind() == "goto_statement" {
-            // goto has a label child
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() == "statement_identifier" {
-                    let label = ast_context.get_node_text(child, source);
-                    labels.push(label);
+    fn collect_goto_labels(&self, statements: &[Statement], labels: &mut HashSet<String>) {
+        for stmt in statements {
+            match stmt {
+                Statement::Goto(goto_stmt) => {
+                    labels.insert(goto_stmt.label.clone());
                 }
+                Statement::Compound(compound) => {
+                    self.collect_goto_labels(&compound.statements, labels);
+                }
+                Statement::If(if_stmt) => {
+                    self.collect_goto_labels(&if_stmt.then_body, labels);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.collect_goto_labels(else_body, labels);
+                    }
+                }
+                Statement::Labeled(labeled) => {
+                    self.collect_goto_labels(std::slice::from_ref(&labeled.statement), labels);
+                }
+                _ => {}
             }
-        }
-
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.collect_goto_labels(ast_context, child, source, labels);
         }
     }
 
     /// Find all labels and what variables they cleanup (unref/free)
     /// Returns map of label_name -> set of variable names
-    fn find_cleanup_labels<'a>(
-        &self,
-        ast_context: &AstContext,
-        body: Node,
-        source: &'a [u8],
-    ) -> HashMap<&'a str, Vec<&'a str>> {
+    fn find_cleanup_labels(&self, statements: &[Statement]) -> HashMap<String, HashSet<String>> {
         let mut result = HashMap::new();
-        self.collect_cleanup_labels(ast_context, body, source, &mut result);
+        self.collect_cleanup_labels(statements, &mut result);
         result
     }
 
-    fn collect_cleanup_labels<'a>(
+    fn collect_cleanup_labels(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-        result: &mut HashMap<&'a str, Vec<&'a str>>,
+        statements: &[Statement],
+        result: &mut HashMap<String, HashSet<String>>,
     ) {
-        if node.kind() == "labeled_statement"
-            && let Some(label) = node.child_by_field_name("label")
-        {
-            let label_name = ast_context.get_node_text(label, source);
+        for stmt in statements {
+            match stmt {
+                Statement::Labeled(labeled) => {
+                    // Find cleanup calls in this labeled statement
+                    let mut cleanup_vars = HashSet::new();
+                    self.find_cleanup_calls(
+                        std::slice::from_ref(&labeled.statement),
+                        &mut cleanup_vars,
+                    );
 
-            // Find cleanup calls in the label body
-            let mut cleanup_vars = Vec::new();
-            self.find_cleanup_calls(ast_context, node, source, &mut cleanup_vars);
+                    if !cleanup_vars.is_empty() {
+                        result.insert(labeled.label.clone(), cleanup_vars);
+                    }
 
-            if !cleanup_vars.is_empty() {
-                result.insert(label_name, cleanup_vars);
+                    // Also recurse to find nested labeled statements
+                    self.collect_cleanup_labels(std::slice::from_ref(&labeled.statement), result);
+                }
+                Statement::Compound(compound) => {
+                    self.collect_cleanup_labels(&compound.statements, result);
+                }
+                Statement::If(if_stmt) => {
+                    self.collect_cleanup_labels(&if_stmt.then_body, result);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.collect_cleanup_labels(else_body, result);
+                    }
+                }
+                _ => {}
             }
-        }
-
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.collect_cleanup_labels(ast_context, child, source, result);
         }
     }
 
-    fn find_cleanup_calls<'a>(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-        cleanup_vars: &mut Vec<&'a str>,
-    ) {
-        let (is_cleanup, _) = ast_context.is_cleanup_call(node, source);
-        if is_cleanup {
-            // Get the argument
-            if let Some(arguments) = node.child_by_field_name("arguments") {
-                let mut cursor = arguments.walk();
-                for child in arguments.children(&mut cursor) {
-                    if child.kind() != "(" && child.kind() != ")" && child.kind() != "," {
-                        let var_text = ast_context.get_node_text(child, source);
-                        // For g_clear_object(&var), extract var from &var
-                        let var_name = var_text.trim_start_matches('&');
-                        cleanup_vars.push(var_name);
+    fn find_cleanup_calls(&self, statements: &[Statement], cleanup_vars: &mut HashSet<String>) {
+        use gobject_ast::Expression;
+
+        for stmt in statements {
+            match stmt {
+                Statement::Expression(expr_stmt) => {
+                    if let Expression::Call(call) = &expr_stmt.expr
+                        && self.is_cleanup_call(&call.function)
+                        && !call.arguments.is_empty()
+                    {
+                        let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
+                        // Extract variable name (handle &var or var)
+                        if let Some(var_name) = arg_expr.extract_variable_name() {
+                            cleanup_vars.insert(var_name.to_string());
+                        }
                     }
                 }
+                Statement::Compound(compound) => {
+                    self.find_cleanup_calls(&compound.statements, cleanup_vars);
+                }
+                Statement::If(if_stmt) => {
+                    self.find_cleanup_calls(&if_stmt.then_body, cleanup_vars);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.find_cleanup_calls(else_body, cleanup_vars);
+                    }
+                }
+                Statement::Labeled(labeled) => {
+                    self.find_cleanup_calls(std::slice::from_ref(&labeled.statement), cleanup_vars);
+                }
+                _ => {}
             }
         }
+    }
 
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.find_cleanup_calls(ast_context, child, source, cleanup_vars);
-        }
+    fn is_cleanup_call(&self, func_name: &str) -> bool {
+        // Functions that cleanup/free GObject types
+        matches!(
+            func_name,
+            "g_object_unref"
+                | "g_clear_object"
+                | "g_clear_pointer"
+                | "g_error_free"
+                | "g_clear_error"
+                | "g_free"
+                | "g_clear_handle_id"
+                | "g_clear_signal_handler"
+        ) || func_name.ends_with("_unref")
+            || func_name.ends_with("_free")
+            || func_name.ends_with("_destroy")
     }
 }

@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::HashSet;
 
-use tree_sitter::Node;
+use gobject_ast::{Expression, Statement};
 
-use super::{CheckContext, Rule};
+use super::Rule;
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGFileLoadBytes;
@@ -36,17 +36,7 @@ impl Rule for UseGFileLoadBytes {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    let ctx = CheckContext {
-                        source: func_source,
-                        file_path: path,
-                        base_line: func.line,
-                        base_byte: func.start_byte.unwrap_or(0),
-                    };
-                    self.check_function(ast_context, tree.root_node(), &ctx, violations);
-                }
+                self.check_function(func, path, violations);
             }
         }
     }
@@ -55,166 +45,180 @@ impl Rule for UseGFileLoadBytes {
 impl UseGFileLoadBytes {
     fn check_function(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
+        func: &gobject_ast::FunctionInfo,
+        file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
         // Find all g_file_load_contents calls and track their output variables
-        let load_contents_calls = self.find_load_contents_calls(ast_context, node, ctx.source);
+        let load_contents_vars = self.find_load_contents_vars(func);
 
-        // Find all g_bytes_new_take calls
+        // Find all g_bytes_new_take calls that use those variables
         self.find_bytes_new_take_violations(
-            ast_context,
-            node,
-            ctx,
-            &load_contents_calls,
+            &func.body_statements,
+            file_path,
+            &load_contents_vars,
             violations,
         );
     }
 
-    /// Find all g_file_load_contents calls and return (contents_var,
-    /// length_var, file_arg, cancellable_arg, error_arg)
-    fn find_load_contents_calls<'a>(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-    ) -> HashMap<&'a str, (&'a str, &'a str, &'a str, &'a str)> {
-        let mut result = HashMap::new();
-        self.collect_load_contents_calls(ast_context, node, source, &mut result);
+    /// Find all g_file_load_contents calls and return the set of variables they
+    /// populate
+    fn find_load_contents_vars(&self, func: &gobject_ast::FunctionInfo) -> HashSet<String> {
+        let mut result = HashSet::new();
+
+        // Find all g_file_load_contents or g_file_load_contents_finish calls
+        for call in func.find_calls(&["g_file_load_contents", "g_file_load_contents_finish"]) {
+            // g_file_load_contents(file, cancellable, &contents, &length, &etag, &error)
+            //                      0     1            2          3         4       5
+            if call.arguments.len() >= 6 {
+                // Extract the contents variable from argument 2 (&contents)
+                if let Some(contents_var) = self.extract_pointer_var(&call.arguments[2]) {
+                    result.insert(contents_var);
+                }
+            }
+        }
+
         result
     }
 
-    fn collect_load_contents_calls<'a>(
+    fn find_bytes_new_take_violations(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-        result: &mut HashMap<&'a str, (&'a str, &'a str, &'a str, &'a str)>,
-    ) {
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let func_name = ast_context.get_node_text(function, source);
-            if (func_name == "g_file_load_contents" || func_name == "g_file_load_contents_finish")
-                && let Some(args) = node.child_by_field_name("arguments")
-            {
-                let arguments = self.collect_arguments(ast_context, args, source);
-
-                // g_file_load_contents(file, cancellable, &contents, &length, &etag, &error)
-                //                      0     1            2          3         4       5
-                // g_file_load_contents_finish(file, res, &contents, &length, &etag, &error)
-                //                             0     1    2          3         4       5
-                if arguments.len() >= 6 {
-                    let contents_var = arguments[2].trim_start_matches('&');
-                    let length_var = arguments[3].trim_start_matches('&');
-
-                    let (file_or_res_arg, cancellable_or_res_arg) =
-                        if func_name == "g_file_load_contents" {
-                            (arguments[0], arguments[1])
-                        } else {
-                            // For _finish, use file (arg 0) and "NULL" for cancellable (not
-                            // used in async version)
-                            (arguments[0], "NULL")
-                        };
-
-                    result.insert(
-                        contents_var,
-                        (
-                            length_var,
-                            file_or_res_arg,
-                            cancellable_or_res_arg,
-                            arguments[5],
-                        ),
-                    );
-                }
-            }
-        }
-
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.collect_load_contents_calls(ast_context, child, source, result);
-        }
-    }
-
-    fn find_bytes_new_take_violations<'a>(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        ctx: &CheckContext,
-        load_contents_calls: &HashMap<&'a str, (&'a str, &'a str, &'a str, &'a str)>,
+        statements: &[Statement],
+        file_path: &std::path::Path,
+        load_contents_vars: &HashSet<String>,
         violations: &mut Vec<Violation>,
     ) {
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let func_name = ast_context.get_node_text(function, ctx.source);
-            if func_name == "g_bytes_new_take"
-                && let Some(args) = node.child_by_field_name("arguments")
-            {
-                let arguments = self.collect_arguments(ast_context, args, ctx.source);
-
-                // g_bytes_new_take(contents, length) or
-                // g_bytes_new_take(g_steal_pointer(&contents), length)
-                if arguments.len() >= 2 {
-                    let first_arg = arguments[0];
-
-                    // Extract variable name from first arg (handle g_steal_pointer)
-                    let contents_var = if first_arg.contains("g_steal_pointer") {
-                        first_arg
-                            .trim_start_matches("g_steal_pointer")
-                            .trim()
-                            .trim_start_matches('(')
-                            .trim_end_matches(')')
-                            .trim()
-                            .trim_start_matches('&')
-                    } else {
-                        first_arg
-                    };
-
-                    // Check if this contents variable came from g_file_load_contents
-                    if let Some((_length_var, _file_arg, _cancellable_arg, _error_arg)) =
-                        load_contents_calls.get(&contents_var)
-                    {
-                        violations.push(self.violation(
-                                ctx.file_path,
-                                ctx.base_line + node.start_position().row,
-                                node.start_position().column + 1,
-                                "Consider using g_file_load_bytes/g_file_load_bytes_async instead of g_file_load_contents + g_bytes_new_take for simplicity".to_string(),
-                            ));
+        for stmt in statements {
+            // Check expressions in this statement
+            match stmt {
+                Statement::Expression(expr_stmt) => {
+                    self.check_expr_for_bytes_new_take(
+                        &expr_stmt.expr,
+                        file_path,
+                        load_contents_vars,
+                        violations,
+                    );
+                }
+                Statement::Declaration(decl) => {
+                    if let Some(init) = &decl.initializer {
+                        self.check_expr_for_bytes_new_take(
+                            init,
+                            file_path,
+                            load_contents_vars,
+                            violations,
+                        );
                     }
                 }
+                Statement::Return(ret) => {
+                    if let Some(expr) = &ret.value {
+                        self.check_expr_for_bytes_new_take(
+                            expr,
+                            file_path,
+                            load_contents_vars,
+                            violations,
+                        );
+                    }
+                }
+                _ => {}
             }
-        }
 
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.find_bytes_new_take_violations(
-                ast_context,
-                child,
-                ctx,
-                load_contents_calls,
-                violations,
-            );
+            // Recurse into nested statements
+            match stmt {
+                Statement::If(if_stmt) => {
+                    self.find_bytes_new_take_violations(
+                        &if_stmt.then_body,
+                        file_path,
+                        load_contents_vars,
+                        violations,
+                    );
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.find_bytes_new_take_violations(
+                            else_body,
+                            file_path,
+                            load_contents_vars,
+                            violations,
+                        );
+                    }
+                }
+                Statement::Compound(compound) => {
+                    self.find_bytes_new_take_violations(
+                        &compound.statements,
+                        file_path,
+                        load_contents_vars,
+                        violations,
+                    );
+                }
+                Statement::Labeled(labeled) => {
+                    self.find_bytes_new_take_violations(
+                        std::slice::from_ref(&labeled.statement),
+                        file_path,
+                        load_contents_vars,
+                        violations,
+                    );
+                }
+                _ => {}
+            }
         }
     }
 
-    fn collect_arguments<'a>(
+    fn check_expr_for_bytes_new_take(
         &self,
-        ast_context: &AstContext,
-        args_node: Node,
-        source: &'a [u8],
-    ) -> Vec<&'a str> {
-        let mut cursor = args_node.walk();
-        let mut arguments = Vec::new();
-        for child in args_node.children(&mut cursor) {
-            if child.kind() != "(" && child.kind() != ")" && child.kind() != "," {
-                arguments.push(ast_context.get_node_text(child, source));
+        expr: &Expression,
+        file_path: &std::path::Path,
+        load_contents_vars: &HashSet<String>,
+        violations: &mut Vec<Violation>,
+    ) {
+        if let Expression::Call(call) = expr
+            && call.function == "g_bytes_new_take"
+            && call.arguments.len() >= 2
+        {
+            // Extract the first argument (contents variable)
+            if let Some(contents_var) = self.extract_contents_var(&call.arguments[0]) {
+                // Check if this contents variable came from g_file_load_contents
+                if load_contents_vars.contains(&contents_var) {
+                    violations.push(self.violation(
+                            file_path,
+                            call.location.line,
+                            call.location.column,
+                            "Consider using g_file_load_bytes/g_file_load_bytes_async instead of g_file_load_contents + g_bytes_new_take for simplicity".to_string(),
+                        ));
+                }
             }
         }
-        arguments
+    }
+
+    /// Extract variable name from &var argument
+    fn extract_pointer_var(&self, arg: &gobject_ast::Argument) -> Option<String> {
+        let gobject_ast::Argument::Expression(expr) = arg;
+
+        // Handle &var
+        if let Expression::Unary(unary) = expr.as_ref()
+            && unary.operator == "&"
+        {
+            return unary.operand.extract_variable_name();
+        }
+
+        None
+    }
+
+    /// Extract variable name from first argument of g_bytes_new_take
+    /// Handles: contents, g_steal_pointer(&contents)
+    fn extract_contents_var(&self, arg: &gobject_ast::Argument) -> Option<String> {
+        let gobject_ast::Argument::Expression(expr) = arg;
+
+        match expr.as_ref() {
+            // Direct variable: contents
+            Expression::Identifier(id) => Some(id.name.clone()),
+            Expression::FieldAccess(f) => Some(f.text.clone()),
+            // g_steal_pointer(&contents)
+            Expression::Call(call) => {
+                if call.function == "g_steal_pointer" && !call.arguments.is_empty() {
+                    self.extract_pointer_var(&call.arguments[0])
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 }

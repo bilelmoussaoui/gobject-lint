@@ -1,10 +1,13 @@
 use tree_sitter::Node;
 
-use crate::model::ExpressionStmt;
-use crate::parser::Parser;
+use crate::{model::ExpressionStmt, parser::Parser};
 
 impl Parser {
-    pub(crate) fn parse_expression_stmt(&self, node: Node, source: &[u8]) -> Option<ExpressionStmt> {
+    pub(crate) fn parse_expression_stmt(
+        &self,
+        node: Node,
+        source: &[u8],
+    ) -> Option<ExpressionStmt> {
         // Get the actual expression inside the statement
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {

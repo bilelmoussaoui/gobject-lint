@@ -1,6 +1,6 @@
-mod top_level;
-mod statement;
 mod expression;
+mod statement;
+mod top_level;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -352,6 +352,15 @@ impl Parser {
                             .map(|b| self.parse_function_body(b, source))
                             .unwrap_or_default();
 
+                        // Extract parameters - find the function_declarator and its parameters
+                        // field
+                        let parameters = node
+                            .child_by_field_name("declarator")
+                            .and_then(|d| self.find_function_declarator(d))
+                            .and_then(|fd| fd.child_by_field_name("parameters"))
+                            .map(|p| self.extract_parameters(p, source))
+                            .unwrap_or_default();
+
                         file_model.functions.push(FunctionInfo {
                             name: name.to_owned(),
                             line: node.start_position().row + 1,
@@ -360,7 +369,7 @@ impl Parser {
                             has_static_forward_decl: static_forwards.contains(name),
                             is_definition: true,
                             return_type: None,
-                            parameters: Vec::new(),
+                            parameters,
                             start_byte: Some(node.start_byte()),
                             end_byte: Some(node.end_byte()),
                             body_start_byte: body_start,
@@ -496,6 +505,29 @@ impl Parser {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if let Some(found) = self.find_call_expression(child) {
+                return Some(found);
+            }
+        }
+
+        None
+    }
+
+    fn find_function_declarator<'a>(&self, node: Node<'a>) -> Option<Node<'a>> {
+        if node.kind() == "function_declarator" {
+            return Some(node);
+        }
+
+        // For pointer/abstract declarators, look in the declarator field
+        if let Some(declarator) = node.child_by_field_name("declarator") {
+            if let Some(found) = self.find_function_declarator(declarator) {
+                return Some(found);
+            }
+        }
+
+        // Recursively search children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(found) = self.find_function_declarator(child) {
                 return Some(found);
             }
         }

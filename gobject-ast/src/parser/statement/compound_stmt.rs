@@ -1,10 +1,16 @@
 use tree_sitter::Node;
 
-use crate::model::{CompoundStatement, Statement};
-use crate::parser::Parser;
+use crate::{
+    model::{CompoundStatement, Statement},
+    parser::Parser,
+};
 
 impl Parser {
-    pub(crate) fn parse_compound_statement(&self, node: Node, source: &[u8]) -> Option<CompoundStatement> {
+    pub(crate) fn parse_compound_statement(
+        &self,
+        node: Node,
+        source: &[u8],
+    ) -> Option<CompoundStatement> {
         let statements = self.parse_function_body(node, source);
 
         Some(CompoundStatement {
@@ -13,7 +19,11 @@ impl Parser {
         })
     }
 
-    pub(in crate::parser) fn parse_function_body(&self, body_node: Node, source: &[u8]) -> Vec<Statement> {
+    pub(in crate::parser) fn parse_function_body(
+        &self,
+        body_node: Node,
+        source: &[u8],
+    ) -> Vec<Statement> {
         let mut statements = Vec::new();
 
         let mut cursor = body_node.walk();

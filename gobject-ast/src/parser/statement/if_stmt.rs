@@ -1,7 +1,6 @@
 use tree_sitter::Node;
 
-use crate::model::IfStatement;
-use crate::parser::Parser;
+use crate::{model::IfStatement, parser::Parser};
 
 impl Parser {
     pub(crate) fn parse_if_statement(&self, node: Node, source: &[u8]) -> Option<IfStatement> {
@@ -20,10 +19,23 @@ impl Parser {
         };
 
         let else_body = node.child_by_field_name("alternative").map(|alt_node| {
-            if alt_node.kind() == "compound_statement" {
-                self.parse_function_body(alt_node, source)
+            // The alternative can be an else_clause or directly an if_statement (else if)
+            let statement_node = if alt_node.kind() == "else_clause" {
+                // else_clause contains the actual statement(s)
+                // Find the first named child
+                let mut cursor = alt_node.walk();
+                alt_node
+                    .children(&mut cursor)
+                    .find(|c| c.is_named())
+                    .unwrap_or(alt_node)
             } else {
-                self.parse_statement(alt_node, source)
+                alt_node
+            };
+
+            if statement_node.kind() == "compound_statement" {
+                self.parse_function_body(statement_node, source)
+            } else {
+                self.parse_statement(statement_node, source)
                     .map(|s| vec![s])
                     .unwrap_or_default()
             }

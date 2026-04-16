@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use tree_sitter::Node;
+use gobject_ast::Statement;
 
 use super::Rule;
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
@@ -32,18 +32,7 @@ impl Rule for UseGAutoptrInlineCleanup {
                     continue;
                 }
 
-                if let Some(func_source) = ast_context.get_function_source(path, func)
-                    && let Some(tree) = ast_context.parse_c_source(func_source)
-                {
-                    self.check_function(
-                        ast_context,
-                        tree.root_node(),
-                        func_source,
-                        path,
-                        func.line,
-                        violations,
-                    );
-                }
+                self.check_function(func, path, violations);
             }
         }
     }
@@ -52,248 +41,335 @@ impl Rule for UseGAutoptrInlineCleanup {
 impl UseGAutoptrInlineCleanup {
     fn check_function(
         &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &[u8],
+        func: &gobject_ast::FunctionInfo,
         file_path: &std::path::Path,
-        base_line: usize,
         violations: &mut Vec<Violation>,
     ) {
-        if let Some(body) = ast_context.find_body(node) {
-            // Find all local pointer declarations
-            let local_vars = self.find_local_pointer_vars(ast_context, body, source);
+        // Find all local pointer declarations
+        let local_vars = self.find_local_pointer_vars(&func.body_statements);
 
-            // For each variable, check if it's a candidate for g_autoptr
-            for (var_name, (var_type, decl_node)) in &local_vars {
-                // Check if variable is allocated
-                let is_allocated = self.is_var_allocated(ast_context, body, var_name, source);
+        // For each variable, check if it's a candidate for g_autoptr
+        for (var_name, (var_type, location)) in &local_vars {
+            // Check if variable is allocated
+            let is_allocated = self.is_var_allocated(&func.body_statements, var_name);
 
-                // Check if variable is manually freed
-                let is_manually_freed =
-                    self.is_var_manually_freed(ast_context, body, var_name, source);
+            // Check if variable is manually freed
+            let is_manually_freed = self.is_var_manually_freed(&func.body_statements, var_name);
 
-                // Check if variable is returned without being freed
-                let is_returned = self.is_var_returned(ast_context, body, var_name, source);
+            // Check if variable is returned without being freed
+            let is_returned = self.is_var_returned(&func.body_statements, var_name);
 
-                // Suggest g_autoptr if:
-                // 1. Variable is allocated
-                // 2. Variable is manually freed at least once
-                // 3. Variable is not returned directly (would need g_steal_pointer)
-                if is_allocated && is_manually_freed && !is_returned {
-                    let base_type = AstContext::extract_base_type(var_type);
-                    let position = decl_node.start_position();
-                    violations.push(self.violation(
-                        file_path,
-                        base_line + position.row,
-                        position.column + 1,
-                        format!(
-                            "Consider using g_autoptr({}) {} to avoid manual cleanup",
-                            base_type, var_name
-                        ),
-                    ));
-                }
+            // Suggest g_autoptr if:
+            // 1. Variable is allocated
+            // 2. Variable is manually freed at least once
+            // 3. Variable is not returned directly (would need g_steal_pointer)
+            if is_allocated && is_manually_freed && !is_returned {
+                let base_type = self.extract_base_type(var_type);
+                violations.push(self.violation(
+                    file_path,
+                    location.line,
+                    location.column,
+                    format!(
+                        "Consider using g_autoptr({}) {} to avoid manual cleanup",
+                        base_type, var_name
+                    ),
+                ));
             }
         }
     }
 
-    fn find_local_pointer_vars<'a>(
+    fn extract_base_type(&self, type_name: &str) -> String {
+        // Extract base type from "const Foo *" -> "Foo"
+        type_name
+            .trim()
+            .trim_start_matches("const")
+            .trim()
+            .trim_end_matches('*')
+            .trim()
+            .to_string()
+    }
+
+    fn find_local_pointer_vars(
         &self,
-        ast_context: &AstContext,
-        body: Node<'a>,
-        source: &'a [u8],
-    ) -> HashMap<&'a str, (&'a str, Node<'a>)> {
+        statements: &[Statement],
+    ) -> HashMap<String, (String, gobject_ast::SourceLocation)> {
         let mut result = HashMap::new();
-        self.collect_local_vars(ast_context, body, source, &mut result);
+        self.collect_local_vars(statements, &mut result);
         result
     }
 
-    fn collect_local_vars<'a>(
+    fn collect_local_vars(
         &self,
-        ast_context: &AstContext,
-        node: Node<'a>,
-        source: &'a [u8],
-        result: &mut HashMap<&'a str, (&'a str, Node<'a>)>,
+        statements: &[Statement],
+        result: &mut HashMap<String, (String, gobject_ast::SourceLocation)>,
     ) {
-        // Only look at top-level declarations in the function body
-        if node.kind() == "compound_statement" {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() == "declaration"
-                    && let Some(type_node) = child.child_by_field_name("type")
-                {
-                    let type_text = ast_context.get_node_text(type_node, source);
-
+        for stmt in statements {
+            match stmt {
+                Statement::Declaration(decl) => {
                     // Skip variables already using g_autoptr/g_autofree
-                    if type_text.contains("g_autoptr") || type_text.contains("g_autofree") {
+                    if decl.type_name.contains("g_autoptr") || decl.type_name.contains("g_autofree")
+                    {
                         continue;
                     }
 
-                    // Find declarators
-                    let mut decl_cursor = child.walk();
-                    for decl_child in child.children(&mut decl_cursor) {
-                        if (decl_child.kind() == "init_declarator"
-                            || decl_child.kind() == "pointer_declarator")
-                            && let Some(var_name) =
-                                self.extract_var_name(ast_context, decl_child, source)
-                        {
-                            // Only simple identifiers
-                            if !var_name.contains("->") && !var_name.contains(".") {
-                                result.insert(var_name, (type_text, child));
-                            }
+                    // Only track pointer types for GObject types
+                    if self.is_autoptr_candidate(&decl.type_name) {
+                        // Skip field access names
+                        if !decl.name.contains("->") && !decl.name.contains('.') {
+                            result.insert(
+                                decl.name.clone(),
+                                (decl.type_name.clone(), decl.location.clone()),
+                            );
                         }
                     }
                 }
-            }
-        }
-    }
-
-    fn extract_var_name<'a>(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        source: &'a [u8],
-    ) -> Option<&'a str> {
-        match node.kind() {
-            "init_declarator" => {
-                if let Some(declarator) = node.child_by_field_name("declarator") {
-                    return self.extract_var_name(ast_context, declarator, source);
+                Statement::Compound(compound) => {
+                    self.collect_local_vars(&compound.statements, result);
                 }
-            }
-            "pointer_declarator" => {
-                if let Some(declarator) = node.child_by_field_name("declarator") {
-                    return self.extract_var_name(ast_context, declarator, source);
+                Statement::If(if_stmt) => {
+                    self.collect_local_vars(&if_stmt.then_body, result);
+                    if let Some(else_body) = &if_stmt.else_body {
+                        self.collect_local_vars(else_body, result);
+                    }
                 }
-            }
-            "identifier" => {
-                return Some(ast_context.get_node_text(node, source));
-            }
-            _ => {}
-        }
-        None
-    }
-
-    fn is_var_allocated(
-        &self,
-        ast_context: &AstContext,
-        body: Node,
-        var_name: &str,
-        source: &[u8],
-    ) -> bool {
-        self.find_var_allocation(ast_context, body, var_name, source)
-    }
-
-    fn find_var_allocation(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        var_name: &str,
-        source: &[u8],
-    ) -> bool {
-        // Look for: var_name = allocation_call()
-        if node.kind() == "assignment_expression"
-            && let Some(left) = node.child_by_field_name("left")
-        {
-            let left_text = ast_context.get_node_text(left, source);
-            if left_text == var_name
-                && let Some(right) = node.child_by_field_name("right")
-                && ast_context.is_allocation_call(right, source)
-            {
-                return true;
+                Statement::Labeled(labeled) => {
+                    self.collect_local_vars(std::slice::from_ref(&labeled.statement), result);
+                }
+                _ => {}
             }
         }
+    }
 
-        // Also check init declarator: Type *var = allocation_call()
-        if node.kind() == "init_declarator"
-            && let Some(declarator) = node.child_by_field_name("declarator")
-            && let Some(found_var) = self.extract_var_name(ast_context, declarator, source)
-            && found_var == var_name
-            && let Some(value) = node.child_by_field_name("value")
-            && ast_context.is_allocation_call(value, source)
+    fn is_autoptr_candidate(&self, type_name: &str) -> bool {
+        // g_autoptr is for GObject-derived types, not simple pointers
+        // Check if it contains a pointer and is a likely GObject type
+
+        if !type_name.contains('*') {
+            return false;
+        }
+
+        // Common GObject types that should use g_autoptr
+        if type_name.contains("GObject")
+            || type_name.contains("GError")
+            || type_name.contains("GList")
+            || type_name.contains("GSList")
+            || type_name.contains("GHashTable")
+            || type_name.contains("GBytes")
+            || type_name.contains("GVariant")
+            || type_name.contains("GArray")
+            || type_name.contains("GFile")
+            || type_name.contains("GInputStream")
+            || type_name.contains("GOutputStream")
         {
             return true;
         }
 
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if self.find_var_allocation(ast_context, child, var_name, source) {
-                return true;
-            }
+        // Custom object types (likely if starts with uppercase and contains mixed case)
+        if type_name.chars().next().is_some_and(|c| c.is_uppercase())
+            && type_name.chars().any(|c| c.is_lowercase())
+        {
+            return true;
         }
 
         false
     }
 
-    fn is_var_manually_freed(
-        &self,
-        ast_context: &AstContext,
-        body: Node,
-        var_name: &str,
-        source: &[u8],
-    ) -> bool {
-        self.find_manual_free(ast_context, body, var_name, source)
+    fn is_var_allocated(&self, statements: &[Statement], var_name: &str) -> bool {
+        self.find_var_allocation(statements, var_name)
     }
 
-    fn find_manual_free(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        var_name: &str,
-        source: &[u8],
-    ) -> bool {
-        let (is_cleanup, _) = ast_context.is_cleanup_call(node, source);
-        if is_cleanup && let Some(arguments) = node.child_by_field_name("arguments") {
-            let args_text = ast_context.get_node_text(arguments, source);
-            if args_text.contains(var_name) {
-                return true;
-            }
-        }
+    fn find_var_allocation(&self, statements: &[Statement], var_name: &str) -> bool {
+        use gobject_ast::Expression;
 
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if self.find_manual_free(ast_context, child, var_name, source) {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    fn is_var_returned(
-        &self,
-        ast_context: &AstContext,
-        body: Node,
-        var_name: &str,
-        source: &[u8],
-    ) -> bool {
-        self.find_return_of_var(ast_context, body, var_name, source)
-    }
-
-    fn find_return_of_var(
-        &self,
-        ast_context: &AstContext,
-        node: Node,
-        var_name: &str,
-        source: &[u8],
-    ) -> bool {
-        if node.kind() == "return_statement" {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() == "identifier" {
-                    let id = ast_context.get_node_text(child, source);
-                    if id == var_name {
+        for stmt in statements {
+            match stmt {
+                // Check init: Type *var = allocation_call()
+                Statement::Declaration(decl) => {
+                    if decl.name == var_name
+                        && let Some(Expression::Call(call)) = &decl.initializer
+                        && self.is_allocation_call(&call.function)
+                    {
                         return true;
                     }
                 }
+                // Check assignment: var = allocation_call()
+                Statement::Expression(expr_stmt) => {
+                    if let Expression::Assignment(assign) = &expr_stmt.expr
+                        && assign.lhs == var_name
+                        && let Expression::Call(call) = &*assign.rhs
+                        && self.is_allocation_call(&call.function)
+                    {
+                        return true;
+                    }
+                }
+                // Recurse
+                Statement::Compound(compound) => {
+                    if self.find_var_allocation(&compound.statements, var_name) {
+                        return true;
+                    }
+                }
+                Statement::If(if_stmt) => {
+                    if self.find_var_allocation(&if_stmt.then_body, var_name) {
+                        return true;
+                    }
+                    if let Some(else_body) = &if_stmt.else_body
+                        && self.find_var_allocation(else_body, var_name)
+                    {
+                        return true;
+                    }
+                }
+                Statement::Labeled(labeled) => {
+                    if self.find_var_allocation(std::slice::from_ref(&labeled.statement), var_name)
+                    {
+                        return true;
+                    }
+                }
+                _ => {}
             }
         }
 
-        // Recurse
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if self.find_return_of_var(ast_context, child, var_name, source) {
-                return true;
+        false
+    }
+
+    fn is_allocation_call(&self, func_name: &str) -> bool {
+        // Functions that allocate GObject types
+        matches!(
+            func_name,
+            "g_object_new"
+                | "g_object_new_with_properties"
+                | "g_type_create_instance"
+                | "g_file_new_for_path"
+                | "g_file_new_for_uri"
+                | "g_file_new_tmp"
+                | "g_variant_new"
+                | "g_variant_ref_sink"
+                | "g_bytes_new"
+                | "g_bytes_new_take"
+                | "g_hash_table_new"
+                | "g_hash_table_new_full"
+                | "g_array_new"
+                | "g_ptr_array_new"
+                | "g_error_new"
+                | "g_error_new_literal"
+        ) || func_name.ends_with("_new")
+            || func_name.ends_with("_get_instance")
+    }
+
+    fn is_var_manually_freed(&self, statements: &[Statement], var_name: &str) -> bool {
+        self.find_manual_free(statements, var_name)
+    }
+
+    fn find_manual_free(&self, statements: &[Statement], var_name: &str) -> bool {
+        use gobject_ast::Expression;
+
+        for stmt in statements {
+            match stmt {
+                Statement::Expression(expr_stmt) => {
+                    if let Expression::Call(call) = &expr_stmt.expr {
+                        // Check if this is a cleanup call with our variable
+                        if self.is_cleanup_call(&call.function) && !call.arguments.is_empty() {
+                            let gobject_ast::Argument::Expression(arg_expr) = &call.arguments[0];
+                            // Check for var or &var
+                            if let Some(arg_var) = arg_expr.extract_variable_name()
+                                && arg_var == var_name
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                // Recurse
+                Statement::Compound(compound) => {
+                    if self.find_manual_free(&compound.statements, var_name) {
+                        return true;
+                    }
+                }
+                Statement::If(if_stmt) => {
+                    if self.find_manual_free(&if_stmt.then_body, var_name) {
+                        return true;
+                    }
+                    if let Some(else_body) = &if_stmt.else_body
+                        && self.find_manual_free(else_body, var_name)
+                    {
+                        return true;
+                    }
+                }
+                Statement::Labeled(labeled) => {
+                    if self.find_manual_free(std::slice::from_ref(&labeled.statement), var_name) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        false
+    }
+
+    fn is_cleanup_call(&self, func_name: &str) -> bool {
+        // Functions that cleanup/free GObject types
+        matches!(
+            func_name,
+            "g_object_unref"
+                | "g_clear_object"
+                | "g_clear_pointer"
+                | "g_error_free"
+                | "g_clear_error"
+                | "g_list_free"
+                | "g_list_free_full"
+                | "g_slist_free"
+                | "g_slist_free_full"
+                | "g_hash_table_unref"
+                | "g_hash_table_destroy"
+                | "g_bytes_unref"
+                | "g_variant_unref"
+                | "g_array_unref"
+                | "g_array_free"
+                | "g_ptr_array_unref"
+                | "g_ptr_array_free"
+        ) || func_name.ends_with("_unref")
+            || func_name.ends_with("_free")
+            || func_name.ends_with("_destroy")
+    }
+
+    fn is_var_returned(&self, statements: &[Statement], var_name: &str) -> bool {
+        self.find_return_of_var(statements, var_name)
+    }
+
+    fn find_return_of_var(&self, statements: &[Statement], var_name: &str) -> bool {
+        use gobject_ast::Expression;
+
+        for stmt in statements {
+            match stmt {
+                Statement::Return(ret) => {
+                    if let Some(Expression::Identifier(id)) = &ret.value
+                        && id.name == var_name
+                    {
+                        return true;
+                    }
+                }
+                // Recurse
+                Statement::Compound(compound) => {
+                    if self.find_return_of_var(&compound.statements, var_name) {
+                        return true;
+                    }
+                }
+                Statement::If(if_stmt) => {
+                    if self.find_return_of_var(&if_stmt.then_body, var_name) {
+                        return true;
+                    }
+                    if let Some(else_body) = &if_stmt.else_body
+                        && self.find_return_of_var(else_body, var_name)
+                    {
+                        return true;
+                    }
+                }
+                Statement::Labeled(labeled) => {
+                    if self.find_return_of_var(std::slice::from_ref(&labeled.statement), var_name) {
+                        return true;
+                    }
+                }
+                _ => {}
             }
         }
 

@@ -1,7 +1,6 @@
 use tree_sitter::Node;
 
-use crate::model::GotoStatement;
-use crate::parser::Parser;
+use crate::{model::GotoStatement, parser::Parser};
 
 impl Parser {
     pub(crate) fn parse_goto_statement(&self, node: Node, source: &[u8]) -> Option<GotoStatement> {

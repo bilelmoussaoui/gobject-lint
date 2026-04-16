@@ -1,10 +1,13 @@
 use tree_sitter::Node;
 
-use crate::model::UnaryExpression;
-use crate::parser::Parser;
+use crate::{model::UnaryExpression, parser::Parser};
 
 impl Parser {
-    pub(crate) fn parse_unary_expression(&self, node: Node, source: &[u8]) -> Option<UnaryExpression> {
+    pub(crate) fn parse_unary_expression(
+        &self,
+        node: Node,
+        source: &[u8],
+    ) -> Option<UnaryExpression> {
         let operator_node = node.child_by_field_name("operator")?;
         let operator = std::str::from_utf8(&source[operator_node.byte_range()])
             .ok()?

@@ -2,8 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::types::{EnumInfo, FunctionInfo, GObjectType, StructInfo, TypedefInfo};
-use super::types::Include;
+use super::types::{EnumInfo, FunctionInfo, GObjectType, Include, StructInfo, TypedefInfo};
 
 /// The complete project model - a map of files to their content
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
