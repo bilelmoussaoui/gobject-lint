@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use super::{Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
-pub struct PropertyEnumZero;
+pub struct PropertyEnumConvention;
 
-impl Rule for PropertyEnumZero {
+impl Rule for PropertyEnumConvention {
     fn name(&self) -> &'static str {
         "property_enum_convention"
     }
@@ -151,7 +151,7 @@ impl Rule for PropertyEnumZero {
     }
 }
 
-impl PropertyEnumZero {
+impl PropertyEnumConvention {
     fn is_property_enum(&self, enum_info: &gobject_ast::EnumInfo) -> bool {
         enum_info
             .values

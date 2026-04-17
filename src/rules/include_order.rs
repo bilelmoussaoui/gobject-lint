@@ -36,7 +36,8 @@ impl Rule for IncludeOrder {
 
 impl IncludeOrder {
     /// Check include ordering at each level of the tree structure
-    /// All includes at the same level (outside conditionals) are sorted together
+    /// All includes at the same level (outside conditionals) are sorted
+    /// together
     fn check_include_groups(
         &self,
         items: &[gobject_ast::top_level::TopLevelItem],
@@ -72,12 +73,7 @@ impl IncludeOrder {
 
         // Check and fix all top-level includes as one group
         if !top_level_includes.is_empty() {
-            self.check_and_fix_group_scattered(
-                &top_level_includes,
-                file_path,
-                source,
-                violations,
-            );
+            self.check_and_fix_group_scattered(&top_level_includes, file_path, source, violations);
         }
     }
 
@@ -111,14 +107,17 @@ impl IncludeOrder {
             }
 
             // Check if next line is already blank or is a preprocessor directive
-            let next_is_blank_or_preprocessor =
-                (pos < source.len() && source[pos] == b'\n') ||
-                (pos < source.len() && source[pos] == b'#');
+            let next_is_blank_or_preprocessor = (pos < source.len() && source[pos] == b'\n')
+                || (pos < source.len() && source[pos] == b'#');
             let skip_trailing_newline = next_is_blank_or_preprocessor;
 
             // Generate sorted includes text
-            let sorted_text =
-                self.generate_sorted_includes_text(&expected_order, includes, file_path, skip_trailing_newline);
+            let sorted_text = self.generate_sorted_includes_text(
+                &expected_order,
+                includes,
+                file_path,
+                skip_trailing_newline,
+            );
 
             // Check if there's a blank line after the first include that we need to consume
             let first_inc = &includes[0];

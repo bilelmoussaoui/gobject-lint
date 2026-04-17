@@ -273,7 +273,10 @@ rule_test!(
     missing_implementation,
     goblint::rules::MissingImplementation
 );
-rule_test!(property_enum_zero, goblint::rules::PropertyEnumZero);
+rule_test!(
+    property_enum_convention,
+    goblint::rules::PropertyEnumConvention
+);
 rule_test!(
     use_g_object_new_with_properties,
     goblint::rules::UseGObjectNewWithProperties
