@@ -343,3 +343,4 @@ rule_test!(
     goblint::rules::UseGValueSetStaticString
 );
 rule_test!(use_g_variant_new_typed, goblint::rules::UseGVariantNewTyped);
+rule_test!(untranslated_string, goblint::rules::UntranslatedString);

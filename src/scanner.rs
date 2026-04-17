@@ -143,6 +143,7 @@ macro_rules! for_each_rule {
             (use_g_str_has_prefix_suffix, UseGStrHasPrefixSuffix, 2, 0),
             (use_g_ascii_functions, UseGAsciiFunctions, 2, 0),
             (use_g_strlcpy, UseGStrlcpy, 2, 0),
+            (untranslated_string, UntranslatedString, 2, 0),
         }
     };
 }

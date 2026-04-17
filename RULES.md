@@ -72,6 +72,7 @@ Rules that are rather strict or have occasional false positives.
 - **matching_declare_define** - Ensure G_DECLARE_* and G_DEFINE_* macros are used consistently
 - **g_param_spec_null_nick_blurb** - Ensure g_param_spec_* functions have NULL for nick and blurb parameters
 - **use_g_object_class_install_properties** - Suggest g_object_class_install_properties for multiple g_object_class_install_property calls
+- **untranslated_string** - Detect user-visible strings in GTK/Adwaita functions that should be wrapped with gettext (use inline ignore for strings that don't need translation)
 
 ## Restriction
 

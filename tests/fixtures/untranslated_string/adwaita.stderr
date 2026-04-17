@@ -1,0 +1,5 @@
+adwaita.c:9:27: untranslated_string: User-visible string in adw_toast_new() should be wrapped with _("...")
+adwaita.c:15:39: untranslated_string: User-visible string in adw_toast_set_button_label() should be wrapped with _("...")
+adwaita.c:18:43: untranslated_string: User-visible string in adw_message_dialog_new() should be wrapped with _("...")
+adwaita.c:21:41: untranslated_string: User-visible string in adw_message_dialog_set_body() should be wrapped with _("...")
+adwaita.c:27:44: untranslated_string: User-visible string in adw_status_page_set_title() should be wrapped with _("...")
