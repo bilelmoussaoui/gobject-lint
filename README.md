@@ -37,19 +37,16 @@ Run `goblint --list-rules` to see the current status of all rules.
 
 ## Configuration
 
-Create a `goblint.toml` file in your project root:
+Create a `goblint.toml` file in your project root to configure rules, set minimum GLib version, and define per-rule ignore patterns.
 
-```toml
-# Minimum supported GLib version (optional)
-# Rules requiring newer GLib versions will be automatically disabled
-min_glib_version = "2.40"
+You can also use inline comments to suppress specific violations:
 
-[rules]
-# Ensure g_param_spec_* functions have NULL for nick and blurb parameters
-g_param_spec_null_nick_blurb = true
+```c
+/* goblint-ignore-next-line: use_g_strlcpy */
+strcpy(dst, src);
 ```
 
-See goblint.toml for all the supported rules/configurations.
+See [CONFIG.md](CONFIG.md) for complete configuration documentation.
 
 ## CI/CD Integration
 
