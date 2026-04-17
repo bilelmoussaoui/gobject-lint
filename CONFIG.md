@@ -47,6 +47,8 @@ ignore = [
 ]
 ```
 
+**Note:** goblint automatically respects `.gitignore` files. Files/directories ignored by git are also ignored by the linter.
+
 ### Per-Rule Ignores
 
 Use the rule-level `ignore` field to skip files for **specific rules only**:
