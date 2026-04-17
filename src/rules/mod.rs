@@ -62,6 +62,7 @@ impl Fix {
 pub mod deprecated_add_private;
 pub mod g_declare_semicolon;
 pub mod g_error_init;
+pub mod g_error_leak;
 pub mod g_object_virtual_methods_chain_up;
 pub mod g_param_spec_null_nick_blurb;
 pub mod g_param_spec_static_name_canonical;
@@ -104,6 +105,7 @@ pub mod use_g_variant_new_typed;
 pub use deprecated_add_private::DeprecatedAddPrivate;
 pub use g_declare_semicolon::GDeclareSemicolon;
 pub use g_error_init::GErrorInit;
+pub use g_error_leak::GErrorLeak;
 pub use g_object_virtual_methods_chain_up::GObjectVirtualMethodsChainUp;
 pub use g_param_spec_null_nick_blurb::GParamSpecNullNickBlurb;
 pub use g_param_spec_static_name_canonical::GParamSpecStaticNameCanonical;

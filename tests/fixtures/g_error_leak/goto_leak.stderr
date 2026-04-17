@@ -1,0 +1,1 @@
+goto_leak.c:4:5: g_error_leak: GError variable 'error' may be leaked; it should be freed with g_error_free/g_clear_error or propagated with g_propagate_error/g_task_return_error/g_steal_pointer
