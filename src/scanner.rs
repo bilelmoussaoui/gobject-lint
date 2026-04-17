@@ -311,6 +311,14 @@ pub fn scan_with_ast(
         !crate::inline_ignore::should_ignore_violation(&v.file, v.line, v.rule, &inline_ignores)
     });
 
+    violations.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then(a.line.cmp(&b.line))
+            .then(a.column.cmp(&b.column))
+            .then(a.rule.cmp(b.rule))
+    });
+
     Ok(violations)
 }
 
