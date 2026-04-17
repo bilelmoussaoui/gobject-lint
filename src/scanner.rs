@@ -181,6 +181,54 @@ fn is_rule_compatible(config: &Config, required_major: u32, required_minor: u32)
 
 for_each_rule!(impl_create_all_rules);
 
+/// Validate that all rule names in inline ignore directives are valid
+/// Returns a list of warnings about unknown rules
+fn validate_inline_ignores(
+    inline_ignores: &std::collections::HashMap<
+        &Path,
+        std::collections::HashMap<usize, Vec<String>>,
+    >,
+    rules: &[RuleEntry],
+    project_root: &Path,
+) -> Vec<String> {
+    use std::collections::HashSet;
+
+    let mut warnings = Vec::new();
+
+    // Collect all valid rule names
+    let valid_rules: HashSet<String> = rules
+        .iter()
+        .map(|entry| entry.rule.name().to_string())
+        .collect();
+
+    // Check each file's ignore directives
+    for (file_path, file_ignores) in inline_ignores {
+        for (line_num, ignored_rules) in file_ignores {
+            for rule_name in ignored_rules {
+                // Skip wildcards
+                if rule_name == "all" || rule_name == "*" {
+                    continue;
+                }
+
+                // Check if rule exists
+                if !valid_rules.contains(rule_name) {
+                    let relative_path = file_path.strip_prefix(project_root).unwrap_or(file_path);
+                    let warning = format!(
+                        "{}:{}:1: {} Unknown rule '{}' in ignore directive",
+                        relative_path.display(),
+                        line_num,
+                        "warning:".yellow(),
+                        rule_name
+                    );
+                    warnings.push(warning);
+                }
+            }
+        }
+    }
+
+    warnings
+}
+
 /// New AST-based scanner - much simpler than the old one!
 pub fn scan_with_ast(
     ast_context: &AstContext,
@@ -190,8 +238,28 @@ pub fn scan_with_ast(
 ) -> Result<Vec<Violation>> {
     let mut violations = Vec::new();
 
+    // Parse inline ignore directives from all files
+    let inline_ignores: std::collections::HashMap<
+        &Path,
+        std::collections::HashMap<usize, Vec<String>>,
+    > = ast_context
+        .project
+        .files
+        .iter()
+        .map(|(path, file)| {
+            let ignores = crate::inline_ignore::parse_ignore_directives(file);
+            (path.as_path(), ignores)
+        })
+        .collect();
+
     // Register all rules in execution order
     let rules = create_all_rules(config);
+
+    // Validate that all rule names in ignore directives are valid
+    let warnings = validate_inline_ignores(&inline_ignores, &rules, project_root);
+    for warning in warnings {
+        eprintln!("{}", warning);
+    }
 
     if let Some(sp) = spinner {
         sp.set_message("Running linter rules...");
@@ -236,6 +304,11 @@ pub fn scan_with_ast(
     // Deduplicate: keep only violations from later rules (higher index) when
     // multiple rules fire on same line
     deduplicate_by_rule_precedence(&mut violations);
+
+    // Filter out violations that have inline ignore directives
+    violations.retain(|v| {
+        !crate::inline_ignore::should_ignore_violation(&v.file, v.line, v.rule, &inline_ignores)
+    });
 
     Ok(violations)
 }

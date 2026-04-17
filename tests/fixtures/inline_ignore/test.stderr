@@ -1,0 +1,2 @@
+test.c:12:5: use_g_strlcpy: Use g_strlcpy(dst, src, sizeof(dst)) instead of strcpy — no bounds checking
+test.c:27:5: use_g_strlcpy: Use g_strlcpy(dst, src, sizeof(dst)) instead of strcpy — no bounds checking
