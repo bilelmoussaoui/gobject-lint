@@ -105,6 +105,45 @@ fn print_project(project: &Project) {
                     gobject_ast::GObjectTypeKind::DefineTypeWithCode { parent_type, .. } => {
                         format!("G_DEFINE_TYPE_WITH_CODE (parent: {})", parent_type)
                     }
+                    gobject_ast::GObjectTypeKind::DefineFinalType { parent_type, .. } => {
+                        format!("G_DEFINE_FINAL_TYPE (parent: {})", parent_type)
+                    }
+                    gobject_ast::GObjectTypeKind::DefineFinalTypeWithCode {
+                        parent_type, ..
+                    } => {
+                        format!("G_DEFINE_FINAL_TYPE_WITH_CODE (parent: {})", parent_type)
+                    }
+                    gobject_ast::GObjectTypeKind::DefineFinalTypeWithPrivate {
+                        parent_type,
+                        ..
+                    } => {
+                        format!("G_DEFINE_FINAL_TYPE_WITH_PRIVATE (parent: {})", parent_type)
+                    }
+                    gobject_ast::GObjectTypeKind::DefineAbstractTypeWithCode {
+                        parent_type,
+                        ..
+                    } => {
+                        format!("G_DEFINE_ABSTRACT_TYPE_WITH_CODE (parent: {})", parent_type)
+                    }
+                    gobject_ast::GObjectTypeKind::DefineAbstractTypeWithPrivate {
+                        parent_type,
+                        ..
+                    } => {
+                        format!(
+                            "G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE (parent: {})",
+                            parent_type
+                        )
+                    }
+                    gobject_ast::GObjectTypeKind::DefineInterface {
+                        prerequisite_type, ..
+                    } => format!("G_DEFINE_INTERFACE (prereq: {})", prerequisite_type),
+                    gobject_ast::GObjectTypeKind::DefineInterfaceWithCode {
+                        prerequisite_type,
+                        ..
+                    } => format!(
+                        "G_DEFINE_INTERFACE_WITH_CODE (prereq: {})",
+                        prerequisite_type
+                    ),
                     gobject_ast::GObjectTypeKind::DefineBoxedType { .. } => {
                         "G_DEFINE_BOXED_TYPE".to_string()
                     }

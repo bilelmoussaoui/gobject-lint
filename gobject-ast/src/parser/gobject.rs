@@ -24,8 +24,15 @@ impl Parser {
             | "G_DEFINE_TYPE_WITH_PRIVATE"
             | "G_DEFINE_ABSTRACT_TYPE"
             | "G_DEFINE_TYPE_WITH_CODE"
-            | "G_DEFINE_FINAL_TYPE_WITH_CODE" => {
+            | "G_DEFINE_FINAL_TYPE"
+            | "G_DEFINE_FINAL_TYPE_WITH_CODE"
+            | "G_DEFINE_FINAL_TYPE_WITH_PRIVATE"
+            | "G_DEFINE_ABSTRACT_TYPE_WITH_CODE"
+            | "G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE" => {
                 self.extract_g_define(node, source, directive_text)
+            }
+            "G_DEFINE_INTERFACE" | "G_DEFINE_INTERFACE_WITH_CODE" => {
+                self.extract_g_define_interface(node, source, directive_text)
             }
             "G_DEFINE_BOXED_TYPE" | "G_DEFINE_POINTER_TYPE" => {
                 self.extract_g_define_simple(node, source, directive_text)
@@ -112,8 +119,28 @@ impl Parser {
                     function_prefix: function_prefix.to_owned(),
                     parent_type: parent_type.to_owned(),
                 },
-                "G_DEFINE_TYPE_WITH_CODE" | "G_DEFINE_FINAL_TYPE_WITH_CODE" => {
-                    GObjectTypeKind::DefineTypeWithCode {
+                "G_DEFINE_TYPE_WITH_CODE" => GObjectTypeKind::DefineTypeWithCode {
+                    function_prefix: function_prefix.to_owned(),
+                    parent_type: parent_type.to_owned(),
+                },
+                "G_DEFINE_FINAL_TYPE" => GObjectTypeKind::DefineFinalType {
+                    function_prefix: function_prefix.to_owned(),
+                    parent_type: parent_type.to_owned(),
+                },
+                "G_DEFINE_FINAL_TYPE_WITH_CODE" => GObjectTypeKind::DefineFinalTypeWithCode {
+                    function_prefix: function_prefix.to_owned(),
+                    parent_type: parent_type.to_owned(),
+                },
+                "G_DEFINE_FINAL_TYPE_WITH_PRIVATE" => GObjectTypeKind::DefineFinalTypeWithPrivate {
+                    function_prefix: function_prefix.to_owned(),
+                    parent_type: parent_type.to_owned(),
+                },
+                "G_DEFINE_ABSTRACT_TYPE_WITH_CODE" => GObjectTypeKind::DefineAbstractTypeWithCode {
+                    function_prefix: function_prefix.to_owned(),
+                    parent_type: parent_type.to_owned(),
+                },
+                "G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE" => {
+                    GObjectTypeKind::DefineAbstractTypeWithPrivate {
                         function_prefix: function_prefix.to_owned(),
                         parent_type: parent_type.to_owned(),
                     }
@@ -352,10 +379,12 @@ impl Parser {
             _ => return None,
         };
 
-        // For G_DEFINE_TYPE_WITH_CODE, parse the code block for interfaces and private
+        // For *_WITH_CODE variants, parse the code block for interfaces and private
         let (interfaces, has_private) = if matches!(
             macro_name,
-            "G_DEFINE_TYPE_WITH_CODE" | "G_DEFINE_FINAL_TYPE_WITH_CODE"
+            "G_DEFINE_TYPE_WITH_CODE"
+                | "G_DEFINE_FINAL_TYPE_WITH_CODE"
+                | "G_DEFINE_ABSTRACT_TYPE_WITH_CODE"
         ) {
             self.extract_code_block_info(args, source)
         } else {
@@ -553,6 +582,62 @@ impl Parser {
             class_struct: None,
             interfaces: Vec::new(),
             has_private: false,
+            line: node.start_position().row + 1,
+        })
+    }
+
+    fn extract_g_define_interface(
+        &self,
+        node: Node,
+        source: &[u8],
+        macro_name: &str,
+    ) -> Option<GObjectType> {
+        // G_DEFINE_INTERFACE (TypeName, function_prefix, PREREQUISITE_TYPE)
+        // G_DEFINE_INTERFACE_WITH_CODE (TypeName, function_prefix, PREREQUISITE_TYPE,
+        // ...)
+        let args = node.child_by_field_name("arguments")?;
+
+        // Collect identifiers from the arguments using our AST walker
+        let mut arg_values = Vec::new();
+        self.collect_identifiers(args, source, &mut arg_values);
+
+        if arg_values.len() < 3 {
+            return None;
+        }
+
+        let type_name = arg_values[0];
+        let function_prefix = arg_values[1];
+        let prerequisite_type = arg_values[2];
+
+        // Generate type macro from type name
+        let type_macro = format!("TYPE_{}", type_name.to_uppercase());
+
+        let kind = match macro_name {
+            "G_DEFINE_INTERFACE" => GObjectTypeKind::DefineInterface {
+                function_prefix: function_prefix.to_owned(),
+                prerequisite_type: prerequisite_type.to_owned(),
+            },
+            "G_DEFINE_INTERFACE_WITH_CODE" => GObjectTypeKind::DefineInterfaceWithCode {
+                function_prefix: function_prefix.to_owned(),
+                prerequisite_type: prerequisite_type.to_owned(),
+            },
+            _ => return None,
+        };
+
+        // For G_DEFINE_INTERFACE_WITH_CODE, parse the code block for interfaces
+        let (interfaces, has_private) = if macro_name == "G_DEFINE_INTERFACE_WITH_CODE" {
+            self.extract_code_block_info(args, source)
+        } else {
+            (Vec::new(), false)
+        };
+
+        Some(GObjectType {
+            type_name: type_name.to_owned(),
+            type_macro,
+            kind,
+            class_struct: None,
+            interfaces,
+            has_private,
             line: node.start_position().row + 1,
         })
     }

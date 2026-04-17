@@ -44,6 +44,27 @@ impl GObjectType {
             | GObjectTypeKind::DefineTypeWithCode {
                 function_prefix, ..
             }
+            | GObjectTypeKind::DefineFinalType {
+                function_prefix, ..
+            }
+            | GObjectTypeKind::DefineFinalTypeWithCode {
+                function_prefix, ..
+            }
+            | GObjectTypeKind::DefineFinalTypeWithPrivate {
+                function_prefix, ..
+            }
+            | GObjectTypeKind::DefineAbstractTypeWithCode {
+                function_prefix, ..
+            }
+            | GObjectTypeKind::DefineAbstractTypeWithPrivate {
+                function_prefix, ..
+            }
+            | GObjectTypeKind::DefineInterface {
+                function_prefix, ..
+            }
+            | GObjectTypeKind::DefineInterfaceWithCode {
+                function_prefix, ..
+            }
             | GObjectTypeKind::DefineBoxedType {
                 function_prefix, ..
             }
@@ -132,10 +153,120 @@ pub enum GObjectTypeKind {
         function_prefix: String,
         parent_type: String,
     },
+    DefineFinalType {
+        function_prefix: String,
+        parent_type: String,
+    },
+    DefineFinalTypeWithCode {
+        function_prefix: String,
+        parent_type: String,
+    },
+    DefineFinalTypeWithPrivate {
+        function_prefix: String,
+        parent_type: String,
+    },
+    DefineAbstractTypeWithCode {
+        function_prefix: String,
+        parent_type: String,
+    },
+    DefineAbstractTypeWithPrivate {
+        function_prefix: String,
+        parent_type: String,
+    },
+    DefineInterface {
+        function_prefix: String,
+        prerequisite_type: String,
+    },
+    DefineInterfaceWithCode {
+        function_prefix: String,
+        prerequisite_type: String,
+    },
     DefineBoxedType {
         function_prefix: String,
     },
     DefinePointerType {
         function_prefix: String,
     },
+}
+
+impl GObjectTypeKind {
+    /// Returns the macro name for this type declaration/definition
+    pub fn macro_name(&self) -> &'static str {
+        match self {
+            Self::DeclareFinal { .. } => "G_DECLARE_FINAL_TYPE",
+            Self::DeclareDerivable { .. } => "G_DECLARE_DERIVABLE_TYPE",
+            Self::DeclareInterface { .. } => "G_DECLARE_INTERFACE",
+            Self::DefineType { .. } => "G_DEFINE_TYPE",
+            Self::DefineTypeWithPrivate { .. } => "G_DEFINE_TYPE_WITH_PRIVATE",
+            Self::DefineTypeWithCode { .. } => "G_DEFINE_TYPE_WITH_CODE",
+            Self::DefineFinalType { .. } => "G_DEFINE_FINAL_TYPE",
+            Self::DefineFinalTypeWithCode { .. } => "G_DEFINE_FINAL_TYPE_WITH_CODE",
+            Self::DefineFinalTypeWithPrivate { .. } => "G_DEFINE_FINAL_TYPE_WITH_PRIVATE",
+            Self::DefineAbstractType { .. } => "G_DEFINE_ABSTRACT_TYPE",
+            Self::DefineAbstractTypeWithCode { .. } => "G_DEFINE_ABSTRACT_TYPE_WITH_CODE",
+            Self::DefineAbstractTypeWithPrivate { .. } => "G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE",
+            Self::DefineInterface { .. } => "G_DEFINE_INTERFACE",
+            Self::DefineInterfaceWithCode { .. } => "G_DEFINE_INTERFACE_WITH_CODE",
+            Self::DefineBoxedType { .. } => "G_DEFINE_BOXED_TYPE",
+            Self::DefinePointerType { .. } => "G_DEFINE_POINTER_TYPE",
+        }
+    }
+
+    /// Returns true if this is a G_DECLARE_* macro
+    pub fn is_declare(&self) -> bool {
+        matches!(
+            self,
+            Self::DeclareFinal { .. }
+                | Self::DeclareDerivable { .. }
+                | Self::DeclareInterface { .. }
+        )
+    }
+
+    /// Returns true if this is a G_DEFINE_* macro
+    pub fn is_define(&self) -> bool {
+        matches!(
+            self,
+            Self::DefineType { .. }
+                | Self::DefineTypeWithPrivate { .. }
+                | Self::DefineTypeWithCode { .. }
+                | Self::DefineFinalType { .. }
+                | Self::DefineFinalTypeWithCode { .. }
+                | Self::DefineFinalTypeWithPrivate { .. }
+                | Self::DefineAbstractType { .. }
+                | Self::DefineAbstractTypeWithCode { .. }
+                | Self::DefineAbstractTypeWithPrivate { .. }
+                | Self::DefineInterface { .. }
+                | Self::DefineInterfaceWithCode { .. }
+        )
+    }
+
+    /// Check if a declare kind is compatible with a define kind
+    pub fn is_compatible_with(&self, define: &Self) -> bool {
+        match self {
+            // G_DECLARE_FINAL_TYPE requires a final define so that
+            // G_TYPE_FLAG_FINAL is registered at runtime.
+            Self::DeclareFinal { .. } => matches!(
+                define,
+                Self::DefineFinalType { .. }
+                    | Self::DefineFinalTypeWithCode { .. }
+                    | Self::DefineFinalTypeWithPrivate { .. }
+            ),
+            // G_DECLARE_DERIVABLE_TYPE covers both concrete and abstract types.
+            Self::DeclareDerivable { .. } => matches!(
+                define,
+                Self::DefineType { .. }
+                    | Self::DefineTypeWithCode { .. }
+                    | Self::DefineTypeWithPrivate { .. }
+                    | Self::DefineAbstractType { .. }
+                    | Self::DefineAbstractTypeWithCode { .. }
+                    | Self::DefineAbstractTypeWithPrivate { .. }
+            ),
+            // G_DECLARE_INTERFACE requires G_DEFINE_INTERFACE.
+            Self::DeclareInterface { .. } => matches!(
+                define,
+                Self::DefineInterface { .. } | Self::DefineInterfaceWithCode { .. }
+            ),
+            _ => false,
+        }
+    }
 }
