@@ -24,7 +24,7 @@ impl Rule for MissingImplementation {
         violations: &mut Vec<super::Violation>,
     ) {
         // Find all declared but not defined functions
-        for (path, func) in ast_context.find_declared_but_not_defined() {
+        for (path, func) in self.find_declared_but_not_defined(ast_context) {
             // Skip static function declarations - they're file-local and often forward
             // declarations within the same header file
             if func.is_static {
@@ -46,5 +46,37 @@ impl Rule for MissingImplementation {
                 ),
             ));
         }
+    }
+}
+
+impl MissingImplementation {
+    /// Find functions declared in headers that have no implementation
+    /// Returns (file_path, function_info) tuples
+    pub fn find_declared_but_not_defined<'a>(
+        &self,
+        ast_context: &'a AstContext,
+    ) -> Vec<(&'a std::path::Path, &'a gobject_ast::FunctionInfo)> {
+        ast_context
+            .project
+            .files
+            .iter()
+            .filter(|(path, _)| path.extension().is_some_and(|ext| ext == "h"))
+            .flat_map(|(path, file)| {
+                file.functions
+                    .iter()
+                    .filter(|f| !f.is_definition)
+                    .filter(|f| {
+                        // Check if there's a matching definition in any C file
+                        !ast_context
+                            .project
+                            .files
+                            .iter()
+                            .filter(|(p, _)| p.extension().is_some_and(|ext| ext == "c"))
+                            .flat_map(|(_, file)| &file.functions)
+                            .any(|def| def.name == f.name && def.is_definition)
+                    })
+                    .map(move |f| (path.as_path(), f))
+            })
+            .collect()
     }
 }

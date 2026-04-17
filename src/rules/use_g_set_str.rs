@@ -34,8 +34,11 @@ impl Rule for UseGSetStr {
             return;
         }
 
-        // Get the source for this function to preserve comments
-        if let Some(func_source) = ast_context.get_function_source(path, func) {
+        let file = ast_context.project.files.get(path).unwrap();
+
+        if let (Some(start), Some(end)) = (func.start_byte, func.end_byte) {
+            // Get the source for this function to preserve comments
+            let func_source = &file.source[start..end];
             self.check_statements(
                 &func.body_statements,
                 path,
