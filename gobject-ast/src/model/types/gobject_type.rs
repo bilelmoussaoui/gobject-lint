@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{FunctionInfo, Property, Signal, function::Parameter};
+use crate::SourceLocation;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GObjectType {
@@ -10,7 +11,7 @@ pub struct GObjectType {
     pub class_struct: Option<ClassStruct>, // For derivable types
     pub interfaces: Vec<InterfaceImplementation>, // G_IMPLEMENT_INTERFACE
     pub has_private: bool,                 // G_ADD_PRIVATE in G_DEFINE_TYPE_WITH_CODE
-    pub line: usize,
+    pub location: SourceLocation,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

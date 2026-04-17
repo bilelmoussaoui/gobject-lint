@@ -46,7 +46,7 @@ fn print_project(project: &Project) {
                     bracket.chars().next().unwrap(),
                     inc.path,
                     bracket.chars().nth(1).unwrap(),
-                    inc.line
+                    inc.location.line
                 );
             }
         }
@@ -56,7 +56,7 @@ fn print_project(project: &Project) {
             for td in &file.typedefs {
                 println!(
                     "    typedef {} {} (line {})",
-                    td.target_type, td.name, td.line
+                    td.target_type, td.name, td.location.line
                 );
             }
         }
@@ -68,7 +68,7 @@ fn print_project(project: &Project) {
                     "    struct {} {} (line {})",
                     s.name,
                     if s.is_opaque { "[opaque]" } else { "" },
-                    s.line
+                    s.location.line
                 );
             }
         }
@@ -76,7 +76,7 @@ fn print_project(project: &Project) {
         if !file.enums.is_empty() {
             println!("  Enums ({}):", file.enums.len());
             for e in &file.enums {
-                println!("    enum {} (line {})", e.name, e.line);
+                println!("    enum {} (line {})", e.name, e.location.line);
             }
         }
 
@@ -151,7 +151,10 @@ fn print_project(project: &Project) {
                         "G_DEFINE_POINTER_TYPE".to_string()
                     }
                 };
-                println!("    {} - {} (line {})", gt.type_name, kind_str, gt.line);
+                println!(
+                    "    {} - {} (line {})",
+                    gt.type_name, kind_str, gt.location.line
+                );
 
                 if !gt.interfaces.is_empty() {
                     println!("      Interfaces: {}", gt.interfaces.len());
@@ -209,7 +212,7 @@ fn print_project(project: &Project) {
                 };
                 println!(
                     "    {}{}{} {} (line {})",
-                    export, static_marker, kind, func.name, func.line
+                    export, static_marker, kind, func.name, func.location.line
                 );
             }
         }

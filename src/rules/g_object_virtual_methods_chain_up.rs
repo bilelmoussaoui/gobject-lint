@@ -65,7 +65,7 @@ impl Rule for GObjectVirtualMethodsChainUp {
         if !self.has_chainup_call(&func.body_statements, method_type) {
             violations.push(self.violation(
                 path,
-                func.line,
+                func.location.line,
                 1,
                 format!(
                     "{} must chain up to parent class (e.g., G_OBJECT_CLASS (parent_class)->{} (object))",

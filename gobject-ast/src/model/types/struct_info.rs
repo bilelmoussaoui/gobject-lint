@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+use crate::SourceLocation;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructInfo {
     pub name: String,
-    pub line: usize,
+    pub location: SourceLocation,
     pub fields: Vec<Field>,
     pub is_opaque: bool, // Only declared, not defined
 }

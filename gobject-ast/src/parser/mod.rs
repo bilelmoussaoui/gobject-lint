@@ -169,7 +169,7 @@ impl Parser {
                     file_model.includes.push(Include {
                         path,
                         is_system,
-                        line: location.line,
+                        location,
                     });
                     return; // Don't recurse into includes
                 }
@@ -195,7 +195,7 @@ impl Parser {
                     file_model.typedefs.push(TypedefInfo {
                         name,
                         target_type,
-                        line: location.line,
+                        location,
                     });
 
                     // Also check for typedef enums
@@ -216,7 +216,7 @@ impl Parser {
 
                     file_model.functions.push(FunctionInfo {
                         name: func_name,
-                        line: func_def.location.line,
+                        location: func_def.location,
                         is_static: func_def.is_static,
                         export_macros: Vec::new(),
                         is_definition: true,
@@ -244,7 +244,7 @@ impl Parser {
                         let func_name = func_decl.name;
                         file_model.functions.push(FunctionInfo {
                             name: func_name,
-                            line: func_decl.location.line,
+                            location: func_decl.location,
                             is_static: func_decl.is_static,
                             export_macros: func_decl.export_macros,
                             is_definition: false,
@@ -294,7 +294,7 @@ impl Parser {
 
                 file_model.enums.push(crate::model::types::EnumInfo {
                     name,
-                    line: node.start_position().row + 1,
+                    location: self.node_location(node),
                     values,
                     body_start_byte: body.start_byte(),
                     body_end_byte: body.end_byte(),

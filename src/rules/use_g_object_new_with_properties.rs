@@ -137,7 +137,7 @@ impl UseGObjectNewWithProperties {
                     // Check if this call is one of our empty g_object_new calls
                     for &empty_call in empty_new_calls {
                         if std::ptr::eq(call as *const _, empty_call as *const _) {
-                            return Some((decl.name.clone(), decl.location.clone()));
+                            return Some((decl.name.clone(), decl.location));
                         }
                     }
                 }
@@ -149,7 +149,7 @@ impl UseGObjectNewWithProperties {
                 {
                     for &empty_call in empty_new_calls {
                         if std::ptr::eq(call as *const _, empty_call as *const _) {
-                            return Some((assign.lhs.clone(), expr_stmt.location.clone()));
+                            return Some((assign.lhs.clone(), expr_stmt.location));
                         }
                     }
                 }

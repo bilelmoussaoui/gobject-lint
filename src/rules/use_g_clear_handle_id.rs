@@ -215,8 +215,8 @@ impl UseGClearHandleId {
                 results.push((
                     var_name,
                     cleanup_func,
-                    first.location().clone(),
-                    second.location().clone(),
+                    *first.location(),
+                    *second.location(),
                 ));
             }
         });

@@ -144,7 +144,7 @@ impl Parser {
 
         Some(TypedefInfo {
             name: name.to_owned(),
-            line: node.start_position().row + 1,
+            location: self.node_location(node),
             target_type: target_type.to_owned(),
         })
     }
@@ -166,7 +166,7 @@ impl Parser {
                             let has_body = child.child_by_field_name("body").is_some();
                             return Some(StructInfo {
                                 name: name.to_owned(),
-                                line: child.start_position().row + 1,
+                                location: self.node_location(child),
                                 fields: Vec::new(), // TODO: extract fields
                                 is_opaque: !has_body,
                             });
@@ -196,7 +196,7 @@ impl Parser {
                             let values = self.extract_enum_values(body, source);
                             return Some(EnumInfo {
                                 name: name.to_owned(),
-                                line: node.start_position().row + 1,
+                                location: self.node_location(node),
                                 values,
                                 body_start_byte: body.start_byte(),
                                 body_end_byte: body.end_byte(),
@@ -234,7 +234,7 @@ impl Parser {
 
                         return Some(EnumInfo {
                             name,
-                            line: child.start_position().row + 1,
+                            location: self.node_location(child),
                             values,
                             body_start_byte: body.start_byte(),
                             body_end_byte: body.end_byte(),

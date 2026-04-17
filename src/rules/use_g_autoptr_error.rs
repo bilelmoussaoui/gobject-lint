@@ -79,7 +79,7 @@ impl UseGAutoptrError {
                 if let Statement::Declaration(decl) = s {
                     // Check if type contains "GError"
                     if decl.type_name.contains("GError") {
-                        result.push((decl.name.clone(), decl.location.clone()));
+                        result.push((decl.name.clone(), decl.location));
                     }
                 }
             });

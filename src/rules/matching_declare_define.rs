@@ -48,7 +48,7 @@ impl Rule for MatchingDeclareDefine {
                     {
                         violations.push(self.violation(
                             path,
-                            gt.line,
+                            gt.location.line,
                             1,
                             format!(
                                 "'{}' is declared with {} but defined with {}",

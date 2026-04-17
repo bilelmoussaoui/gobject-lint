@@ -61,7 +61,7 @@ impl Rule for PropertyEnumZero {
 
                 let mut fixes = Vec::new();
                 let mut has_violations = false;
-                let mut violation_line = enum_info.line;
+                let mut violation_line = enum_info.location.line;
                 let mut message = String::new();
 
                 // Check first enumerator
@@ -71,7 +71,7 @@ impl Rule for PropertyEnumZero {
                     // Check if it's PROP_0 or XXX_PROP_0
                     if !(first_val.name.ends_with("_PROP_0") || first_val.name == "PROP_0") {
                         has_violations = true;
-                        violation_line = enum_info.line;
+                        violation_line = enum_info.location.line;
 
                         // Get indentation from the source
                         let indent = self.get_indentation(&file.source, first_val.name_start_byte);

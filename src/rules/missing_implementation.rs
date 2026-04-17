@@ -38,7 +38,7 @@ impl Rule for MissingImplementation {
 
             violations.push(self.violation(
                 path,
-                func.line,
+                func.location.line,
                 1,
                 format!(
                     "Function '{}' is declared in a header but has no implementation",

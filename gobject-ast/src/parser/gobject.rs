@@ -94,7 +94,7 @@ impl Parser {
                 class_struct: None,
                 interfaces: Vec::new(),
                 has_private: false,
-                line: parent.start_position().row + 1,
+                location: self.node_location(parent),
             });
         }
 
@@ -171,7 +171,7 @@ impl Parser {
                 class_struct: None,
                 interfaces,
                 has_private,
-                line: parent.start_position().row + 1,
+                location: self.node_location(parent),
             });
         }
 
@@ -334,7 +334,7 @@ impl Parser {
             class_struct: None,
             interfaces: Vec::new(),
             has_private: false,
-            line: node.start_position().row + 1,
+            location: self.node_location(node),
         })
     }
 
@@ -398,7 +398,7 @@ impl Parser {
             class_struct: None,
             interfaces,
             has_private,
-            line: node.start_position().row + 1,
+            location: self.node_location(node),
         })
     }
 
@@ -582,7 +582,7 @@ impl Parser {
             class_struct: None,
             interfaces: Vec::new(),
             has_private: false,
-            line: node.start_position().row + 1,
+            location: self.node_location(node),
         })
     }
 
@@ -638,7 +638,7 @@ impl Parser {
             class_struct: None,
             interfaces,
             has_private,
-            line: node.start_position().row + 1,
+            location: self.node_location(node),
         })
     }
 

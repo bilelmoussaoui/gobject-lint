@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+use crate::SourceLocation;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnumInfo {
     pub name: String,
-    pub line: usize,
+    pub location: SourceLocation,
     pub values: Vec<EnumValue>,
     /// Byte range of the enum body for inserting fixes
     pub body_start_byte: usize,

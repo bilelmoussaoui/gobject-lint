@@ -99,7 +99,7 @@ impl GTaskSourceTag {
                                 &decl.name,
                                 source,
                             );
-                            let mut location = decl.location.clone();
+                            let mut location = decl.location;
                             location.column = var_name_column;
                             results.push((decl.name.clone(), location));
                         }
@@ -111,7 +111,7 @@ impl GTaskSourceTag {
                             && call.function == "g_task_new"
                         {
                             // For assignments, use the assignment location
-                            results.push((assignment.lhs.clone(), assignment.location.clone()));
+                            results.push((assignment.lhs.clone(), assignment.location));
                         }
                     }
                     _ => {}

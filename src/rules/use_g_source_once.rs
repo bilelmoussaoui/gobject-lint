@@ -222,7 +222,7 @@ impl UseGSourceOnce {
         let mut current_line = 1;
 
         for (i, &byte) in source.iter().enumerate() {
-            if current_line == func.line {
+            if current_line == func.location.line {
                 // Found the line, now find "gboolean" on this line
                 let mut line_end = i;
                 while line_end < source.len() && source[line_end] != b'\n' {

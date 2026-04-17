@@ -114,10 +114,8 @@ impl UseGAutoptrInlineCleanup {
                     if self.is_autoptr_candidate(&decl.type_name) {
                         // Skip field access names
                         if !decl.name.contains("->") && !decl.name.contains('.') {
-                            result.insert(
-                                decl.name.clone(),
-                                (decl.type_name.clone(), decl.location.clone()),
-                            );
+                            result
+                                .insert(decl.name.clone(), (decl.type_name.clone(), decl.location));
                         }
                     }
                 }

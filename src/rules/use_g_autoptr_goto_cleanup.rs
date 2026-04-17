@@ -115,10 +115,8 @@ impl UseGAutoptrGotoCleanup {
                     if decl.type_name.contains('*') {
                         // Skip field access names
                         if !decl.name.contains("->") && !decl.name.contains('.') {
-                            result.insert(
-                                decl.name.clone(),
-                                (decl.type_name.clone(), decl.location.clone()),
-                            );
+                            result
+                                .insert(decl.name.clone(), (decl.type_name.clone(), decl.location));
                         }
                     }
                 }
@@ -143,7 +141,7 @@ impl UseGAutoptrGotoCleanup {
                             && call.is_allocation_call()
                             && let Some((type_text, location)) = local_vars.get(&decl.name)
                         {
-                            result.insert(decl.name.clone(), (type_text.clone(), location.clone()));
+                            result.insert(decl.name.clone(), (type_text.clone(), *location));
                         }
                     }
                     // Pattern 2: var = allocation_call();
@@ -157,10 +155,7 @@ impl UseGAutoptrGotoCleanup {
                                 && !assign.lhs.contains('.')
                                 && let Some((type_text, location)) = local_vars.get(&assign.lhs)
                             {
-                                result.insert(
-                                    assign.lhs.clone(),
-                                    (type_text.clone(), location.clone()),
-                                );
+                                result.insert(assign.lhs.clone(), (type_text.clone(), *location));
                             }
                         }
                     }

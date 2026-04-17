@@ -1,14 +1,17 @@
 use serde::{Deserialize, Serialize};
 
-use crate::model::{
-    expression::{Argument, CallExpression, Expression},
-    statement::Statement,
+use crate::{
+    SourceLocation,
+    model::{
+        expression::{Argument, CallExpression, Expression},
+        statement::Statement,
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionInfo {
     pub name: String,
-    pub line: usize,
+    pub location: SourceLocation,
     pub is_static: bool,
     pub export_macros: Vec<String>, // CLUTTER_EXPORT, G_MODULE_EXPORT, G_DEPRECATED_FOR, etc.
     pub is_definition: bool,        // true = definition, false = declaration

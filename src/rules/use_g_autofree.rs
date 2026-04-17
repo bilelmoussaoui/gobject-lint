@@ -136,10 +136,7 @@ impl UseGAutofree {
                 if let Statement::Declaration(decl) = s {
                     // Skip if var name contains -> or . (field access)
                     if !decl.name.contains("->") && !decl.name.contains('.') {
-                        result.insert(
-                            decl.name.clone(),
-                            (decl.type_name.clone(), decl.location.clone()),
-                        );
+                        result.insert(decl.name.clone(), (decl.type_name.clone(), decl.location));
                     }
                 }
             });
