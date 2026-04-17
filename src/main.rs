@@ -43,6 +43,10 @@ struct Args {
     #[arg(long, value_name = "RULE")]
     only: Vec<String>,
 
+    /// Disable specific rules (can be repeated, overrides config)
+    #[arg(long, value_name = "RULE")]
+    exclude: Vec<String>,
+
     /// Filter rules by category
     #[arg(long, value_name = "CATEGORY")]
     category: Option<Category>,
@@ -84,6 +88,11 @@ fn main() -> Result<()> {
     // Apply --only filter if specified
     if !args.only.is_empty() {
         config.enable_only_rules(&args.only)?;
+    }
+
+    // Apply --exclude filter if specified
+    if !args.exclude.is_empty() {
+        config.disable_rules(&args.exclude)?;
     }
 
     // Apply --category filter if specified
