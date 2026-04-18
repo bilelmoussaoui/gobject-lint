@@ -8,6 +8,9 @@ use crate::rules::Violation;
 pub fn apply_fixes(violations: &[Violation]) -> Result<usize> {
     use crate::rules::Fix;
 
+    // Count violations with fixes (not individual fixes)
+    let total_violations_with_fixes = violations.iter().filter(|v| !v.fixes.is_empty()).count();
+
     // Collect all fixes from all violations, grouped by file
     let mut by_file: HashMap<&Path, Vec<&Fix>> = HashMap::new();
     for violation in violations {
@@ -20,8 +23,6 @@ pub fn apply_fixes(violations: &[Violation]) -> Result<usize> {
             }
         }
     }
-
-    let mut total_fixed = 0;
 
     for (file_path, mut fixes) in by_file {
         // Sort by start_byte descending - apply fixes from bottom to top
@@ -43,7 +44,6 @@ pub fn apply_fixes(violations: &[Violation]) -> Result<usize> {
             new_content.extend_from_slice(&modified_content[fix.end_byte..]);
 
             modified_content = new_content;
-            total_fixed += 1;
         }
 
         // Write back to file
@@ -51,5 +51,5 @@ pub fn apply_fixes(violations: &[Violation]) -> Result<usize> {
             .with_context(|| format!("Failed to write file: {}", file_path.display()))?;
     }
 
-    Ok(total_fixed)
+    Ok(total_violations_with_fixes)
 }
