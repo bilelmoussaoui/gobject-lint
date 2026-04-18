@@ -94,10 +94,13 @@ impl UntranslatedString {
         }
 
         // Check if it's a raw string literal
-        if let Expression::StringLiteral(string_lit) = &**arg_expr {
-            // Skip empty strings - they don't need translation
-            if string_lit.value.is_empty() {
-                return;
+        if let Expression::StringLiteral(_) = &**arg_expr {
+            // Extract the string value without quotes
+            if let Some(string_value) = arg_expr.extract_string_value() {
+                // Skip empty strings and whitespace-only strings
+                if string_value.trim().is_empty() {
+                    return;
+                }
             }
 
             let location = arg_expr.location();
