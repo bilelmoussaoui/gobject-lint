@@ -11,7 +11,7 @@ impl Rule for GParamSpecStaticStrings {
     }
 
     fn description(&self) -> &'static str {
-        "Ensure g_param_spec_* calls use G_PARAM_STATIC_STRINGS flag for string literals"
+        "Ensure *_param_spec_* calls use G_PARAM_STATIC_STRINGS flag for string literals"
     }
 
     fn category(&self) -> super::Category {
@@ -32,7 +32,7 @@ impl Rule for GParamSpecStaticStrings {
     ) {
         // Get custom flags that already include static strings
         let static_flags = config
-            .get_rule_config("g_param_spec_static_strings")
+            .get_rule_config(self.name())
             .and_then(|rc| rc.options.get("static_flags"))
             .and_then(|v| v.as_array())
             .map(|arr| {
@@ -42,12 +42,12 @@ impl Rule for GParamSpecStaticStrings {
             })
             .unwrap_or_default();
 
-        // Find all g_param_spec_* calls (but skip g_param_spec_override and
-        // g_param_spec_internal)
+        // Find all *_param_spec_* calls (including g_param_spec_*, cogl_param_spec_*,
+        // etc.) but skip *_param_spec_override and *_param_spec_internal
         for call in func.find_calls_matching(|name| {
-            name.starts_with("g_param_spec_")
-                && name != "g_param_spec_override"
-                && name != "g_param_spec_internal"
+            name.contains("_param_spec_")
+                && !name.ends_with("_param_spec_override")
+                && !name.ends_with("_param_spec_internal")
         }) {
             self.check_call(path, call, &static_flags, violations);
         }

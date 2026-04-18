@@ -25,16 +25,30 @@ impl Rule for GParamSpecNullNickBlurb {
     fn check_func_impl(
         &self,
         _ast_context: &AstContext,
-        _config: &Config,
+        config: &Config,
         func: &gobject_ast::top_level::FunctionDefItem,
         path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
+        // Get custom flags that already include static strings
+        let static_flags = config
+            .get_rule_config(self.name())
+            .and_then(|rc| rc.options.get("static_flags"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
         // Find all g_param_spec_* calls (but skip g_param_spec_internal)
         for call in func.find_calls_matching(|name| {
-            name.starts_with("g_param_spec_") && name != "g_param_spec_internal"
+            name.contains("_param_spec_")
+                && !name.ends_with("_param_spec_override")
+                && !name.ends_with("_param_spec_internal")
         }) {
-            self.check_call(path, call, violations);
+            self.check_call(path, call, &static_flags, violations);
         }
     }
 }
@@ -44,6 +58,7 @@ impl GParamSpecNullNickBlurb {
         &self,
         file_path: &std::path::Path,
         call: &CallExpression,
+        custom_static_flags: &[String],
         violations: &mut Vec<Violation>,
     ) {
         // g_param_spec_*(name, nick, blurb, ...) — need at least 3 args
@@ -55,6 +70,21 @@ impl GParamSpecNullNickBlurb {
         let Some(property) = Property::from_param_spec_call(call) else {
             return;
         };
+
+        // Check if any custom flags that include static strings are present
+        // If so, skip this rule as the project intentionally uses non-NULL nick/blurb
+        use gobject_ast::types::ParamFlag;
+        let has_custom_static_flag = property.flags.iter().any(|flag| {
+            if let ParamFlag::Unknown(name) = flag {
+                custom_static_flags.contains(name)
+            } else {
+                false
+            }
+        });
+
+        if has_custom_static_flag {
+            return; // Project uses custom flags that include static strings
+        }
 
         // Check if nick/blurb are NULL using the parsed Property
         let nick_is_null = property.nick.is_none();

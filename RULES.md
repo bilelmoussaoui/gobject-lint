@@ -71,7 +71,7 @@ Rules that suggest simpler alternatives to complex patterns.
 
 Rules that suggest changes for better performance.
 
-- **g_param_spec_static_strings** - Ensure g_param_spec_* calls use G_PARAM_STATIC_STRINGS flag for string literals
+- **g_param_spec_static_strings** - Ensure *_param_spec_* calls use G_PARAM_STATIC_STRINGS flag for string literals
   - **Per-rule config option `static_flags`**: List of custom flag constants that already include `G_PARAM_STATIC_STRINGS` (default: `[]`). Use this if your project has custom macros like `ST_PARAM_READWRITE` that already include the static strings flag. Example:
 
     ```toml
@@ -90,6 +90,14 @@ Rules that are rather strict or have occasional false positives.
 - **g_declare_semicolon** - Enforce semicolons after G_DECLARE_* and G_DEFINE_* macros (including multi-line variants)
 - **matching_declare_define** - Ensure G_DECLARE_* and G_DEFINE_* macros are used consistently
 - **g_param_spec_null_nick_blurb** - Ensure g_param_spec_* functions have NULL for nick and blurb parameters
+  - **Per-rule config option `static_flags`**: List of custom flag constants that include `G_PARAM_STATIC_STRINGS`. If your project uses custom flags like `ST_PARAM_READWRITE` with non-NULL nick/blurb, this rule will skip those calls. Example:
+
+    ```toml
+    [rules.g_param_spec_null_nick_blurb]
+    level = "warn"
+    static_flags = ["ST_PARAM_READWRITE"]
+    ```
+
 - **use_g_object_class_install_properties** - Suggest g_object_class_install_properties for multiple g_object_class_install_property calls
 - **untranslated_string** - Detect user-visible strings in GTK/Adwaita functions that should be wrapped with gettext (use inline ignore for strings that don't need translation)
 
