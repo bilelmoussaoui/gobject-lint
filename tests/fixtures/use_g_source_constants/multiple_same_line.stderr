@@ -1,0 +1,2 @@
+multiple_same_line.c:11:28: use_g_source_constants: Use G_SOURCE_CONTINUE instead of TRUE in GSourceFunc callback
+multiple_same_line.c:11:35: use_g_source_constants: Use G_SOURCE_REMOVE instead of FALSE in GSourceFunc callback

@@ -1,0 +1,4 @@
+multiple_same_line.c:8:7: use_g_str_has_prefix_suffix: Use g_str_has_prefix (str1, "http://") instead of strncmp() == 0
+multiple_same_line.c:8:61: use_g_str_has_prefix_suffix: Use g_str_has_prefix (str2, "https://") instead of strncmp() == 0
+multiple_same_line.c:12:7: use_g_str_has_prefix_suffix: Use g_str_has_suffix (str1, ".txt") instead of strcmp() == 0
+multiple_same_line.c:12:71: use_g_str_has_prefix_suffix: Use g_str_has_suffix (str2, ".md") instead of strcmp() == 0

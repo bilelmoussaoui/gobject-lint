@@ -1,0 +1,7 @@
+multiple_same_line.c:8:7: use_g_ascii_functions: Use g_ascii_tolower() instead of tolower() — C ctype functions are locale-dependent
+multiple_same_line.c:8:22: use_g_ascii_functions: Use g_ascii_tolower() instead of tolower() — C ctype functions are locale-dependent
+multiple_same_line.c:12:7: use_g_ascii_functions: Use g_ascii_isdigit() instead of isdigit() — C ctype functions are locale-dependent
+multiple_same_line.c:12:22: use_g_ascii_functions: Use g_ascii_isdigit() instead of isdigit() — C ctype functions are locale-dependent
+multiple_same_line.c:12:37: use_g_ascii_functions: Use g_ascii_isdigit() instead of isdigit() — C ctype functions are locale-dependent
+multiple_same_line.c:16:10: use_g_ascii_functions: Use g_ascii_tolower() instead of tolower() — C ctype functions are locale-dependent
+multiple_same_line.c:16:32: use_g_ascii_functions: Use g_ascii_toupper() instead of toupper() — C ctype functions are locale-dependent
