@@ -1,0 +1,2 @@
+different_variable.c:17:3: unnecessary_null_check: Remove unnecessary NULL check before g_free (g_free handles NULL)
+different_variable.c:21:3: unnecessary_null_check: Remove unnecessary NULL check before g_free (g_free handles NULL)
