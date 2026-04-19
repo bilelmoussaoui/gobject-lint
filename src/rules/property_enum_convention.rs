@@ -45,7 +45,7 @@ impl Rule for PropertyEnumConvention {
                     let has_prop_0 = e
                         .values
                         .first()
-                        .map(|v| v.name.ends_with("_PROP_0") || v.name == "PROP_0")
+                        .map(|v| Self::is_prop_0_name(&v.name))
                         .unwrap_or(false);
 
                     let has_n_props_at_end = e
@@ -82,7 +82,7 @@ impl Rule for PropertyEnumConvention {
                 let has_prop_0 = enum_info
                     .values
                     .first()
-                    .map(|v| v.name.ends_with("_PROP_0") || v.name == "PROP_0")
+                    .map(|v| Self::is_prop_0_name(&v.name))
                     .unwrap_or(false);
 
                 let has_n_props = enum_info
@@ -125,7 +125,7 @@ impl Rule for PropertyEnumConvention {
 
                 // Find which class_init and property functions correspond to this enum
                 // by tracing N_PROPS through GParamSpec array to class_init
-                let class_context = self.find_class_context_for_enum(file, &n_props_name);
+                let class_context = self.find_class_context_for_enum(file, enum_info);
 
                 // IMPORTANT: Only transform if we can verify this is a GObject property enum
                 // by finding its class_init. This prevents transforming unrelated enums that
@@ -172,11 +172,15 @@ impl Rule for PropertyEnumConvention {
                     }
                 }
 
-                // Fix 1: Remove PROP_0 line entirely
+                // Fix 1: Remove PROP_0 line entirely (including any blank line after it)
                 if has_prop_0 && enum_info.values.len() >= 2 {
                     let prop_0 = &enum_info.values[0];
+
+                    // Use SourceLocation's find_line_bounds_with_following_blank
+                    let location =
+                        gobject_ast::SourceLocation::new(0, 0, prop_0.start_byte, prop_0.end_byte);
                     let (line_start, line_end) =
-                        self.find_line_bounds(&file.source, prop_0.start_byte, prop_0.end_byte);
+                        location.find_line_bounds_with_following_blank(&file.source);
                     fixes.push(Fix::new(line_start, line_end, String::new()));
                 }
 
@@ -204,13 +208,19 @@ impl Rule for PropertyEnumConvention {
                     }
                 }
 
-                // Fix 3: Remove N_PROPS line entirely
+                // Fix 3: Remove N_PROPS line entirely (including any blank line before it)
                 if has_n_props && enum_info.values.len() >= 2 {
                     let n_props = enum_info.values.last().unwrap();
 
-                    // Remove the N_PROPS line
-                    let (line_start, line_end) =
-                        self.find_line_bounds(&file.source, n_props.start_byte, n_props.end_byte);
+                    // Use SourceLocation's find_line_bounds which already handles preceding blank
+                    // lines
+                    let location = gobject_ast::SourceLocation::new(
+                        0,
+                        0,
+                        n_props.start_byte,
+                        n_props.end_byte,
+                    );
+                    let (line_start, line_end) = location.find_line_bounds(&file.source);
                     fixes.push(Fix::new(line_start, line_end, String::new()));
                 }
 
@@ -312,7 +322,15 @@ impl PropertyEnumConvention {
             .any(|v| v.name.contains("_PROP_") || v.name.starts_with("PROP_"))
     }
 
-    /// Check if a name is a sentinel (N_PROPS, PROP_LAST, NUM_PROPERTIES, etc.)
+    /// Check if a name is a PROP_0 sentinel (PROP_0, *_PROP_0, etc.)
+    fn is_prop_0_name(name: &str) -> bool {
+        name.ends_with("_PROP_0")
+            || name == "PROP_0"
+            || (name.starts_with("PROP_") && name.ends_with("_0"))
+    }
+
+    /// Check if a name is a sentinel (N_PROPS, PROP_LAST, NUM_PROPERTIES,
+    /// N_PROPERTIES, etc.)
     fn is_sentinel_name(name: &str) -> bool {
         name.ends_with("_N_PROPS")
             || name == "N_PROPS"
@@ -320,33 +338,9 @@ impl PropertyEnumConvention {
             || name == "PROP_LAST"
             || name.ends_with("_NUM_PROPERTIES")
             || name == "NUM_PROPERTIES"
-    }
-
-    /// Find the line bounds (start and end byte positions) for a given byte
-    /// range
-    fn find_line_bounds(
-        &self,
-        source: &[u8],
-        start_byte: usize,
-        end_byte: usize,
-    ) -> (usize, usize) {
-        // Find the start of the line
-        let mut line_start = start_byte;
-        while line_start > 0 && source[line_start - 1] != b'\n' {
-            line_start -= 1;
-        }
-
-        // Find the end of the line (including the newline)
-        let mut line_end = end_byte;
-        while line_end < source.len() && source[line_end] != b'\n' {
-            line_end += 1;
-        }
-        // Include the newline character
-        if line_end < source.len() {
-            line_end += 1;
-        }
-
-        (line_start, line_end)
+            || name == "N_PROPERTIES"
+            || (name.starts_with("N_") && name.ends_with("_PROPS"))
+            || (name.starts_with("N_") && name.ends_with("_PROPERTIES"))
     }
 
     /// Find GParamSpec arrays that use N_PROPS, fix their declarations, and
@@ -502,68 +496,113 @@ impl PropertyEnumConvention {
     }
 
     /// Find which class owns this property enum by tracing N_PROPS through
-    /// GParamSpec arrays Returns the class type and associated get/set
-    /// property function names
+    /// GParamSpec arrays or by finding install_property calls
+    /// Returns the class type and associated get/set property function names
     fn find_class_context_for_enum(
         &self,
         file: &gobject_ast::FileModel,
-        n_props_name: &str,
+        enum_info: &gobject_ast::EnumInfo,
     ) -> Option<ClassContext> {
-        // Step 1: Find GParamSpec array declarations that use this N_PROPS
-        let array_names = self.find_param_spec_arrays_for_sentinel(file, n_props_name);
+        // Get N_PROPS name if present
+        let n_props_name = enum_info
+            .values
+            .last()
+            .filter(|v| Self::is_sentinel_name(&v.name))
+            .map(|v| v.name.as_str());
 
-        if array_names.is_empty() {
-            return None;
-        }
+        // Get all property enum value names (excluding PROP_0 and sentinels)
+        let property_names: Vec<&str> = enum_info
+            .values
+            .iter()
+            .filter(|v| !Self::is_prop_0_name(&v.name) && !Self::is_sentinel_name(&v.name))
+            .map(|v| v.name.as_str())
+            .collect();
 
-        // Step 2: Find class_init function that uses this array
+        // Step 1: Find GParamSpec array declarations that use N_PROPS
+        let array_names = if let Some(sentinel) = n_props_name {
+            self.find_param_spec_arrays_for_sentinel(file, sentinel)
+        } else {
+            Vec::new()
+        };
+
+        // Step 2: Find class_init function that uses this array OR uses
+        // install_property
         for func in file.iter_function_definitions() {
             if !func.name.ends_with("_class_init") {
                 continue;
             }
 
-            // Check if this class_init assigns to or calls
-            // g_object_class_install_properties with any of our arrays
-            let uses_array = func.body_statements.iter().any(|stmt| {
-                let mut found = false;
-                stmt.walk(&mut |s| {
-                    if let gobject_ast::Statement::Expression(expr_stmt) = s {
-                        match &expr_stmt.expr {
-                            // Check assignments: my_props[PROP_NAME] = ...
-                            gobject_ast::Expression::Assignment(assignment) => {
-                                for array_name in &array_names {
-                                    if assignment.lhs.contains(array_name) {
-                                        found = true;
-                                        break;
+            let mut uses_property_enum = false;
+
+            // Check if this class_init uses the array (install_properties path)
+            if !array_names.is_empty() {
+                uses_property_enum = func.body_statements.iter().any(|stmt| {
+                    let mut found = false;
+                    stmt.walk(&mut |s| {
+                        if let gobject_ast::Statement::Expression(expr_stmt) = s {
+                            match &expr_stmt.expr {
+                                // Check assignments: my_props[PROP_NAME] = ...
+                                gobject_ast::Expression::Assignment(assignment) => {
+                                    for array_name in &array_names {
+                                        if assignment.lhs.contains(array_name) {
+                                            found = true;
+                                            break;
+                                        }
                                     }
                                 }
-                            }
-                            // Check calls: g_object_class_install_properties(..., my_props)
-                            gobject_ast::Expression::Call(call)
-                                if call.function.contains("install_properties") =>
-                            {
-                                for arg in &call.arguments {
-                                    let gobject_ast::Argument::Expression(expr) = arg;
-                                    if let gobject_ast::Expression::Identifier(ident) =
-                                        expr.as_ref()
-                                    {
-                                        for array_name in &array_names {
-                                            if &ident.name == array_name {
-                                                found = true;
-                                                break;
+                                // Check calls: g_object_class_install_properties(..., my_props)
+                                gobject_ast::Expression::Call(call)
+                                    if call.function.contains("install_properties") =>
+                                {
+                                    for arg in &call.arguments {
+                                        let gobject_ast::Argument::Expression(expr) = arg;
+                                        if let gobject_ast::Expression::Identifier(ident) =
+                                            expr.as_ref()
+                                        {
+                                            for array_name in &array_names {
+                                                if &ident.name == array_name {
+                                                    found = true;
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
                                 }
+                                _ => {}
                             }
-                            _ => {}
                         }
-                    }
+                    });
+                    found
                 });
-                found
-            });
+            }
 
-            if !uses_array {
+            // If no array usage found, check for install_property (singular) calls
+            // that use any of our property enum values
+            if !uses_property_enum && !property_names.is_empty() {
+                func.body_statements.iter().for_each(|stmt| {
+                    stmt.walk(&mut |s| {
+                        if let gobject_ast::Statement::Expression(expr_stmt) = s
+                            && let gobject_ast::Expression::Call(call) = &expr_stmt.expr
+                            && call.function.contains("install_property")
+                            && !call.function.contains("install_properties")
+                        {
+                            // Check if any argument uses our property enum values
+                            for arg in &call.arguments {
+                                if let gobject_ast::Argument::Expression(expr) = arg
+                                    && let gobject_ast::Expression::Identifier(ident) =
+                                        expr.as_ref()
+                                    && property_names.contains(&ident.name.as_str())
+                                {
+                                    uses_property_enum = true;
+                                    break;
+                                }
+                            }
+                        }
+                    });
+                });
+            }
+
+            if !uses_property_enum {
                 continue;
             }
 
@@ -695,8 +734,29 @@ impl PropertyEnumConvention {
                         )
                         .unwrap_or("");
 
-                        if switch_source.contains(n_props_name) {
-                            found = true;
+                        // Check if n_props_name appears as a whole identifier (not as substring)
+                        if let Some(pos) = switch_source.find(n_props_name) {
+                            let before = if pos > 0 {
+                                switch_source.as_bytes()[pos - 1] as char
+                            } else {
+                                ' '
+                            };
+                            let after_pos = pos + n_props_name.len();
+                            let after = if after_pos < switch_source.len() {
+                                switch_source.as_bytes()[after_pos] as char
+                            } else {
+                                ' '
+                            };
+
+                            // Check if surrounded by non-identifier characters
+                            let is_whole_identifier = !before.is_alphanumeric()
+                                && before != '_'
+                                && !after.is_alphanumeric()
+                                && after != '_';
+
+                            if is_whole_identifier {
+                                found = true;
+                            }
                         }
                     }
                 });

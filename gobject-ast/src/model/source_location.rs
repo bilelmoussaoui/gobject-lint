@@ -61,4 +61,45 @@ impl SourceLocation {
 
         (line_start, line_end)
     }
+
+    /// Find the start and end byte positions of the line containing this
+    /// location, including any following blank line
+    /// Returns (line_start_byte, line_end_byte) including newlines
+    pub fn find_line_bounds_with_following_blank(&self, source: &[u8]) -> (usize, usize) {
+        // Find the start of the line
+        let mut line_start = self.start_byte;
+        while line_start > 0 && source[line_start - 1] != b'\n' {
+            line_start -= 1;
+        }
+
+        // Find the end of the line (including newline)
+        let mut line_end = self.end_byte;
+        while line_end < source.len() && source[line_end] != b'\n' {
+            line_end += 1;
+        }
+        if line_end < source.len() {
+            line_end += 1; // Include the newline
+        }
+
+        // Check if the next line is blank (only whitespace)
+        if line_end < source.len() {
+            let mut pos = line_end;
+            let mut is_blank = true;
+
+            while pos < source.len() && source[pos] != b'\n' {
+                if !source[pos].is_ascii_whitespace() {
+                    is_blank = false;
+                    break;
+                }
+                pos += 1;
+            }
+
+            // If next line is blank, include it in the removal
+            if is_blank && pos < source.len() {
+                line_end = pos + 1; // Include the newline of the blank line
+            }
+        }
+
+        (line_start, line_end)
+    }
 }

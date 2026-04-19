@@ -1,0 +1,1 @@
+install_property_singular.c:5:1: property_enum_convention: Use modern property enum pattern (remove PROP_0, N_PROPS, start from = 1)

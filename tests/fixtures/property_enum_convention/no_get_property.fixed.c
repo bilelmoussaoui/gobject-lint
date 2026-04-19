@@ -2,9 +2,7 @@
 
 typedef enum
 {
-
   PROP_MODE = 1,
-
 } MetaBackendNativeProps;
 
 static GParamSpec *obj_props[PROP_MODE + 1];
