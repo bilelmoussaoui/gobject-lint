@@ -228,8 +228,7 @@ impl UseGSetStr {
 
         // Ternary: var = cond ? g_strdup(...) : NULL
         if let Expression::Conditional(cond) = &*assign.rhs
-            && let Expression::Call(call) = &*cond.then_expr
-            && (call.function == "g_strdup" || call.function == "g_strndup")
+            && cond.then_expr.is_call_to_any(&["g_strdup", "g_strndup"])
         {
             // Use the condition variable as the value
             let cond_text = self.expr_to_string(&cond.condition);

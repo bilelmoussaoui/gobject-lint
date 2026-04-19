@@ -251,4 +251,14 @@ impl Expression {
         });
         identifiers
     }
+
+    /// Check if this expression is a call to the specified function
+    pub fn is_call_to(&self, function_name: &str) -> bool {
+        matches!(self, Expression::Call(call) if call.function == function_name)
+    }
+
+    /// Check if this expression is a call to any of the specified functions
+    pub fn is_call_to_any(&self, function_names: &[&str]) -> bool {
+        matches!(self, Expression::Call(call) if function_names.contains(&call.function.as_str()))
+    }
 }

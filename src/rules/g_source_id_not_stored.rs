@@ -44,25 +44,25 @@ impl Rule for GSourceIdNotStored {
             stmt.walk(&mut |s| {
                 // Only check expression statements (not assignments/declarations)
                 if let Statement::Expression(expr_stmt) = s
-                    && let Expression::Call(call) = &expr_stmt.expr
-                        && SOURCE_FUNCTIONS.contains(&call.function.as_str()) {
-                            // Check if user_data (last argument) is not NULL
-                            if !call.arguments.is_empty() {
-                                let last_arg = call.get_arg(call.arguments.len() - 1);
-                                if let Some(last_expr) = last_arg
-                                    && !last_expr.is_null() {
-                                        violations.push(self.violation(
-                                            path,
-                                            call.location.line,
-                                            call.location.column,
-                                            format!(
-                                                "{}() called without storing the returned source ID. If the object is destroyed before the callback fires, this will cause a use-after-free. Store the ID and use g_clear_handle_id() in dispose.",
-                                                call.function
-                                            ),
-                                        ));
-                                    }
-                            }
+                    && expr_stmt.expr.is_call_to_any(SOURCE_FUNCTIONS)
+                    && let Expression::Call(call) = &expr_stmt.expr {
+                        // Check if user_data (last argument) is not NULL
+                        if !call.arguments.is_empty()
+                            && call.has_arg_matching(call.arguments.len() - 1, |expr| {
+                                !expr.is_null()
+                            })
+                        {
+                            violations.push(self.violation(
+                                path,
+                                call.location.line,
+                                call.location.column,
+                                format!(
+                                    "{}() called without storing the returned source ID. If the object is destroyed before the callback fires, this will cause a use-after-free. Store the ID and use g_clear_handle_id() in dispose.",
+                                    call.function
+                                ),
+                            ));
                         }
+                    }
             });
         }
     }

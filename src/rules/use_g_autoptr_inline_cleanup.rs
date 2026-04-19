@@ -192,12 +192,7 @@ impl UseGAutoptrInlineCleanup {
     fn is_var_manually_freed(&self, statements: &[Statement], var_name: &str) -> bool {
         for stmt in statements {
             for call in stmt.iter_calls() {
-                if call.is_cleanup_call()
-                    && let Some(arg_expr) = call.get_arg(0)
-                    // Check for var or &var
-                    && let Some(arg_var) = arg_expr.extract_variable_name()
-                    && arg_var == var_name
-                {
+                if call.is_cleanup_call() && call.arg_contains_variable(0, var_name) {
                     return true;
                 }
             }
@@ -208,11 +203,7 @@ impl UseGAutoptrInlineCleanup {
     fn is_var_freed_with_g_free(&self, statements: &[Statement], var_name: &str) -> bool {
         for stmt in statements {
             for call in stmt.iter_calls() {
-                if call.function == "g_free"
-                    && let Some(arg_expr) = call.get_arg(0)
-                    && let Some(arg_var) = arg_expr.extract_variable_name()
-                    && arg_var == var_name
-                {
+                if call.function == "g_free" && call.arg_contains_variable(0, var_name) {
                     return true;
                 }
             }

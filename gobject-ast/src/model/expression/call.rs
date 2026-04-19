@@ -23,6 +23,25 @@ impl CallExpression {
         self.arguments.get(index)?.to_source_string(source)
     }
 
+    /// Check if the argument at the given index exists and matches the
+    /// predicate
+    pub fn has_arg_matching<F>(&self, index: usize, predicate: F) -> bool
+    where
+        F: FnOnce(&Expression) -> bool,
+    {
+        self.get_arg(index).is_some_and(predicate)
+    }
+
+    /// Check if the argument at the given index contains a reference to the
+    /// specified variable Handles both plain identifiers and field access
+    /// (e.g., obj->field)
+    pub fn arg_contains_variable(&self, index: usize, var_name: &str) -> bool {
+        self.has_arg_matching(index, |expr| {
+            expr.extract_variable_name()
+                .is_some_and(|name| name == var_name)
+        })
+    }
+
     /// Check if this looks like a macro call (ALL_CAPS or ends with _)
     /// Examples: I_, N_, G_STRINGIFY, GINT_TO_POINTER
     pub fn is_likely_macro(&self) -> bool {

@@ -61,9 +61,10 @@ impl UseGStrcmp0 {
         violations: &mut Vec<Violation>,
     ) {
         // Check for strcmp usage (suggest g_strcmp0 for NULL-safety)
-        if let Expression::Call(call) = expr
-            && call.function == "strcmp"
-        {
+        if expr.is_call_to("strcmp") {
+            let Expression::Call(call) = expr else {
+                return;
+            };
             // Create fix to replace "strcmp" with "g_strcmp0"
             let fix = Fix::new(
                 call.location.start_byte,
