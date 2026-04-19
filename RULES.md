@@ -24,6 +24,7 @@ Rules that detect code that is most likely wrong or useless.
 
 - **missing_implementation** - Report functions declared in headers but not implemented
 - **unnecessary_null_check** - Detect unnecessary NULL checks before g_free/g_clear_* functions
+- **g_source_id_not_stored** - Warn when g_timeout_add/g_idle_add are called without storing the returned source ID (prevents use-after-free)
 
 ## Style
 

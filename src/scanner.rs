@@ -120,6 +120,7 @@ macro_rules! for_each_rule {
             (g_param_spec_static_name_canonical, GParamSpecStaticNameCanonical, 2, 0),
             (g_error_init, GErrorInit, 2, 0),
             (g_error_leak, GErrorLeak, 2, 0),
+            (g_source_id_not_stored, GSourceIdNotStored, 2, 0),
             (property_enum_convention, PropertyEnumConvention, 2, 0),
             (g_object_virtual_methods_chain_up, GObjectVirtualMethodsChainUp, 2, 0),
             (g_task_source_tag, GTaskSourceTag, 2, 36),
