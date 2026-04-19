@@ -3,6 +3,14 @@ use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct PropertyEnumConvention;
 
+/// Context about which class owns a property enum
+#[derive(Debug)]
+struct ClassContext {
+    class_type: String,
+    get_property_func: Option<String>,
+    set_property_func: Option<String>,
+}
+
 impl Rule for PropertyEnumConvention {
     fn name(&self) -> &'static str {
         "property_enum_convention"
@@ -89,12 +97,6 @@ impl Rule for PropertyEnumConvention {
                     idx < enum_info.values.len() - 1 && Self::is_sentinel_name(&v.name)
                 });
 
-                if has_n_props_in_middle {
-                    // Skip: N_PROPS in the middle means override properties follow
-                    // This is a legitimate pattern for interface implementations
-                    continue;
-                }
-
                 if !has_prop_0 && !has_n_props {
                     // Already using new pattern, skip
                     continue;
@@ -104,6 +106,16 @@ impl Rule for PropertyEnumConvention {
                 let prop_0_name = enum_info.values.first().unwrap().name.clone();
                 let n_props_name = enum_info.values.last().unwrap().name.clone();
 
+                // Skip if this is the interface override pattern:
+                // Either N_PROPS in the middle OR N_PROPS used in switch case expressions
+                // Auto-fixing is impossible for these cases
+                if has_n_props_in_middle
+                    || (has_n_props && self.n_props_used_in_switch_cases(file, &n_props_name))
+                {
+                    // Skip: interface override pattern detected
+                    continue;
+                }
+
                 // Get the name of the last REAL property (the one before N_PROPS)
                 let last_real_prop_name = if has_n_props && enum_info.values.len() >= 2 {
                     enum_info.values[enum_info.values.len() - 2].name.clone()
@@ -111,7 +123,54 @@ impl Rule for PropertyEnumConvention {
                     enum_info.values.last().unwrap().name.clone()
                 };
 
+                // Find which class_init and property functions correspond to this enum
+                // by tracing N_PROPS through GParamSpec array to class_init
+                let class_context = self.find_class_context_for_enum(file, &n_props_name);
+
+                // IMPORTANT: Only transform if we can verify this is a GObject property enum
+                // by finding its class_init. This prevents transforming unrelated enums that
+                // happen to have N_PROPS (e.g., in header files, or non-GObject enums).
+                if class_context.is_none() {
+                    continue;
+                }
+
+                // Determine the enum name to use (either from typedef or derived from
+                // class_init)
+                let derived_enum_name = if enum_info.name.is_none() {
+                    class_context
+                        .as_ref()
+                        .and_then(|ctx| self.derive_enum_name_from_class_type(&ctx.class_type))
+                } else {
+                    None
+                };
+
                 let mut fixes = Vec::new();
+
+                // Fix 0: Convert anonymous enum to typedef if needed
+                if let Some(ref enum_name) = derived_enum_name {
+                    // Add "typedef " before "enum"
+                    fixes.push(Fix::new(
+                        enum_info.location.start_byte,
+                        enum_info.location.start_byte,
+                        "typedef ".to_string(),
+                    ));
+
+                    // Add enum name and semicolon after the closing brace
+                    // Find the semicolon after the enum body
+                    let mut semicolon_pos = enum_info.body_end_byte;
+                    while semicolon_pos < file.source.len() && file.source[semicolon_pos] != b';' {
+                        semicolon_pos += 1;
+                    }
+
+                    if semicolon_pos < file.source.len() {
+                        // Replace the semicolon with " EnumName;"
+                        fixes.push(Fix::new(
+                            semicolon_pos,
+                            semicolon_pos + 1,
+                            format!(" {};", enum_name),
+                        ));
+                    }
+                }
 
                 // Fix 1: Remove PROP_0 line entirely
                 if has_prop_0 && enum_info.values.len() >= 2 {
@@ -145,8 +204,7 @@ impl Rule for PropertyEnumConvention {
                     }
                 }
 
-                // Fix 3: Remove N_PROPS line entirely, and remove trailing comma from previous
-                // property
+                // Fix 3: Remove N_PROPS line entirely
                 if has_n_props && enum_info.values.len() >= 2 {
                     let n_props = enum_info.values.last().unwrap();
 
@@ -154,7 +212,6 @@ impl Rule for PropertyEnumConvention {
                     let (line_start, line_end) =
                         self.find_line_bounds(&file.source, n_props.start_byte, n_props.end_byte);
                     fixes.push(Fix::new(line_start, line_end, String::new()));
-
                 }
 
                 // Fix 4 & 5: Find GParamSpec arrays and fix both their declarations and
@@ -189,6 +246,35 @@ impl Rule for PropertyEnumConvention {
                                     ));
                                 }
                             }
+                        }
+                    }
+                }
+
+                // Fix 6: Add enum cast to switch statements in get_property/set_property
+                // This enables -Wswitch-enum to catch missing properties
+                // Only apply to the specific property functions for this enum (from
+                // class_context)
+                if let Some(ref ctx) = class_context {
+                    let enum_name = if let Some(ref name) = enum_info.name {
+                        name.clone()
+                    } else if let Some(ref derived) = derived_enum_name {
+                        derived.clone()
+                    } else {
+                        // Try to derive from class type if we have it
+                        self.derive_enum_name_from_class_type(&ctx.class_type)
+                            .unwrap_or_else(|| "UnknownProps".to_string())
+                    };
+
+                    if !enum_name.is_empty() {
+                        if let Some(ref func_name) = ctx.get_property_func {
+                            self.add_switch_cast_for_function(
+                                file, func_name, &enum_name, &mut fixes,
+                            );
+                        }
+                        if let Some(ref func_name) = ctx.set_property_func {
+                            self.add_switch_cast_for_function(
+                                file, func_name, &enum_name, &mut fixes,
+                            );
                         }
                     }
                 }
@@ -346,5 +432,279 @@ impl PropertyEnumConvention {
             }
             _ => {}
         }
+    }
+
+    /// Add switch cast fix for a specific function
+    fn add_switch_cast_for_function(
+        &self,
+        file: &gobject_ast::FileModel,
+        func_name: &str,
+        enum_name: &str,
+        fixes: &mut Vec<Fix>,
+    ) {
+        // Find the function definition
+        for func in file.iter_function_definitions() {
+            if func.name != func_name {
+                continue;
+            }
+
+            // Find switch statements using walk to handle nested cases
+            for stmt in &func.body_statements {
+                stmt.walk(&mut |s| {
+                    if let gobject_ast::Statement::Switch(switch_stmt) = s {
+                        self.add_switch_cast_if_needed(switch_stmt, enum_name, fixes);
+                    }
+                });
+            }
+        }
+    }
+
+    /// Helper to add switch cast if not already present
+    fn add_switch_cast_if_needed(
+        &self,
+        switch_stmt: &gobject_ast::SwitchStatement,
+        enum_name: &str,
+        fixes: &mut Vec<Fix>,
+    ) {
+        use gobject_ast::Expression;
+
+        // Check if the condition is already a cast to this enum type
+        let already_cast = match &switch_stmt.condition {
+            Expression::Cast(cast) => {
+                // Check if cast type contains the enum name
+                cast.type_name.contains(enum_name)
+            }
+            _ => false,
+        };
+
+        if !already_cast {
+            // Add fix to wrap the condition in a cast
+            let cast_expr = format!("({}) ", enum_name);
+            fixes.push(Fix::new(
+                switch_stmt.condition_location.start_byte,
+                switch_stmt.condition_location.start_byte,
+                cast_expr,
+            ));
+        }
+    }
+
+    /// Derive enum name from class type parameter
+    /// e.g., "ClutterActorClass *" -> Some("ClutterActorProps")
+    /// e.g., "MyObjectClass *" -> Some("MyObjectProps")
+    fn derive_enum_name_from_class_type(&self, class_type: &str) -> Option<String> {
+        // Remove pointer and whitespace
+        let class_type = class_type.trim().trim_end_matches('*').trim();
+
+        // Check if it ends with "Class"
+        class_type
+            .strip_suffix("Class")
+            .map(|base_name| format!("{}Props", base_name))
+    }
+
+    /// Find which class owns this property enum by tracing N_PROPS through
+    /// GParamSpec arrays Returns the class type and associated get/set
+    /// property function names
+    fn find_class_context_for_enum(
+        &self,
+        file: &gobject_ast::FileModel,
+        n_props_name: &str,
+    ) -> Option<ClassContext> {
+        // Step 1: Find GParamSpec array declarations that use this N_PROPS
+        let array_names = self.find_param_spec_arrays_for_sentinel(file, n_props_name);
+
+        if array_names.is_empty() {
+            return None;
+        }
+
+        // Step 2: Find class_init function that uses this array
+        for func in file.iter_function_definitions() {
+            if !func.name.ends_with("_class_init") {
+                continue;
+            }
+
+            // Check if this class_init assigns to or calls
+            // g_object_class_install_properties with any of our arrays
+            let uses_array = func.body_statements.iter().any(|stmt| {
+                let mut found = false;
+                stmt.walk(&mut |s| {
+                    if let gobject_ast::Statement::Expression(expr_stmt) = s {
+                        match &expr_stmt.expr {
+                            // Check assignments: my_props[PROP_NAME] = ...
+                            gobject_ast::Expression::Assignment(assignment) => {
+                                for array_name in &array_names {
+                                    if assignment.lhs.contains(array_name) {
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            // Check calls: g_object_class_install_properties(..., my_props)
+                            gobject_ast::Expression::Call(call)
+                                if call.function.contains("install_properties") =>
+                            {
+                                for arg in &call.arguments {
+                                    let gobject_ast::Argument::Expression(expr) = arg;
+                                    if let gobject_ast::Expression::Identifier(ident) =
+                                        expr.as_ref()
+                                    {
+                                        for array_name in &array_names {
+                                            if &ident.name == array_name {
+                                                found = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+                found
+            });
+
+            if !uses_array {
+                continue;
+            }
+
+            // Extract class type from parameter
+            let class_type = func
+                .parameters
+                .first()
+                .map(|p| p.type_name.clone())
+                .unwrap_or_default();
+
+            // Extract get_property and set_property function names from assignments
+            let mut get_property_func = None;
+            let mut set_property_func = None;
+
+            for stmt in &func.body_statements {
+                stmt.walk(&mut |s| {
+                    if let gobject_ast::Statement::Expression(expr_stmt) = s
+                        && let gobject_ast::Expression::Assignment(assignment) = &expr_stmt.expr
+                    {
+                        // Check for object_class->get_property = func_name
+                        if assignment.lhs.contains("get_property") {
+                            if let gobject_ast::Expression::Identifier(ident) =
+                                assignment.rhs.as_ref()
+                            {
+                                get_property_func = Some(ident.name.to_string());
+                            }
+                        } else if assignment.lhs.contains("set_property")
+                            && let gobject_ast::Expression::Identifier(ident) =
+                                assignment.rhs.as_ref()
+                        {
+                            set_property_func = Some(ident.name.to_string());
+                        }
+                    }
+                });
+            }
+
+            return Some(ClassContext {
+                class_type,
+                get_property_func,
+                set_property_func,
+            });
+        }
+
+        None
+    }
+
+    /// Find GParamSpec array names that use the given sentinel
+    fn find_param_spec_arrays_for_sentinel<'a>(
+        &self,
+        file: &'a gobject_ast::FileModel,
+        sentinel_name: &str,
+    ) -> Vec<&'a str> {
+        let mut array_names = Vec::new();
+
+        for item in &file.top_level_items {
+            self.find_param_spec_arrays_in_item_for_sentinel(
+                item,
+                sentinel_name,
+                &file.source,
+                &mut array_names,
+            );
+        }
+
+        array_names
+    }
+
+    fn find_param_spec_arrays_in_item_for_sentinel<'a>(
+        &self,
+        item: &'a gobject_ast::top_level::TopLevelItem,
+        sentinel_name: &str,
+        source: &[u8],
+        array_names: &mut Vec<&'a str>,
+    ) {
+        use gobject_ast::{
+            Statement,
+            top_level::{PreprocessorDirective, TopLevelItem},
+        };
+
+        match item {
+            TopLevelItem::Declaration(Statement::Declaration(decl))
+                if ((decl.type_name.contains("GParamSpec") && decl.type_name.contains('*'))
+                    || decl.type_name == "GParamSpec*") =>
+            {
+                let decl_text =
+                    std::str::from_utf8(&source[decl.location.start_byte..decl.location.end_byte])
+                        .unwrap_or("");
+
+                let pattern = format!("[{}]", sentinel_name);
+                if decl_text.contains(&pattern) {
+                    array_names.push(&decl.name);
+                }
+            }
+            TopLevelItem::Preprocessor(PreprocessorDirective::Conditional { body, .. }) => {
+                for nested_item in body {
+                    self.find_param_spec_arrays_in_item_for_sentinel(
+                        nested_item,
+                        sentinel_name,
+                        source,
+                        array_names,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Check if N_PROPS is used in switch case expressions in
+    /// get_property/set_property e.g., case N_PROPS +
+    /// META_DBUS_SESSION_PROP_FOO:
+    fn n_props_used_in_switch_cases(
+        &self,
+        file: &gobject_ast::FileModel,
+        n_props_name: &str,
+    ) -> bool {
+        for func in file.iter_function_definitions() {
+            if !func.name.ends_with("_get_property") && !func.name.ends_with("_set_property") {
+                continue;
+            }
+
+            // Check all switch statements in the function
+            for stmt in &func.body_statements {
+                let mut found = false;
+                stmt.walk(&mut |s| {
+                    if let gobject_ast::Statement::Switch(switch_stmt) = s {
+                        // Check the source text directly for N_PROPS usage
+                        let switch_source = std::str::from_utf8(
+                            &file.source
+                                [switch_stmt.location.start_byte..switch_stmt.location.end_byte],
+                        )
+                        .unwrap_or("");
+
+                        if switch_source.contains(n_props_name) {
+                            found = true;
+                        }
+                    }
+                });
+                if found {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }

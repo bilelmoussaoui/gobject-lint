@@ -212,7 +212,8 @@ impl Parser {
                 }
             }
             "ERROR" => {
-                // ERROR nodes from misparsed macros - look for G_DECLARE/G_DEFINE identifiers
+                // ERROR nodes from misparsed macros (e.g., g_autoptr) - recurse to find content
+                // Look for G_DECLARE/G_DEFINE identifiers and other parseable content
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
                     if child.kind() == "identifier" {
@@ -231,6 +232,10 @@ impl Parser {
                                 ));
                             }
                         }
+                    } else {
+                        // Recursively visit children to extract function definitions and other
+                        // items
+                        self.visit_node(child, source, file_model);
                     }
                 }
             }

@@ -18,6 +18,6 @@ pub use project::{FileModel, Project};
 pub use source_location::SourceLocation;
 pub use statement::{
     CompoundStatement, ExpressionStmt, GotoStatement, IfStatement, LabeledStatement,
-    ReturnStatement, Statement, VariableDecl,
+    ReturnStatement, Statement, SwitchStatement, VariableDecl,
 };
 pub use types::*;

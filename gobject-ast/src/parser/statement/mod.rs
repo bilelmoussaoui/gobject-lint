@@ -4,6 +4,7 @@ mod goto_stmt;
 mod if_stmt;
 mod labeled_stmt;
 mod return_stmt;
+mod switch_stmt;
 mod variable_decl;
 
 use tree_sitter::Node;
@@ -98,8 +99,11 @@ impl Parser {
             "compound_statement" => self
                 .parse_compound_statement(node, source)
                 .map(Statement::Compound),
-            "for_statement" | "while_statement" | "do_statement" | "switch_statement" => {
-                // Loop and switch statements - we don't need to parse them in detail for
+            "switch_statement" => self
+                .parse_switch_statement(node, source)
+                .map(Statement::Switch),
+            "for_statement" | "while_statement" | "do_statement" => {
+                // Loop statements - we don't need to parse them in detail for
                 // linting rules, but we need to recognize them as statements so
                 // they aren't silently skipped
                 self.parse_loop_statement(node, source)

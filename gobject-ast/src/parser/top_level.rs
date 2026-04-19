@@ -310,19 +310,12 @@ impl Parser {
             if let Some(body) = node.child_by_field_name("body") {
                 let values = self.extract_enum_values(body, source);
 
-                // Try to get the name from the name field, or generate one for anonymous enums
-                let name = if let Some(name_node) = node.child_by_field_name("name") {
+                // Try to get the name from the name field
+                let name = node.child_by_field_name("name").and_then(|name_node| {
                     std::str::from_utf8(&source[name_node.byte_range()])
-                        .ok()?
-                        .to_owned()
-                } else {
-                    // Anonymous enum - generate a name based on the first value
-                    if let Some(first_value) = values.first() {
-                        format!("anonymous_{}", first_value.name)
-                    } else {
-                        "anonymous_enum".to_owned()
-                    }
-                };
+                        .ok()
+                        .map(|s| s.to_owned())
+                });
 
                 return Some(EnumInfo {
                     name,
@@ -344,7 +337,7 @@ impl Parser {
                         if let Some(body) = type_node.child_by_field_name("body") {
                             let values = self.extract_enum_values(body, source);
                             return Some(EnumInfo {
-                                name: name.to_owned(),
+                                name: Some(name.to_owned()),
                                 location: self.node_location(node),
                                 values,
                                 body_start_byte: body.start_byte(),
@@ -366,20 +359,12 @@ impl Parser {
                     if let Some(body) = child.child_by_field_name("body") {
                         let values = self.extract_enum_values(body, source);
 
-                        // Try to get the name from the name field, or generate one for anonymous
-                        // enums
-                        let name = if let Some(name_node) = child.child_by_field_name("name") {
+                        // Try to get the name from the name field
+                        let name = child.child_by_field_name("name").and_then(|name_node| {
                             std::str::from_utf8(&source[name_node.byte_range()])
-                                .ok()?
-                                .to_owned()
-                        } else {
-                            // Anonymous enum - generate a name based on the first value
-                            if let Some(first_value) = values.first() {
-                                format!("anonymous_{}", first_value.name)
-                            } else {
-                                "anonymous_enum".to_owned()
-                            }
-                        };
+                                .ok()
+                                .map(|s| s.to_owned())
+                        });
 
                         return Some(EnumInfo {
                             name,

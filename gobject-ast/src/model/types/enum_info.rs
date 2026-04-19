@@ -4,7 +4,7 @@ use crate::SourceLocation;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnumInfo {
-    pub name: String,
+    pub name: Option<String>,
     pub location: SourceLocation,
     pub values: Vec<EnumValue>,
     /// Byte range of the enum body for inserting fixes

@@ -1,0 +1,74 @@
+#include <glib-object.h>
+
+enum
+{
+  PROP_0,
+  PROP_ACTOR,
+  PROP_NAME,
+  PROP_ENABLED,
+  N_PROPS
+};
+
+static GParamSpec *clutter_actor_props[N_PROPS] = { NULL, };
+
+static void
+clutter_actor_class_init (ClutterActorClass *klass)
+{
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+
+  object_class->get_property = clutter_actor_get_property;
+  object_class->set_property = clutter_actor_set_property;
+
+  g_object_class_install_properties (object_class, N_PROPS, clutter_actor_props);
+}
+
+static void
+clutter_actor_get_property (GObject    *object,
+                            guint       prop_id,
+                            GValue     *value,
+                            GParamSpec *pspec)
+{
+  ClutterActor *self = CLUTTER_ACTOR (object);
+
+  switch (prop_id)
+    {
+    case PROP_ACTOR:
+      g_value_set_object (value, self->actor);
+      break;
+    case PROP_NAME:
+      g_value_set_string (value, self->name);
+      break;
+    case PROP_ENABLED:
+      g_value_set_boolean (value, self->enabled);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+    }
+}
+
+static void
+clutter_actor_set_property (GObject      *object,
+                            guint         prop_id,
+                            const GValue *value,
+                            GParamSpec   *pspec)
+{
+  ClutterActor *self = CLUTTER_ACTOR (object);
+
+  switch (prop_id)
+    {
+    case PROP_ACTOR:
+      self->actor = g_value_dup_object (value);
+      break;
+    case PROP_NAME:
+      g_free (self->name);
+      self->name = g_value_dup_string (value);
+      break;
+    case PROP_ENABLED:
+      self->enabled = g_value_get_boolean (value);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+    }
+}

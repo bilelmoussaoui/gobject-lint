@@ -4,6 +4,7 @@ mod goto_stmt;
 mod if_stmt;
 mod labeled_stmt;
 mod return_stmt;
+mod switch_stmt;
 mod variable_decl;
 
 pub use compound_stmt::CompoundStatement;
@@ -13,6 +14,7 @@ pub use if_stmt::IfStatement;
 pub use labeled_stmt::LabeledStatement;
 pub use return_stmt::ReturnStatement;
 use serde::{Deserialize, Serialize};
+pub use switch_stmt::SwitchStatement;
 pub use variable_decl::VariableDecl;
 
 use crate::model::{CallExpression, Expression, SourceLocation};
@@ -26,6 +28,7 @@ pub enum Statement {
     Goto(GotoStatement),
     Labeled(LabeledStatement),
     Compound(CompoundStatement),
+    Switch(SwitchStatement),
 }
 
 impl Statement {
@@ -54,6 +57,11 @@ impl Statement {
             Statement::Labeled(labeled) => {
                 labeled.statement.walk(f);
             }
+            Statement::Switch(switch) => {
+                for stmt in &switch.body {
+                    stmt.walk(f);
+                }
+            }
             _ => {}
         }
     }
@@ -77,6 +85,7 @@ impl Statement {
             Statement::Goto(g) => &g.location,
             Statement::Labeled(l) => &l.location,
             Statement::Compound(c) => &c.location,
+            Statement::Switch(s) => &s.location,
         }
     }
 
@@ -112,6 +121,12 @@ impl Statement {
             }
             Statement::Labeled(labeled) => {
                 labeled.statement.walk_expressions(f);
+            }
+            Statement::Switch(switch) => {
+                f(&switch.condition);
+                for stmt in &switch.body {
+                    stmt.walk_expressions(f);
+                }
             }
             _ => {}
         }
