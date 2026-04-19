@@ -46,8 +46,16 @@ impl Parser {
                     .ok()?
                     .to_owned();
 
+                // Extract value if present (for #define FOO 123)
+                let value = node.child_by_field_name("value").and_then(|value_node| {
+                    std::str::from_utf8(&source[value_node.byte_range()])
+                        .ok()
+                        .map(|s| s.to_owned())
+                });
+
                 Some(TopLevelItem::Preprocessor(PreprocessorDirective::Define {
                     name,
+                    value,
                     location: self.node_location(node),
                 }))
             }
@@ -55,7 +63,24 @@ impl Parser {
                 let directive_node = node.child_by_field_name("directive")?;
                 let directive = std::str::from_utf8(&source[directive_node.byte_range()])
                     .ok()?
+                    .trim_start_matches('#')
                     .to_owned();
+
+                // Parse #pragma directives specially
+                if directive == "pragma" {
+                    let arguments = node.child_by_field_name("argument").and_then(|arg_node| {
+                        std::str::from_utf8(&source[arg_node.byte_range()])
+                            .ok()
+                            .map(|s| s.trim().to_owned())
+                    });
+
+                    let kind = self.parse_pragma_kind(&arguments);
+
+                    return Some(TopLevelItem::Preprocessor(PreprocessorDirective::Pragma {
+                        kind,
+                        location: self.node_location(node),
+                    }));
+                }
 
                 Some(TopLevelItem::Preprocessor(PreprocessorDirective::Call {
                     directive,
@@ -64,11 +89,26 @@ impl Parser {
             }
             "preproc_if" | "preproc_ifdef" | "preproc_ifndef" => {
                 // Parse conditional preprocessor directives with their body
-                let kind = match node.kind() {
-                    "preproc_ifdef" => super::top_level::ConditionalKind::Ifdef,
-                    "preproc_ifndef" => super::top_level::ConditionalKind::Ifndef,
-                    "preproc_if" => super::top_level::ConditionalKind::If,
-                    _ => unreachable!(),
+                // Note: tree-sitter-c uses "preproc_ifdef" for both #ifdef and #ifndef
+                // We need to check the actual text to distinguish them
+                let kind = if node.kind() == "preproc_ifdef" {
+                    // Check if it's actually #ifndef by looking at the directive text
+                    let first_child = node.child(0);
+                    let is_ifndef = first_child
+                        .and_then(|child| std::str::from_utf8(&source[child.byte_range()]).ok())
+                        .is_some_and(|text| text == "#ifndef");
+
+                    if is_ifndef {
+                        super::top_level::ConditionalKind::Ifndef
+                    } else {
+                        super::top_level::ConditionalKind::Ifdef
+                    }
+                } else {
+                    match node.kind() {
+                        "preproc_ifndef" => super::top_level::ConditionalKind::Ifndef,
+                        "preproc_if" => super::top_level::ConditionalKind::If,
+                        _ => unreachable!(),
+                    }
                 };
 
                 // Get condition (for #ifdef/#ifndef, it's the name; for #if, it's the whole
@@ -509,6 +549,51 @@ impl Parser {
         }
 
         None
+    }
+
+    /// Parse pragma arguments into a PragmaKind
+    fn parse_pragma_kind(&self, arguments: &Option<String>) -> PragmaKind {
+        let Some(args) = arguments else {
+            return PragmaKind::Other {
+                name: String::new(),
+                arguments: None,
+            };
+        };
+
+        // Check for "once"
+        if args == "once" {
+            return PragmaKind::Once;
+        }
+
+        // Check for diagnostic directives
+        // Formats: "GCC diagnostic push", "clang diagnostic push", etc.
+        if args.contains("diagnostic") {
+            if args.contains("push") {
+                return PragmaKind::DiagnosticPush;
+            }
+            if args.contains("pop") {
+                return PragmaKind::DiagnosticPop;
+            }
+            // Check for "diagnostic ignored"
+            if args.contains("ignored") {
+                // Extract warning name from quotes
+                // Format: "GCC diagnostic ignored \"-Wwarning-name\""
+                if let Some(start) = args.find('"') {
+                    if let Some(end) = args[start + 1..].find('"') {
+                        let warning = args[start + 1..start + 1 + end].to_string();
+                        return PragmaKind::DiagnosticIgnored { warning };
+                    }
+                }
+            }
+        }
+
+        // Everything else goes to Other
+        // Split into name and arguments
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        let name = parts[0].to_string();
+        let arguments = parts.get(1).map(|s| s.to_string());
+
+        PragmaKind::Other { name, arguments }
     }
 
     /// Parse the body of a conditional preprocessor block (#ifdef, #if, etc.)

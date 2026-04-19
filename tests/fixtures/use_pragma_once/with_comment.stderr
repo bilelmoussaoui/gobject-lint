@@ -1,0 +1,2 @@
+traditional_guard.h:1:1: use_pragma_once: Use #pragma once instead of include guard 'MY_HEADER_H'
+with_comment.h:3:1: use_pragma_once: Use #pragma once instead of include guard '__PYGOBJECT_BOXED_H__'

@@ -18,6 +18,23 @@ pub enum TopLevelItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PragmaKind {
+    /// #pragma once
+    Once,
+    /// #pragma GCC/clang diagnostic push
+    DiagnosticPush,
+    /// #pragma GCC/clang diagnostic pop
+    DiagnosticPop,
+    /// #pragma GCC/clang diagnostic ignored "-Wwarning-name"
+    DiagnosticIgnored { warning: String },
+    /// Other pragma directive
+    Other {
+        name: String,
+        arguments: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PreprocessorDirective {
     Include {
         path: String,
@@ -26,10 +43,15 @@ pub enum PreprocessorDirective {
     },
     Define {
         name: String,
+        value: Option<String>,
         location: SourceLocation,
     },
     Call {
         directive: String,
+        location: SourceLocation,
+    },
+    Pragma {
+        kind: PragmaKind,
         location: SourceLocation,
     },
     /// GObject type declaration/definition (G_DECLARE_*, G_DEFINE_*)

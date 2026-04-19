@@ -38,6 +38,7 @@ Rules that suggest more idiomatic ways to write code.
     level = "error"
     config_header = "myproject-config.h"
     ```
+- **use_pragma_once** - Suggest #pragma once instead of traditional include guards (#ifndef/#define/#endif)
 - **use_g_settings_typed** - Prefer g_settings_get/set_string/boolean/etc over g_settings_get/set_value with g_variant
 - **use_g_variant_new_typed** - Prefer g_variant_new_string/boolean/etc over g_variant_new with format strings
 - **use_g_strcmp0** - Suggest g_strcmp0 instead of strcmp if arguments can be NULL (g_strcmp0 is NULL-safe)

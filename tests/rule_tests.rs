@@ -6,14 +6,14 @@ use goblint::{ast_context::AstContext, config::Config, fixer, rules::Rule};
 /// Build an AstContext from a single C file copied into a temp directory.
 /// Also copies any sibling .h files from the fixture directory.
 /// Returns the TempDir (must stay alive for the duration of the test).
-fn build_context_for_file(c_file: &Path) -> (AstContext, tempfile::TempDir) {
+fn build_context_for_file(test_file: &Path) -> (AstContext, tempfile::TempDir) {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let dest = temp_dir.path().join(c_file.file_name().unwrap());
-    fs::copy(c_file, &dest).expect("failed to copy fixture");
+    let dest = temp_dir.path().join(test_file.file_name().unwrap());
+    fs::copy(test_file, &dest).expect("failed to copy fixture");
 
     // Also copy any .h files from the same directory (for rules that inspect
     // headers)
-    if let Some(fixture_dir) = c_file.parent()
+    if let Some(fixture_dir) = test_file.parent()
         && let Ok(entries) = fs::read_dir(fixture_dir)
     {
         for entry in entries.filter_map(|e| e.ok()) {
@@ -63,13 +63,23 @@ fn run_fixture_tests(rule_name: &str, rule: &dyn Rule) {
         return;
     }
 
-    let mut c_files: Vec<_> = fs::read_dir(&fixtures_dir)
+    let mut test_files: Vec<_> = fs::read_dir(&fixtures_dir)
         .unwrap()
         .filter_map(|e| e.ok())
         .filter(|e| {
             let path = e.path();
-            // Only plain *.c files — exclude *.fixed.c (those are expected outputs)
-            path.extension().is_some_and(|ext| ext == "c")
+            // Test *.c and standalone *.h files (not already tested as part of .c)
+            // Exclude *.fixed.{c,h} (those are expected outputs)
+            let ext = path.extension();
+            let is_c = ext.is_some_and(|e| e == "c");
+            let is_standalone_h = ext.is_some_and(|e| e == "h") && {
+                // Only include .h if there's no corresponding .c file
+                let stem = path.file_stem().unwrap();
+                let c_file = path.with_file_name(stem).with_extension("c");
+                !c_file.exists()
+            };
+
+            (is_c || is_standalone_h)
                 && !path
                     .file_stem()
                     .and_then(|s| s.to_str())
@@ -77,18 +87,19 @@ fn run_fixture_tests(rule_name: &str, rule: &dyn Rule) {
         })
         .map(|e| e.path())
         .collect();
-    c_files.sort();
+    test_files.sort();
 
     let bless = std::env::var("BLESS").is_ok();
     let mut failures: Vec<String> = Vec::new();
 
-    for c_file in c_files {
-        let stem = c_file.file_stem().unwrap().to_str().unwrap().to_owned();
+    for test_file in test_files {
+        let stem = test_file.file_stem().unwrap().to_str().unwrap().to_owned();
+        let ext = test_file.extension().unwrap().to_str().unwrap();
         let stderr_file = fixtures_dir.join(format!("{stem}.stderr"));
-        let fixed_file = fixtures_dir.join(format!("{stem}.fixed.c"));
+        let fixed_file = fixtures_dir.join(format!("{stem}.fixed.{ext}"));
 
         // --- violation check ---
-        let (ctx, temp_dir) = build_context_for_file(&c_file);
+        let (ctx, temp_dir) = build_context_for_file(&test_file);
         let config = Config::default();
 
         let mut violations = Vec::new();
@@ -141,7 +152,7 @@ fn run_fixture_tests(rule_name: &str, rule: &dyn Rule) {
         if fixed_file.exists() {
             fixer::apply_fixes(&violations).expect("failed to apply fixes");
 
-            let temp_c = temp_dir.path().join(c_file.file_name().unwrap());
+            let temp_c = temp_dir.path().join(test_file.file_name().unwrap());
             let actual_fixed = fs::read_to_string(&temp_c).expect("failed to read fixed file");
             let expected_fixed = fs::read_to_string(&fixed_file).expect("failed to read .fixed.c");
 
@@ -349,3 +360,4 @@ rule_test!(
 );
 rule_test!(use_g_variant_new_typed, goblint::rules::UseGVariantNewTyped);
 rule_test!(untranslated_string, goblint::rules::UntranslatedString);
+rule_test!(use_pragma_once, goblint::rules::UsePragmaOnce);

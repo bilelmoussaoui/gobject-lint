@@ -104,6 +104,7 @@ pub mod use_g_string_free_and_steal;
 pub mod use_g_strlcpy;
 pub mod use_g_value_set_static_string;
 pub mod use_g_variant_new_typed;
+pub mod use_pragma_once;
 
 pub use deprecated_add_private::DeprecatedAddPrivate;
 pub use g_declare_semicolon::GDeclareSemicolon;
@@ -150,6 +151,7 @@ pub use use_g_string_free_and_steal::UseGStringFreeAndSteal;
 pub use use_g_strlcpy::UseGStrlcpy;
 pub use use_g_value_set_static_string::UseGValueSetStaticString;
 pub use use_g_variant_new_typed::UseGVariantNewTyped;
+pub use use_pragma_once::UsePragmaOnce;
 
 #[derive(Debug, Clone)]
 pub struct Violation {
