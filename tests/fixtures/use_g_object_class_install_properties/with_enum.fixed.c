@@ -1,0 +1,22 @@
+#include <glib-object.h>
+
+typedef enum {
+  PROP_0,
+  PROP_NAME,
+  PROP_VALUE,
+  N_PROPS
+} FooProperty;
+
+static GParamSpec *props[N_PROPS] = { NULL, };
+
+static void
+foo_class_init (FooClass *klass)
+{
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+
+  props[PROP_NAME] = g_param_spec_string ("name", NULL, NULL, NULL, G_PARAM_READWRITE);
+
+  props[PROP_VALUE] = g_param_spec_int ("value", NULL, NULL, 0, 100, 0, G_PARAM_READWRITE);
+
+  g_object_class_install_properties (object_class, N_PROPS, props);
+}
