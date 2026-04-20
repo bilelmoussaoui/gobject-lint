@@ -1,0 +1,1 @@
+field_access.c:10:3: use_g_set_object: Use g_set_object (&priv->item, new_item); instead of g_clear_object and g_object_ref

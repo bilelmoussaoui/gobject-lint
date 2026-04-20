@@ -337,6 +337,7 @@ rule_test!(
     use_g_object_notify_by_pspec,
     goblint::rules::UseGObjectNotifyByPspec
 );
+rule_test!(use_g_set_object, goblint::rules::UseGSetObject);
 rule_test!(use_g_set_str, goblint::rules::UseGSetStr);
 rule_test!(use_g_settings_typed, goblint::rules::UseGSettingsTyped);
 rule_test!(use_g_source_constants, goblint::rules::UseGSourceConstants);

@@ -1,0 +1,1 @@
+unref.c:6:3: use_g_set_object: Use g_set_object (&*obj, new_obj); instead of g_clear_object and g_object_ref
