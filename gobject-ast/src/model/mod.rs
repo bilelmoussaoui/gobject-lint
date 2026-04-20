@@ -1,3 +1,4 @@
+pub mod comment;
 pub mod expression;
 pub mod operators;
 mod project;
@@ -7,6 +8,7 @@ pub mod top_level;
 mod type_info;
 pub mod types;
 
+pub use comment::{Comment, CommentKind, CommentPosition};
 pub use expression::{
     Argument, Assignment, BinaryExpression, BooleanExpression, CallExpression, CastExpression,
     CharLiteralExpression, CommentExpression, ConditionalExpression, Expression,

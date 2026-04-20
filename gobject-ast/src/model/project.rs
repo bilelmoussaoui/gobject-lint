@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::top_level::TopLevelItem;
+use super::{Comment, top_level::TopLevelItem};
 
 /// The complete project model - a map of files to their content
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -57,6 +57,8 @@ pub struct FileModel {
     pub path: PathBuf,
     /// Top-level items in source order (preserves structure like #ifdef blocks)
     pub top_level_items: Vec<TopLevelItem>,
+    /// All comments in the file, in source order
+    pub comments: Vec<Comment>,
     /// The raw source code of this file - available for detailed pattern
     /// matching
     #[serde(skip)]
@@ -68,6 +70,7 @@ impl FileModel {
         Self {
             path,
             top_level_items: Vec::new(),
+            comments: Vec::new(),
             source: Vec::new(),
         }
     }
