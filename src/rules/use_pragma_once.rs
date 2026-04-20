@@ -45,7 +45,7 @@ impl Rule for UsePragmaOnce {
             }
 
             // Look for traditional include guard pattern
-            if let Some((conditional_loc, define_loc, guard_name)) =
+            if let Some((ifndef_loc, define_loc, endif_loc, guard_name)) =
                 self.find_include_guard(&file.top_level_items)
             {
                 // Build fixes:
@@ -53,28 +53,29 @@ impl Rule for UsePragmaOnce {
                 // 2. Remove the #endif line (including any comment) at the end
                 let mut fixes = Vec::new();
 
-                // Fix 1: Replace from start of #ifndef to end of #define line
-                // Note: find_line_bounds includes preceding blank lines, but we want
-                // to preserve them, so find the actual start of the #ifndef line
-                let ifndef_actual_start =
-                    self.find_actual_line_start(&file.source, conditional_loc.start_byte);
-                let (_, define_line_end) = define_loc.find_line_bounds(&file.source);
+                // Fix 1: Delete #ifndef line (with following blank line if any)
+                let (ifndef_start, ifndef_end) =
+                    ifndef_loc.find_line_bounds_with_following_blank(&file.source);
 
+                // Fix 2: Replace #define line with #pragma once
+                let (define_start, define_end) = define_loc.find_line_bounds(&file.source);
+
+                // Combine: delete #ifndef, replace #define with #pragma once
+                fixes.push(Fix::new(ifndef_start, ifndef_end, String::new()));
                 fixes.push(Fix::new(
-                    ifndef_actual_start,
-                    define_line_end,
+                    define_start,
+                    define_end,
                     "#pragma once\n".to_string(),
                 ));
 
-                // Fix 2: Remove the entire #endif line including any trailing comment
-                let (endif_line_start, endif_line_end) =
-                    self.find_endif_line_with_comment(&file.source, conditional_loc.end_byte);
-                fixes.push(Fix::new(endif_line_start, endif_line_end, String::new()));
+                // Fix 3: Remove the entire #endif line (with preceding blank line if any)
+                let (endif_start, endif_end) = endif_loc.find_line_bounds(&file.source);
+                fixes.push(Fix::new(endif_start, endif_end, String::new()));
 
                 violations.push(self.violation_with_fixes(
                     path,
-                    conditional_loc.line,
-                    conditional_loc.column,
+                    ifndef_loc.line,
+                    ifndef_loc.column,
                     format!("Use #pragma once instead of include guard '{}'", guard_name),
                     fixes,
                 ));
@@ -85,11 +86,12 @@ impl Rule for UsePragmaOnce {
 
 impl UsePragmaOnce {
     /// Find traditional include guard pattern
-    /// Returns (conditional_location, define_location, guard_name)
+    /// Returns (ifndef_location, define_location, endif_location, guard_name)
     fn find_include_guard(
         &self,
         items: &[gobject_ast::top_level::TopLevelItem],
     ) -> Option<(
+        gobject_ast::SourceLocation,
         gobject_ast::SourceLocation,
         gobject_ast::SourceLocation,
         String,
@@ -106,7 +108,25 @@ impl UsePragmaOnce {
             }) => {
                 // Found #ifndef - check it contains matching #define as first item
                 let define_loc = self.find_matching_define(body, name)?;
-                Some((*location, define_loc, name.clone()))
+
+                // Create location for #endif - it's at the end of the conditional
+                // The location.end_byte points to after the #endif directive
+                let endif_loc = gobject_ast::SourceLocation::new(
+                    0, // Line/column don't matter for our use case
+                    0,
+                    location.end_byte,
+                    location.end_byte,
+                );
+
+                // Create location for #ifndef - it's at the start
+                let ifndef_loc = gobject_ast::SourceLocation::new(
+                    location.line,
+                    location.column,
+                    location.start_byte,
+                    location.start_byte,
+                );
+
+                Some((ifndef_loc, define_loc, endif_loc, name.clone()))
             }
             _ => None, // First item is not #ifndef
         })
@@ -143,51 +163,5 @@ impl UsePragmaOnce {
             }
             _ => None,
         })
-    }
-
-    /// Find the actual start of a line without including preceding blank lines
-    /// This is different from find_line_bounds which includes them
-    fn find_actual_line_start(&self, source: &[u8], pos: usize) -> usize {
-        let mut line_start = pos;
-        // Go back to the start of this line (after the previous \n)
-        while line_start > 0 && source[line_start - 1] != b'\n' {
-            line_start -= 1;
-        }
-        line_start
-    }
-
-    /// Find the #endif line including any trailing comment and preceding blank
-    /// lines Returns (line_start, line_end) byte positions
-    fn find_endif_line_with_comment(
-        &self,
-        source: &[u8],
-        conditional_end: usize,
-    ) -> (usize, usize) {
-        // The conditional_end is right after the #endif word
-        // Search backwards to find the start of the #endif line
-        let mut line_start = conditional_end;
-        while line_start > 0 && source[line_start - 1] != b'\n' {
-            line_start -= 1;
-        }
-
-        // Also remove any blank lines before #endif
-        while line_start >= 2 && source[line_start - 1] == b'\n' && source[line_start - 2] == b'\n'
-        {
-            line_start -= 1;
-        }
-
-        // Search forward from conditional_end to find the actual end of line
-        // (to include any trailing comment like /* GUARD_NAME */)
-        let mut line_end = conditional_end;
-        while line_end < source.len() && source[line_end] != b'\n' {
-            line_end += 1;
-        }
-
-        // Include the newline
-        if line_end < source.len() && source[line_end] == b'\n' {
-            line_end += 1;
-        }
-
-        (line_start, line_end)
     }
 }
