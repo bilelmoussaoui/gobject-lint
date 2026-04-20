@@ -101,6 +101,7 @@ pub enum PropertyType {
     Pointer,
     GType { is_a_type: String },
     Variant,
+    Override,
     Unknown { spec_function: String },
 }
 
@@ -291,6 +292,31 @@ impl Property {
             nick,
             blurb,
             flags,
+        })
+    }
+
+    /// Extract property from g_object_class_override_property call
+    /// Call signature: g_object_class_override_property(oclass, property_id, name)
+    pub fn from_override_property_call(call: &CallExpression) -> Option<Self> {
+        let func_name = call.function_name_str()?;
+        if func_name != "g_object_class_override_property" {
+            return None;
+        }
+
+        let args = &call.arguments;
+        if args.len() < 3 {
+            return None;
+        }
+
+        // Third argument is the property name
+        let name = extract_string_arg(&args[2])?;
+
+        Some(Property {
+            name,
+            property_type: PropertyType::Override,
+            nick: None,
+            blurb: None,
+            flags: Vec::new(),
         })
     }
 }
