@@ -45,13 +45,13 @@ impl GTaskSourceTag {
         violations: &mut Vec<Violation>,
     ) {
         // Find all g_task_new calls and their variables
-        let task_vars = self.find_gtask_new_vars(statements, source);
+        let task_vars = self.find_gtask_new_vars(statements);
 
         // For each task variable, check if there's a set_source_tag call
-        for (var_name, stmt_location) in task_vars {
+        for (var_name, name_location, stmt_location) in task_vars {
             if !self.has_set_source_tag_call(statements, &var_name, source) {
                 // Extract indentation from the statement
-                let indentation = self.extract_indentation(stmt_location.start_byte, source);
+                let indentation = stmt_location.extract_indentation(source);
 
                 // Create fix: insert g_task_set_source_tag after the statement
                 let fix = Fix::new(
@@ -65,8 +65,8 @@ impl GTaskSourceTag {
 
                 violations.push(self.violation_with_fix(
                     file_path,
-                    stmt_location.line,
-                    stmt_location.column,
+                    name_location.line,
+                    name_location.column,
                     format!("GTask '{}' created without g_task_set_source_tag", var_name),
                     fix,
                 ));
@@ -77,8 +77,11 @@ impl GTaskSourceTag {
     fn find_gtask_new_vars(
         &self,
         statements: &[Statement],
-        source: &[u8],
-    ) -> Vec<(String, gobject_ast::SourceLocation)> {
+    ) -> Vec<(
+        String,
+        gobject_ast::SourceLocation,
+        gobject_ast::SourceLocation,
+    )> {
         let mut results = Vec::new();
 
         for stmt in statements {
@@ -89,15 +92,7 @@ impl GTaskSourceTag {
                         if let Some(Expression::Call(call)) = &decl.initializer
                             && call.is_function("g_task_new")
                         {
-                            // Find the column where the variable name appears
-                            let var_name_column = self.find_var_name_column(
-                                decl.location.start_byte,
-                                &decl.name,
-                                source,
-                            );
-                            let mut location = decl.location;
-                            location.column = var_name_column;
-                            results.push((decl.name.clone(), location));
+                            results.push((decl.name.clone(), decl.name_location, decl.location));
                         }
                     }
                     // Check assignments: task = g_task_new(...)
@@ -106,10 +101,10 @@ impl GTaskSourceTag {
                             && let Expression::Call(call) = assignment.rhs.as_ref()
                             && call.is_function("g_task_new")
                         {
-                            // For assignments, use the assignment location
+                            // For assignments, use the assignment location for both
                             let var_name = assignment.lhs_as_text();
                             if !var_name.is_empty() {
-                                results.push((var_name, assignment.location));
+                                results.push((var_name, assignment.location, assignment.location));
                             }
                         }
                     }
@@ -119,24 +114,6 @@ impl GTaskSourceTag {
         }
 
         results
-    }
-
-    fn find_var_name_column(&self, start_byte: usize, var_name: &str, source: &[u8]) -> usize {
-        let search_text = std::str::from_utf8(&source[start_byte..]).unwrap_or("");
-        if let Some(pos) = search_text.find(var_name) {
-            let var_byte = start_byte + pos;
-
-            // Find the start of the line
-            let mut line_start = var_byte;
-            while line_start > 0 && source[line_start - 1] != b'\n' {
-                line_start -= 1;
-            }
-
-            // Return byte offset from line start (0-indexed becomes 1-indexed)
-            var_byte - line_start
-        } else {
-            1
-        }
     }
 
     fn has_set_source_tag_call(
@@ -165,27 +142,5 @@ impl GTaskSourceTag {
             }
         }
         false
-    }
-
-    fn extract_indentation(&self, start_byte: usize, source: &[u8]) -> String {
-        // Find the start of the line
-        let mut line_start_byte = start_byte;
-
-        // Walk backwards to find the start of the line
-        while line_start_byte > 0 && source[line_start_byte - 1] != b'\n' {
-            line_start_byte -= 1;
-        }
-
-        // Count spaces/tabs from line start to first non-whitespace
-        let mut indent = String::new();
-        for &byte in &source[line_start_byte..start_byte] {
-            if byte == b' ' || byte == b'\t' {
-                indent.push(byte as char);
-            } else {
-                break;
-            }
-        }
-
-        indent
     }
 }

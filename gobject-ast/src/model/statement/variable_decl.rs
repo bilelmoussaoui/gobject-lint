@@ -6,6 +6,8 @@ use crate::model::{Expression, SourceLocation, TypeInfo};
 pub struct VariableDecl {
     pub type_info: TypeInfo,
     pub name: String,
+    /// Location of the variable name in the source
+    pub name_location: SourceLocation,
     pub initializer: Option<Expression>,
     /// Array size expression for array declarators (e.g., [N_PROPS])
     pub array_size: Option<Expression>,

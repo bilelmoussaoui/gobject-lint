@@ -24,16 +24,22 @@ impl SourceLocation {
         std::str::from_utf8(&source[self.start_byte..self.end_byte]).ok()
     }
 
+    /// Find the byte position of the start of the line containing this location
+    fn find_line_start(&self, source: &[u8]) -> usize {
+        let mut line_start = self.start_byte;
+        while line_start > 0 && source[line_start - 1] != b'\n' {
+            line_start -= 1;
+        }
+        line_start
+    }
+
     /// Find the start and end byte positions of the line containing this
     /// location Returns (line_start_byte, line_end_byte) including the
     /// newline If the previous line is empty (only whitespace), includes it
     /// too
     pub fn find_line_bounds(&self, source: &[u8]) -> (usize, usize) {
         // Find the start of the line
-        let mut line_start = self.start_byte;
-        while line_start > 0 && source[line_start - 1] != b'\n' {
-            line_start -= 1;
-        }
+        let mut line_start = self.find_line_start(source);
 
         // Check if the previous line is empty (only whitespace)
         if line_start > 0 {
@@ -67,10 +73,7 @@ impl SourceLocation {
     /// Returns (line_start_byte, line_end_byte) including newlines
     pub fn find_line_bounds_with_following_blank(&self, source: &[u8]) -> (usize, usize) {
         // Find the start of the line
-        let mut line_start = self.start_byte;
-        while line_start > 0 && source[line_start - 1] != b'\n' {
-            line_start -= 1;
-        }
+        let line_start = self.find_line_start(source);
 
         // Find the end of the line (including newline)
         let mut line_end = self.end_byte;
@@ -101,5 +104,25 @@ impl SourceLocation {
         }
 
         (line_start, line_end)
+    }
+
+    /// Extract indentation (leading whitespace) from the line containing this
+    /// location Returns the spaces/tabs before the location on the same
+    /// line
+    pub fn extract_indentation(&self, source: &[u8]) -> String {
+        let line_start = self.find_line_start(source);
+
+        // Extract indentation (spaces/tabs before first non-whitespace or before
+        // location)
+        let mut indent = String::new();
+        for &byte in &source[line_start..self.start_byte] {
+            if byte == b' ' || byte == b'\t' {
+                indent.push(byte as char);
+            } else {
+                break;
+            }
+        }
+
+        indent
     }
 }

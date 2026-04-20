@@ -52,8 +52,9 @@ impl Parser {
 
         let declarator = declarator?;
 
-        // Get variable name from declarator
+        // Get variable name and its location from declarator
         let mut var_name = None;
+        let mut var_name_location = SourceLocation::default();
         let mut initializer = None;
 
         // Count pointer depth from declarator
@@ -73,11 +74,12 @@ impl Parser {
             }
 
             if !has_equals {
-                // Before "=", extract variable name
+                // Before "=", extract variable name and location
                 match child.kind() {
                     "pointer_declarator" | "identifier" | "array_declarator" => {
-                        if let Some(id) = self.find_identifier(child, source) {
+                        if let Some((id, loc)) = self.find_identifier_with_location(child, source) {
                             var_name = Some(id);
+                            var_name_location = loc;
                         }
                     }
                     _ => {}
@@ -112,21 +114,29 @@ impl Parser {
         Some(VariableDecl {
             type_info,
             name: var_name?.to_owned(),
+            name_location: var_name_location,
             initializer,
             array_size,
             location: self.node_location(node),
         })
     }
 
-    pub(super) fn find_identifier<'a>(&self, node: Node, source: &'a [u8]) -> Option<&'a str> {
+    /// Find identifier and its location in the source
+    pub(super) fn find_identifier_with_location<'a>(
+        &self,
+        node: Node,
+        source: &'a [u8],
+    ) -> Option<(&'a str, SourceLocation)> {
         if node.kind() == "identifier" {
-            return std::str::from_utf8(&source[node.byte_range()]).ok();
+            let text = std::str::from_utf8(&source[node.byte_range()]).ok()?;
+            let location = self.node_location(node);
+            return Some((text, location));
         }
 
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if let Some(id) = self.find_identifier(child, source) {
-                return Some(id);
+            if let Some(result) = self.find_identifier_with_location(child, source) {
+                return Some(result);
             }
         }
 
