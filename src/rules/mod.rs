@@ -57,6 +57,28 @@ impl Fix {
             replacement: replacement.into(),
         }
     }
+
+    /// Create a fix that deletes an entire line (including indentation and
+    /// newline)
+    pub fn delete_line(location: &gobject_ast::SourceLocation, source: &[u8]) -> Self {
+        // Find the start of the line (rewind to previous newline or start of file)
+        let mut line_start = location.start_byte;
+        while line_start > 0 && source[line_start - 1] != b'\n' {
+            line_start -= 1;
+        }
+
+        // Find the end of the line (advance to next newline, including it)
+        let mut line_end = location.end_byte;
+        while line_end < source.len() && source[line_end] != b'\n' {
+            line_end += 1;
+        }
+        // Include the newline itself
+        if line_end < source.len() && source[line_end] == b'\n' {
+            line_end += 1;
+        }
+
+        Self::new(line_start, line_end, String::new())
+    }
 }
 
 pub mod deprecated_add_private;

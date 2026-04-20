@@ -24,14 +24,15 @@ impl Rule for UseGClearSignalHandler {
 
     fn check_func_impl(
         &self,
-        _ast_context: &AstContext,
+        ast_context: &AstContext,
         _config: &Config,
         func: &gobject_ast::top_level::FunctionDefItem,
         path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
+        let file = ast_context.project.files.get(path).unwrap();
         // Walk through function body looking for patterns
-        self.check_statements(&func.body_statements, path, violations);
+        self.check_statements(&func.body_statements, file, path, violations);
     }
 }
 
@@ -39,6 +40,7 @@ impl UseGClearSignalHandler {
     fn check_statements(
         &self,
         statements: &[Statement],
+        file: &gobject_ast::FileModel,
         file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
@@ -55,6 +57,7 @@ impl UseGClearSignalHandler {
                 && self.try_disconnect_then_zero(
                     &statements[i],
                     &statements[i + 1],
+                    file,
                     file_path,
                     violations,
                 )
@@ -73,17 +76,18 @@ impl UseGClearSignalHandler {
             // Recursively check nested statements
             match &statements[i] {
                 Statement::If(if_stmt) => {
-                    self.check_statements(&if_stmt.then_body, file_path, violations);
+                    self.check_statements(&if_stmt.then_body, file, file_path, violations);
                     if let Some(else_body) = &if_stmt.else_body {
-                        self.check_statements(else_body, file_path, violations);
+                        self.check_statements(else_body, file, file_path, violations);
                     }
                 }
                 Statement::Compound(compound) => {
-                    self.check_statements(&compound.statements, file_path, violations);
+                    self.check_statements(&compound.statements, file, file_path, violations);
                 }
                 Statement::Labeled(labeled) => {
                     self.check_statements(
                         std::slice::from_ref(&labeled.statement),
+                        file,
                         file_path,
                         violations,
                     );
@@ -158,6 +162,7 @@ impl UseGClearSignalHandler {
         &self,
         s1: &Statement,
         s2: &Statement,
+        file: &gobject_ast::FileModel,
         file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) -> bool {
@@ -169,19 +174,26 @@ impl UseGClearSignalHandler {
             return false;
         }
 
-        // Get byte range for both statements
-        let start_byte = s1.location().start_byte;
-        let end_byte = s2.location().end_byte;
-
         let replacement = format!("g_clear_signal_handler (&{handler_id}, {obj});");
-        let fix = Fix::new(start_byte, end_byte, replacement.clone());
 
-        violations.push(self.violation_with_fix(
+        // Use two separate fixes to preserve comments between statements
+        let fixes = vec![
+            // Replace the first statement with the new call
+            Fix::new(
+                s1.location().start_byte,
+                s1.location().end_byte,
+                replacement.clone(),
+            ),
+            // Delete the entire second line
+            Fix::delete_line(s2.location(), &file.source),
+        ];
+
+        violations.push(self.violation_with_fixes(
             file_path,
             s1.location().line,
             s1.location().column,
             format!("Use {replacement} instead of g_signal_handler_disconnect and zeroing the ID"),
-            fix,
+            fixes,
         ));
         true
     }

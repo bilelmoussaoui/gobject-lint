@@ -32,8 +32,8 @@ impl Rule for UseGBytesUnrefToData {
         path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
-        let source = &ast_context.project.files.get(path).unwrap().source;
-        self.check_statement_list(path, &func.body_statements, source, violations);
+        let file = ast_context.project.files.get(path).unwrap();
+        self.check_statement_list(path, &func.body_statements, file, violations);
     }
 }
 
@@ -44,25 +44,25 @@ impl UseGBytesUnrefToData {
         &self,
         file_path: &std::path::Path,
         statements: &[Statement],
-        source: &[u8],
+        file: &gobject_ast::FileModel,
         violations: &mut Vec<Violation>,
     ) {
         // Check consecutive statements at this level
         Statement::for_each_pair(statements, |stmt1, stmt2| {
-            self.try_bytes_pattern(file_path, stmt1, stmt2, source, violations);
+            self.try_bytes_pattern(file_path, stmt1, stmt2, file, violations);
         });
 
         // Recurse into nested statement blocks
         for stmt in statements {
             match stmt {
                 Statement::If(if_stmt) => {
-                    self.check_statement_list(file_path, &if_stmt.then_body, source, violations);
+                    self.check_statement_list(file_path, &if_stmt.then_body, file, violations);
                     if let Some(else_body) = &if_stmt.else_body {
-                        self.check_statement_list(file_path, else_body, source, violations);
+                        self.check_statement_list(file_path, else_body, file, violations);
                     }
                 }
                 Statement::Compound(compound) => {
-                    self.check_statement_list(file_path, &compound.statements, source, violations);
+                    self.check_statement_list(file_path, &compound.statements, file, violations);
                 }
                 _ => {}
             }
@@ -75,18 +75,21 @@ impl UseGBytesUnrefToData {
         file_path: &std::path::Path,
         stmt1: &Statement,
         stmt2: &Statement,
-        source: &[u8],
+        file: &gobject_ast::FileModel,
         violations: &mut Vec<Violation>,
     ) {
         // First statement: dest = g_bytes_get_data(bytes, &size)
         let Some((dest, bytes_var, size_arg, assignment, _call1)) =
-            self.extract_bytes_get_data(stmt1, source)
+            self.extract_bytes_get_data(stmt1, &file.source)
         else {
             return;
         };
 
         // Second statement: g_bytes_unref(bytes)
-        let Some(stmt2_end_byte) = self.extract_bytes_unref(stmt2, &bytes_var, source) else {
+        if self
+            .extract_bytes_unref(stmt2, &bytes_var, &file.source)
+            .is_none()
+        {
             return;
         };
 
@@ -96,9 +99,19 @@ impl UseGBytesUnrefToData {
             dest, bytes_var, size_arg
         );
 
-        let fix = Fix::new(assignment.location.start_byte, stmt2_end_byte, replacement);
+        // Use two separate fixes to preserve comments between statements
+        let fixes = vec![
+            // Replace the first statement with the new call
+            Fix::new(
+                stmt1.location().start_byte,
+                stmt1.location().end_byte,
+                replacement.clone(),
+            ),
+            // Delete the entire second line
+            Fix::delete_line(stmt2.location(), &file.source),
+        ];
 
-        violations.push(self.violation_with_fix(
+        violations.push(self.violation_with_fixes(
             file_path,
             assignment.location.line,
             assignment.location.column,
@@ -106,7 +119,7 @@ impl UseGBytesUnrefToData {
                 "Use g_bytes_unref_to_data({}, {}) instead of g_bytes_get_data() followed by g_bytes_unref()",
                 bytes_var, size_arg
             ),
-            fix,
+            fixes,
         ));
     }
 

@@ -31,12 +31,7 @@ impl Rule for UseGSetObject {
         violations: &mut Vec<Violation>,
     ) {
         let file = ast_context.project.files.get(path).unwrap();
-
-        let start = func.location.start_byte;
-        let end = func.location.end_byte;
-        // Get the source for this function to preserve comments
-        let func_source = &file.source[start..end];
-        self.check_statements(&func.body_statements, path, func_source, start, violations);
+        self.check_statements(&func.body_statements, file, path, violations);
     }
 }
 
@@ -44,9 +39,8 @@ impl UseGSetObject {
     fn check_statements(
         &self,
         statements: &[Statement],
+        file: &gobject_ast::FileModel,
         file_path: &std::path::Path,
-        source: &[u8],
-        base_byte: usize,
         violations: &mut Vec<Violation>,
     ) {
         let mut i = 0;
@@ -56,9 +50,8 @@ impl UseGSetObject {
                 && self.try_clear_then_ref(
                     &statements[i],
                     &statements[i + 1],
+                    file,
                     file_path,
-                    source,
-                    base_byte,
                     violations,
                 )
             {
@@ -69,32 +62,19 @@ impl UseGSetObject {
             // Recurse into nested statements
             match &statements[i] {
                 Statement::If(if_stmt) => {
-                    self.check_statements(
-                        &if_stmt.then_body,
-                        file_path,
-                        source,
-                        base_byte,
-                        violations,
-                    );
+                    self.check_statements(&if_stmt.then_body, file, file_path, violations);
                     if let Some(else_body) = &if_stmt.else_body {
-                        self.check_statements(else_body, file_path, source, base_byte, violations);
+                        self.check_statements(else_body, file, file_path, violations);
                     }
                 }
                 Statement::Compound(compound) => {
-                    self.check_statements(
-                        &compound.statements,
-                        file_path,
-                        source,
-                        base_byte,
-                        violations,
-                    );
+                    self.check_statements(&compound.statements, file, file_path, violations);
                 }
                 Statement::Labeled(labeled) => {
                     self.check_statements(
                         std::slice::from_ref(&labeled.statement),
+                        file,
                         file_path,
-                        source,
-                        base_byte,
                         violations,
                     );
                 }
@@ -111,9 +91,8 @@ impl UseGSetObject {
         &self,
         s1: &Statement,
         s2: &Statement,
+        file: &gobject_ast::FileModel,
         file_path: &std::path::Path,
-        source: &[u8],
-        base_byte: usize,
         violations: &mut Vec<Violation>,
     ) -> bool {
         // First statement: g_clear_object(&var) or g_object_unref(var)
@@ -146,27 +125,24 @@ impl UseGSetObject {
             format!("g_set_object (&{var_name}, {new_val});")
         };
 
-        // Extract bytes between the two statements to preserve comments
-        let s1_end = s1.location().end_byte - base_byte;
-        let s2_start = s2.location().start_byte - base_byte;
-        let intermediate = std::str::from_utf8(&source[s1_end..s2_start]).unwrap_or("");
-        let comment_prefix = intermediate.trim_start_matches(['\n', '\r', ' ', '\t']);
+        // Use two separate fixes to preserve comments between statements
+        let fixes = vec![
+            // Delete the entire first line (g_clear_object/g_object_unref)
+            Fix::delete_line(s1.location(), &file.source),
+            // Replace the second statement with g_set_object
+            Fix::new(
+                s2.location().start_byte,
+                s2.location().end_byte,
+                set_object_call.clone(),
+            ),
+        ];
 
-        // If there are comments, include them in the fix
-        let fix_text = if comment_prefix.is_empty() {
-            set_object_call.clone()
-        } else {
-            format!("{}{}", comment_prefix, set_object_call)
-        };
-
-        let fix = Fix::new(s1.location().start_byte, s2.location().end_byte, fix_text);
-
-        violations.push(self.violation_with_fix(
+        violations.push(self.violation_with_fixes(
             file_path,
             s1.location().line,
             s1.location().column,
             format!("Use {set_object_call} instead of g_clear_object and g_object_ref"),
-            fix,
+            fixes,
         ));
         true
     }

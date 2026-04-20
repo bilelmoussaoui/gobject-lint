@@ -30,8 +30,8 @@ impl Rule for UseGClearList {
         path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
-        let source = &ast_context.project.files.get(path).unwrap().source;
-        self.check_statements(path, &func.body_statements, source, violations);
+        let file = ast_context.project.files.get(path).unwrap();
+        self.check_statements(path, &func.body_statements, file, violations);
     }
 }
 
@@ -40,23 +40,23 @@ impl UseGClearList {
         &self,
         file_path: &std::path::Path,
         statements: &[Statement],
-        source: &[u8],
+        file: &gobject_ast::FileModel,
         violations: &mut Vec<Violation>,
     ) {
         // Check consecutive statements for the pattern
-        self.check_free_then_null(file_path, statements, source, violations);
+        self.check_free_then_null(file_path, statements, file, violations);
 
         // Recurse into nested statements
         for stmt in statements {
             match stmt {
                 Statement::If(if_stmt) => {
-                    self.check_statements(file_path, &if_stmt.then_body, source, violations);
+                    self.check_statements(file_path, &if_stmt.then_body, file, violations);
                     if let Some(else_body) = &if_stmt.else_body {
-                        self.check_statements(file_path, else_body, source, violations);
+                        self.check_statements(file_path, else_body, file, violations);
                     }
                 }
                 Statement::Compound(compound) => {
-                    self.check_statements(file_path, &compound.statements, source, violations);
+                    self.check_statements(file_path, &compound.statements, file, violations);
                 }
                 _ => {}
             }
@@ -67,12 +67,12 @@ impl UseGClearList {
         &self,
         file_path: &std::path::Path,
         statements: &[Statement],
-        source: &[u8],
+        file: &gobject_ast::FileModel,
         violations: &mut Vec<Violation>,
     ) {
         Statement::for_each_pair(statements, |first, second| {
             // Check if first is g_list_free or g_slist_free
-            if let Some((var_name, list_type)) = self.extract_list_free(first, source) {
+            if let Some((var_name, list_type)) = self.extract_list_free(first, &file.source) {
                 // Check if second is assignment to NULL
                 if second.is_null_assignment_to(&var_name) {
                     let clear_fn = if list_type == "GList" {
@@ -83,13 +83,19 @@ impl UseGClearList {
 
                     let replacement = format!("{} (&{}, NULL);", clear_fn, var_name);
 
-                    let fix = Fix::new(
-                        first.location().start_byte,
-                        second.location().end_byte,
-                        replacement.clone(),
-                    );
+                    // Use two separate fixes to preserve comments between statements
+                    let fixes = vec![
+                        // Delete the entire first line
+                        Fix::delete_line(first.location(), &file.source),
+                        // Replace the second statement
+                        Fix::new(
+                            second.location().start_byte,
+                            second.location().end_byte,
+                            replacement.clone(),
+                        ),
+                    ];
 
-                    violations.push(self.violation_with_fix(
+                    violations.push(self.violation_with_fixes(
                         file_path,
                         first.location().line,
                         first.location().column,
@@ -98,7 +104,7 @@ impl UseGClearList {
                             replacement,
                             list_type.to_lowercase()
                         ),
-                        fix,
+                        fixes,
                     ));
                 }
             }

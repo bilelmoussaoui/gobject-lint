@@ -24,14 +24,15 @@ impl Rule for UseGClearWeakPointer {
 
     fn check_func_impl(
         &self,
-        _ast_context: &AstContext,
+        ast_context: &AstContext,
         _config: &Config,
         func: &gobject_ast::top_level::FunctionDefItem,
         path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
+        let file = ast_context.project.files.get(path).unwrap();
         // Walk through function body looking for the pattern
-        self.check_statements(&func.body_statements, path, violations);
+        self.check_statements(&func.body_statements, file, path, violations);
     }
 }
 
@@ -39,29 +40,31 @@ impl UseGClearWeakPointer {
     fn check_statements(
         &self,
         statements: &[Statement],
+        file: &gobject_ast::FileModel,
         file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
         // Check consecutive pairs for the pattern
         Statement::for_each_pair(statements, |s1, s2| {
-            self.try_remove_weak_then_null(s1, s2, file_path, violations);
+            self.try_remove_weak_then_null(s1, s2, file, file_path, violations);
         });
 
         // Recursively check nested statements
         for stmt in statements {
             match stmt {
                 Statement::If(if_stmt) => {
-                    self.check_statements(&if_stmt.then_body, file_path, violations);
+                    self.check_statements(&if_stmt.then_body, file, file_path, violations);
                     if let Some(else_body) = &if_stmt.else_body {
-                        self.check_statements(else_body, file_path, violations);
+                        self.check_statements(else_body, file, file_path, violations);
                     }
                 }
                 Statement::Compound(compound) => {
-                    self.check_statements(&compound.statements, file_path, violations);
+                    self.check_statements(&compound.statements, file, file_path, violations);
                 }
                 Statement::Labeled(labeled) => {
                     self.check_statements(
                         std::slice::from_ref(&labeled.statement),
+                        file,
                         file_path,
                         violations,
                     );
@@ -76,6 +79,7 @@ impl UseGClearWeakPointer {
         &self,
         s1: &Statement,
         s2: &Statement,
+        file: &gobject_ast::FileModel,
         file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
@@ -109,13 +113,20 @@ impl UseGClearWeakPointer {
 
         // Create a fix
         let replacement = format!("g_clear_weak_pointer (&{});", var_name);
-        let fix = Fix::new(
-            s1.location().start_byte,
-            s2.location().end_byte,
-            replacement.clone(),
-        );
 
-        violations.push(self.violation_with_fix(
+        // Use two separate fixes to preserve comments between statements
+        let fixes = vec![
+            // Delete the entire first line
+            Fix::delete_line(s1.location(), &file.source),
+            // Replace the second statement
+            Fix::new(
+                s2.location().start_byte,
+                s2.location().end_byte,
+                replacement.clone(),
+            ),
+        ];
+
+        violations.push(self.violation_with_fixes(
             file_path,
             s1.location().line,
             s1.location().column,
@@ -123,7 +134,7 @@ impl UseGClearWeakPointer {
                 "Use {} instead of g_object_remove_weak_pointer + NULL assignment",
                 replacement.trim_end_matches(';')
             ),
-            fix,
+            fixes,
         ));
     }
 

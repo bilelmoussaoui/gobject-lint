@@ -30,8 +30,8 @@ impl Rule for UseGStealPointer {
         path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) {
-        let source = &ast_context.project.files.get(path).unwrap().source;
-        self.check_function(func, path, source, violations);
+        let file = ast_context.project.files.get(path).unwrap();
+        self.check_function(func, path, file, violations);
     }
 }
 
@@ -40,24 +40,24 @@ impl UseGStealPointer {
         &self,
         func: &gobject_ast::top_level::FunctionDefItem,
         file_path: &std::path::Path,
-        source: &[u8],
+        file: &gobject_ast::FileModel,
         violations: &mut Vec<Violation>,
     ) {
-        self.check_statements(&func.body_statements, file_path, source, violations);
+        self.check_statements(&func.body_statements, file_path, file, violations);
     }
 
     fn check_statements(
         &self,
         statements: &[Statement],
         file_path: &std::path::Path,
-        source: &[u8],
+        file: &gobject_ast::FileModel,
         violations: &mut Vec<Violation>,
     ) {
         let mut i = 0;
         while i < statements.len() {
             // Try if/else steal: if (expr) { dest = expr; expr = NULL; } else { dest =
             // NULL; }
-            if self.try_if_else_steal(&statements[i], file_path, source, violations) {
+            if self.try_if_else_steal(&statements[i], file_path, &file.source, violations) {
                 i += 1;
                 continue;
             }
@@ -65,7 +65,7 @@ impl UseGStealPointer {
             // Try if-without-else steal:
             //   if (c) { dest = ptr; ptr = NULL; }
             //   if (c) { T *tmp = ptr; ptr = NULL; return tmp; }
-            if self.try_if_no_else_steal(&statements[i], file_path, source, violations) {
+            if self.try_if_no_else_steal(&statements[i], file_path, &file.source, violations) {
                 i += 1;
                 continue;
             }
@@ -76,6 +76,7 @@ impl UseGStealPointer {
                     &statements[i],
                     &statements[i + 1],
                     &statements[i + 2],
+                    file,
                     file_path,
                     violations,
                 )
@@ -86,7 +87,13 @@ impl UseGStealPointer {
 
             // Try 2-statement pattern: other = ptr; ptr = NULL;
             if i + 1 < statements.len()
-                && self.try_assign_null(&statements[i], &statements[i + 1], file_path, violations)
+                && self.try_assign_null(
+                    &statements[i],
+                    &statements[i + 1],
+                    file,
+                    file_path,
+                    violations,
+                )
             {
                 i += 2;
                 continue;
@@ -95,19 +102,19 @@ impl UseGStealPointer {
             // Recurse into nested blocks
             match &statements[i] {
                 Statement::Compound(compound) => {
-                    self.check_statements(&compound.statements, file_path, source, violations);
+                    self.check_statements(&compound.statements, file_path, file, violations);
                 }
                 Statement::If(if_stmt) => {
-                    self.check_statements(&if_stmt.then_body, file_path, source, violations);
+                    self.check_statements(&if_stmt.then_body, file_path, file, violations);
                     if let Some(else_body) = &if_stmt.else_body {
-                        self.check_statements(else_body, file_path, source, violations);
+                        self.check_statements(else_body, file_path, file, violations);
                     }
                 }
                 Statement::Labeled(labeled) => {
                     self.check_statements(
                         std::slice::from_ref(&labeled.statement),
                         file_path,
-                        source,
+                        file,
                         violations,
                     );
                 }
@@ -124,6 +131,7 @@ impl UseGStealPointer {
         s1: &Statement,
         s2: &Statement,
         s3: &Statement,
+        file: &gobject_ast::FileModel,
         file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) -> bool {
@@ -172,17 +180,26 @@ impl UseGStealPointer {
         }
 
         let replacement = format!("return g_steal_pointer (&{ptr_expr});");
-        let fix = Fix::new(
-            s1.location().start_byte,
-            s3.location().end_byte,
-            replacement.clone(),
-        );
-        violations.push(self.violation_with_fix(
+
+        // Use three separate fixes to preserve comments between statements
+        let fixes = vec![
+            // Delete the first two lines
+            Fix::delete_line(s1.location(), &file.source),
+            Fix::delete_line(s2.location(), &file.source),
+            // Replace the third statement (return)
+            Fix::new(
+                s3.location().start_byte,
+                s3.location().end_byte,
+                replacement.clone(),
+            ),
+        ];
+
+        violations.push(self.violation_with_fixes(
             file_path,
             s1.location().line,
             s1.location().column,
             format!("Use {replacement} instead of copying {ptr_expr} and setting it to NULL"),
-            fix,
+            fixes,
         ));
         true
     }
@@ -192,6 +209,7 @@ impl UseGStealPointer {
         &self,
         s1: &Statement,
         s2: &Statement,
+        file: &gobject_ast::FileModel,
         file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
     ) -> bool {
@@ -209,17 +227,25 @@ impl UseGStealPointer {
         }
 
         let replacement = format!("{other_expr} = g_steal_pointer (&{ptr_expr});");
-        let fix = Fix::new(
-            s1.location().start_byte,
-            s2.location().end_byte,
-            replacement.clone(),
-        );
-        violations.push(self.violation_with_fix(
+
+        // Use two separate fixes to preserve comments between statements
+        let fixes = vec![
+            // Delete the entire first line
+            Fix::delete_line(s1.location(), &file.source),
+            // Replace the second statement
+            Fix::new(
+                s2.location().start_byte,
+                s2.location().end_byte,
+                replacement.clone(),
+            ),
+        ];
+
+        violations.push(self.violation_with_fixes(
             file_path,
             s1.location().line,
             s1.location().column,
             format!("Use g_steal_pointer (&{ptr_expr}) instead of copying and setting to NULL"),
-            fix,
+            fixes,
         ));
         true
     }
