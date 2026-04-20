@@ -218,3 +218,29 @@ impl AssignmentOp {
         }
     }
 }
+
+/// Field access operators in C
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FieldAccessOp {
+    Arrow, // ->
+    Dot,   // .
+}
+
+impl FieldAccessOp {
+    /// Parse from operator string
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "->" => Some(Self::Arrow),
+            "." => Some(Self::Dot),
+            _ => None,
+        }
+    }
+
+    /// Convert to operator string
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Arrow => "->",
+            Self::Dot => ".",
+        }
+    }
+}

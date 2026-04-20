@@ -203,7 +203,7 @@ fn test_statement_order() {
             ..
         }) = &func.body_statements[i + 1]
         {
-            if call2.function == "g_bytes_unref" {
+            if call2.is_function("g_bytes_unref") {
                 found_pattern = true;
             }
         }

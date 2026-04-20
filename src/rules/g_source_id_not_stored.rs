@@ -58,7 +58,7 @@ impl Rule for GSourceIdNotStored {
                                 call.location.column,
                                 format!(
                                     "{}() called without storing the returned source ID. If the object is destroyed before the callback fires, this will cause a use-after-free. Store the ID and use g_clear_handle_id() in dispose.",
-                                    call.function
+                                    call.function_name()
                                 ),
                             ));
                         }

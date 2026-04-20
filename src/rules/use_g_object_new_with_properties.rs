@@ -145,7 +145,10 @@ impl UseGObjectNewWithProperties {
                 {
                     for &empty_call in empty_new_calls {
                         if std::ptr::eq(call as *const _, empty_call as *const _) {
-                            return Some((assign.lhs.clone(), expr_stmt.location));
+                            let var_name = assign.lhs_as_text();
+                            if !var_name.is_empty() {
+                                return Some((var_name, expr_stmt.location));
+                            }
                         }
                     }
                 }
@@ -159,7 +162,7 @@ impl UseGObjectNewWithProperties {
     /// Check if a call is g_object_new with no properties (just NULL or type
     /// only)
     fn is_g_object_new_empty(&self, call: &gobject_ast::CallExpression) -> bool {
-        if call.function != "g_object_new" {
+        if !call.is_function("g_object_new") {
             return false;
         }
 
@@ -183,7 +186,7 @@ impl UseGObjectNewWithProperties {
             return None;
         };
 
-        if call.function != "g_object_set" {
+        if !call.is_function("g_object_set") {
             return None;
         }
 

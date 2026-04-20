@@ -111,7 +111,7 @@ impl Property {
     /// - g_param_spec_int(name, nick, blurb, min, max, default, flags)
     /// - g_param_spec_object(name, nick, blurb, object_type, flags)
     pub fn from_param_spec_call(call: &CallExpression) -> Option<Self> {
-        let func_name = &call.function;
+        let func_name = call.function_name_str()?;
 
         // Extract common arguments (name, nick, blurb)
         let args = &call.arguments;
@@ -123,7 +123,7 @@ impl Property {
         let nick = extract_string_arg(&args[1]);
         let blurb = extract_string_arg(&args[2]);
 
-        let property_type = match func_name.as_str() {
+        let property_type = match func_name {
             "g_param_spec_string" => {
                 // (name, nick, blurb, default, flags)
                 PropertyType::String
@@ -274,7 +274,7 @@ impl Property {
             }
             "g_param_spec_variant" => PropertyType::Variant,
             _ => PropertyType::Unknown {
-                spec_function: func_name.clone(),
+                spec_function: func_name.to_string(),
             },
         };
 
@@ -378,7 +378,7 @@ fn extract_identifier_arg(arg: &Argument) -> Option<String> {
             Expression::Identifier(id) => Some(id.name.clone()),
             Expression::Call(call) => {
                 // Handle macros like G_TYPE_STRING
-                Some(call.function.clone())
+                Some(call.function_name())
             }
             _ => None,
         },

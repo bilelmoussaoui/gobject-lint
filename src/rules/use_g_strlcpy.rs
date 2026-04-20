@@ -29,7 +29,10 @@ impl Rule for UseGStrlcpy {
         violations: &mut Vec<Violation>,
     ) {
         for call in func.find_calls(&["strcpy", "strcat", "strncat"]) {
-            let message = match call.function.as_str() {
+            let Some(func_name) = call.function_name_str() else {
+                continue;
+            };
+            let message = match func_name {
                 "strcpy" => {
                     "Use g_strlcpy(dst, src, sizeof(dst)) instead of strcpy — no bounds checking"
                 }

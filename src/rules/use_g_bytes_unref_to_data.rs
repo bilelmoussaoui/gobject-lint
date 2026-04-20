@@ -135,7 +135,7 @@ impl UseGBytesUnrefToData {
             return None;
         };
 
-        if call.function != "g_bytes_get_data" {
+        if !call.is_function("g_bytes_get_data") {
             return None;
         }
 
@@ -148,13 +148,12 @@ impl UseGBytesUnrefToData {
         let bytes_var = call.get_arg_text(0, source)?;
         let size_arg = call.get_arg_text(1, source)?;
 
-        Some((
-            assignment.lhs.clone(),
-            bytes_var,
-            size_arg,
-            assignment,
-            call,
-        ))
+        let dest_var = assignment.lhs_as_text();
+        if dest_var.is_empty() {
+            return None;
+        }
+
+        Some((dest_var, bytes_var, size_arg, assignment, call))
     }
 
     /// Extract call from: g_bytes_unref(expected_var)
@@ -173,7 +172,7 @@ impl UseGBytesUnrefToData {
             return None;
         };
 
-        if call.function != "g_bytes_unref" {
+        if !call.is_function("g_bytes_unref") {
             return None;
         }
 

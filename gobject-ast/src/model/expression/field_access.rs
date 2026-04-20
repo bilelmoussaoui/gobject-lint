@@ -1,9 +1,18 @@
 use serde::{Deserialize, Serialize};
 
-use crate::model::SourceLocation;
+use crate::{model::SourceLocation, operators::FieldAccessOp};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldAccessExpression {
-    pub text: String, // Full text like "self->field" or "obj.field"
+    pub base: String,
+    pub operator: FieldAccessOp,
+    pub field: String,
     pub location: SourceLocation,
+}
+
+impl FieldAccessExpression {
+    /// Get the full text representation
+    pub fn text(&self) -> String {
+        format!("{}{}{}", self.base, self.operator.as_str(), self.field)
+    }
 }

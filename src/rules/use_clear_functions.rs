@@ -175,7 +175,7 @@ impl UseClearFunctions {
         for stmt in statements {
             if let Some(call) = stmt.extract_call() {
                 for &func_name in &unref_functions {
-                    if call.function == func_name {
+                    if call.is_function(func_name) {
                         // Check if any argument contains the variable
                         for arg in &call.arguments {
                             if let Some(arg_text) = arg.to_source_string(source)

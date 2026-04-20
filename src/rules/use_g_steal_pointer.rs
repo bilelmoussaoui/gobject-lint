@@ -298,7 +298,7 @@ impl UseGStealPointer {
     fn extract_condition_expr(&self, condition: &Expression) -> Option<String> {
         match condition {
             Expression::Identifier(id) => Some(id.name.clone()),
-            Expression::FieldAccess(f) => Some(f.text.clone()),
+            Expression::FieldAccess(f) => Some(f.text()),
             Expression::Binary(bin) => {
                 if bin.operator == BinaryOp::NotEqual {
                     // Check for expr != NULL or NULL != expr
@@ -320,7 +320,7 @@ impl UseGStealPointer {
     fn extract_simple_expr(&self, expr: &Expression) -> Option<String> {
         match expr {
             Expression::Identifier(id) => Some(id.name.clone()),
-            Expression::FieldAccess(f) => Some(f.text.clone()),
+            Expression::FieldAccess(f) => Some(f.text()),
             _ => None,
         }
     }
@@ -508,7 +508,7 @@ impl UseGStealPointer {
         // Get rhs as string - handle various expression types
         let rhs = match &*assign.rhs {
             Expression::Identifier(id) => id.name.clone(),
-            Expression::FieldAccess(f) => f.text.clone(),
+            Expression::FieldAccess(f) => f.text(),
             Expression::Null(_) | Expression::Call(_) => {
                 // For NULL or function calls like g_strdup(), we don't want to suggest
                 // g_steal_pointer
@@ -519,7 +519,11 @@ impl UseGStealPointer {
             }
         };
 
-        Some((assign.lhs.clone(), rhs))
+        let lhs = assign.lhs_as_text();
+        if lhs.is_empty() {
+            return None;
+        }
+        Some((lhs, rhs))
     }
 
     /// Find the position of opening and closing braces around a block of

@@ -62,7 +62,8 @@ impl UseGNew {
             return;
         };
 
-        let suggested_func = if call.function == "g_malloc0" {
+        let func_name = call.function_name();
+        let suggested_func = if call.is_function("g_malloc0") {
             "g_new0"
         } else {
             "g_new"
@@ -82,7 +83,7 @@ impl UseGNew {
             call.location.column,
             format!(
                 "Use {} instead of {}(sizeof({})) for type safety",
-                replacement, call.function, type_name
+                replacement, func_name, type_name
             ),
             fix,
         ));

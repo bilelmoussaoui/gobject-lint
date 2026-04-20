@@ -171,7 +171,7 @@ impl Expression {
     pub fn extract_variable_name(&self) -> Option<String> {
         match self {
             Expression::Identifier(id) => Some(id.name.clone()),
-            Expression::FieldAccess(f) => Some(f.text.clone()),
+            Expression::FieldAccess(f) => Some(f.text()),
             _ => None,
         }
     }
@@ -254,11 +254,11 @@ impl Expression {
 
     /// Check if this expression is a call to the specified function
     pub fn is_call_to(&self, function_name: &str) -> bool {
-        matches!(self, Expression::Call(call) if call.function == function_name)
+        matches!(self, Expression::Call(call) if call.is_function(function_name))
     }
 
     /// Check if this expression is a call to any of the specified functions
     pub fn is_call_to_any(&self, function_names: &[&str]) -> bool {
-        matches!(self, Expression::Call(call) if function_names.contains(&call.function.as_str()))
+        matches!(self, Expression::Call(call) if call.function_name_str().is_some_and(|name| function_names.contains(&name)))
     }
 }

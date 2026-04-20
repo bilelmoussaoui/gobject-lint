@@ -54,7 +54,9 @@ impl Rule for UseGAsciiFunctions {
             "tolower", "toupper", "isdigit", "isalpha", "isalnum", "isspace", "isupper", "islower",
             "isxdigit", "ispunct", "isprint", "isgraph", "iscntrl",
         ]) {
-            if let Some(replacement) = g_ascii_replacement(&call.function) {
+            if let Some(func_name) = call.function_name_str()
+                && let Some(replacement) = g_ascii_replacement(func_name)
+            {
                 let fix = Fix::new(
                     call.location.start_byte,
                     call.location.end_byte,
@@ -75,7 +77,7 @@ impl Rule for UseGAsciiFunctions {
                     call.location.column,
                     format!(
                         "Use {}() instead of {}() — C ctype functions are locale-dependent",
-                        replacement, call.function
+                        replacement, func_name
                     ),
                     fix,
                 ));

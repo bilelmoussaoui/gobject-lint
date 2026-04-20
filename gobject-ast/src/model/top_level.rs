@@ -190,7 +190,7 @@ impl FunctionDefItem {
         use super::expression::{Argument, Expression};
         match expr {
             Expression::Call(call) => {
-                if predicate(&call.function) {
+                if call.function_name_str().is_some_and(|name| predicate(name)) {
                     calls.push(call);
                 }
                 // Also check arguments

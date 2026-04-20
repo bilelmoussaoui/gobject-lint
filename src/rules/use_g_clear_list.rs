@@ -108,7 +108,8 @@ impl UseGClearList {
     fn extract_list_free(&self, stmt: &Statement, source: &[u8]) -> Option<(String, &'static str)> {
         let call = stmt.extract_call()?;
 
-        let list_type = match call.function.as_str() {
+        let func_name = call.function_name_str()?;
+        let list_type = match func_name {
             "g_list_free" => "GList",
             "g_slist_free" => "GSList",
             _ => return None,

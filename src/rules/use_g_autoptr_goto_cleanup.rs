@@ -127,14 +127,11 @@ impl UseGAutoptrGotoCleanup {
                         if let Expression::Assignment(assign) = &expr_stmt.expr
                             && let Expression::Call(call) = &*assign.rhs
                             && call.is_allocation_call()
-                        {
                             // Only simple identifiers, not field expressions
-                            if !assign.lhs.contains("->")
-                                && !assign.lhs.contains('.')
-                                && let Some((type_info, location)) = local_vars.get(&assign.lhs)
-                            {
-                                result.insert(assign.lhs.clone(), (type_info.clone(), *location));
-                            }
+                            && let Expression::Identifier(id) = &*assign.lhs
+                            && let Some((type_info, location)) = local_vars.get(&id.name)
+                        {
+                            result.insert(id.name.clone(), (type_info.clone(), *location));
                         }
                     }
                     _ => {}

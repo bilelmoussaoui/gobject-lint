@@ -88,7 +88,10 @@ impl UnnecessaryNullCheck {
         };
 
         // Check for g_free or any g_clear_* function
-        if !call.function.starts_with("g_free") && !call.function.starts_with("g_clear_") {
+        let Some(func_name) = call.function_name_str() else {
+            return;
+        };
+        if !func_name.starts_with("g_free") && !func_name.starts_with("g_clear_") {
             return;
         }
 
@@ -129,7 +132,7 @@ impl UnnecessaryNullCheck {
             if_stmt.location.column,
             format!(
                 "Remove unnecessary NULL check before {} ({} handles NULL)",
-                call.function, call.function
+                func_name, func_name
             ),
             fix,
         ));

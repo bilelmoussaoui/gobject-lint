@@ -64,7 +64,8 @@ impl UseGSourceConstants {
     ) -> Option<String> {
         // Map of source-add function name → zero-based index of the GSourceFunc
         // argument
-        let callback_arg_index: usize = match call.function.as_str() {
+        let func_name = call.function_name_str()?;
+        let callback_arg_index: usize = match func_name {
             "g_idle_add" => 0,
             "g_idle_add_full" | "g_timeout_add" | "g_timeout_add_seconds" => 1,
             "g_timeout_add_full" | "g_timeout_add_seconds_full" => 2,

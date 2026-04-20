@@ -85,7 +85,12 @@ impl StrcmpExplicitComparison {
                 }
             }
             // Bare call: if (strcmp(a, b)) or if (g_strcmp0(a, b))
-            Expression::Call(call) if self.is_str_compare(&call.function) => {
+            Expression::Call(call)
+                if call
+                    .function_name_str()
+                    .is_some_and(|name| self.is_str_compare(name)) =>
+            {
+                let func_name = call.function_name();
                 // Fix: add "!= 0" after the call
                 let fix = Fix::new(
                     call.location.end_byte,
@@ -99,7 +104,7 @@ impl StrcmpExplicitComparison {
                     call.location.column,
                     format!(
                         "{}() returns 0 for equality — add explicit comparison: '{}(...) != 0'",
-                        call.function, call.function
+                        func_name, func_name
                     ),
                     fix,
                 ));
@@ -107,8 +112,11 @@ impl StrcmpExplicitComparison {
             // Negated call: if (!strcmp(a, b)) or if (!g_strcmp0(a, b))
             Expression::Unary(unary) if unary.operator == UnaryOp::Not => {
                 if let Expression::Call(call) = &*unary.operand
-                    && self.is_str_compare(&call.function)
+                    && call
+                        .function_name_str()
+                        .is_some_and(|name| self.is_str_compare(name))
                 {
+                    let func_name = call.function_name();
                     // Fix: remove the '!' and add ' == 0' after the call
                     let fixes = vec![
                         // Remove the '!' operator
@@ -131,7 +139,7 @@ impl StrcmpExplicitComparison {
                         call.location.column,
                         format!(
                             "{}() returns 0 for equality — use '{}(...) == 0' instead of '!{}(...)'",
-                            call.function, call.function, call.function
+                            func_name, func_name, func_name
                         ),
                         fixes,
                     ));

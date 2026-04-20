@@ -52,11 +52,25 @@ impl Parser {
                 }))
             }
             "field_expression" => {
-                let text = std::str::from_utf8(&source[node.byte_range()])
+                // Parse field_expression: base->field or base.field
+                let argument_node = node.child_by_field_name("argument")?;
+                let base = std::str::from_utf8(&source[argument_node.byte_range()])
                     .ok()?
                     .to_owned();
+
+                let operator_node = node.child_by_field_name("operator")?;
+                let operator_str = std::str::from_utf8(&source[operator_node.byte_range()]).ok()?;
+                let operator = FieldAccessOp::from_str(operator_str)?;
+
+                let field_node = node.child_by_field_name("field")?;
+                let field = std::str::from_utf8(&source[field_node.byte_range()])
+                    .ok()?
+                    .to_owned();
+
                 Some(Expression::FieldAccess(FieldAccessExpression {
-                    text,
+                    base,
+                    operator,
+                    field,
                     location: self.node_location(node),
                 }))
             }

@@ -154,7 +154,7 @@ impl UseGAutoptrInlineCleanup {
                     // Check assignment: var = allocation_call()
                     Statement::Expression(expr_stmt) => {
                         if let Expression::Assignment(assign) = &expr_stmt.expr
-                            && assign.lhs == var_name
+                            && assign.lhs_as_text() == var_name
                             && let Expression::Call(call) = &*assign.rhs
                             && call.is_allocation_call()
                         {
@@ -185,7 +185,7 @@ impl UseGAutoptrInlineCleanup {
     fn is_var_freed_with_g_free(&self, statements: &[Statement], var_name: &str) -> bool {
         for stmt in statements {
             for call in stmt.iter_calls() {
-                if call.function == "g_free" && call.arg_contains_variable(0, var_name) {
+                if call.is_function("g_free") && call.arg_contains_variable(0, var_name) {
                     return true;
                 }
             }

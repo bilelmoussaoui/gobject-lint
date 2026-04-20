@@ -93,7 +93,7 @@ impl Signal {
     ///               0);
     /// ```
     pub fn from_g_signal_new_call(call: &CallExpression, source: &[u8]) -> Option<Self> {
-        if !call.function.starts_with("g_signal_new") {
+        if !call.function_name().starts_with("g_signal_new") {
             return None;
         }
 

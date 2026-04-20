@@ -154,7 +154,7 @@ impl GParamSpecNullNickBlurb {
             call.location.column,
             format!(
                 "{} should have NULL for {}",
-                call.function,
+                call.function_name(),
                 issues.join(" and ")
             ),
             fixes,

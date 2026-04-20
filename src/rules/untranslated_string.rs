@@ -63,7 +63,9 @@ impl UntranslatedString {
     ) {
         // Look for function calls
         if let Expression::Call(call) = expr {
-            let func_name = call.function.as_str();
+            let Some(func_name) = call.function_name_str() else {
+                return;
+            };
 
             // Check if this is a GTK/Adwaita function that takes user-visible text
             if let Some(arg_index) = self.get_translatable_param(func_name)
@@ -85,8 +87,9 @@ impl UntranslatedString {
         let Argument::Expression(arg_expr) = arg;
 
         // Check if the argument is already a call to gettext function
-        if let Expression::Call(call) = &**arg_expr {
-            let name = call.function.as_str();
+        if let Expression::Call(call) = &**arg_expr
+            && let Some(name) = call.function_name_str()
+        {
             // Already wrapped in gettext
             if matches!(name, "_" | "gettext" | "N_" | "g_dgettext" | "g_dpgettext2") {
                 return;

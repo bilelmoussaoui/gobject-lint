@@ -83,7 +83,7 @@ impl UseGAutoptrError {
     fn has_error_free_call(&self, statements: &[Statement], var_name: &str) -> bool {
         for stmt in statements {
             for call in stmt.iter_calls() {
-                if call.function == "g_error_free" && call.arg_contains_variable(0, var_name) {
+                if call.is_function("g_error_free") && call.arg_contains_variable(0, var_name) {
                     return true;
                 }
             }

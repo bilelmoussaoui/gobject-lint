@@ -100,29 +100,26 @@ impl GObjectVirtualMethodsChainUp {
 
         match expr {
             // Field access: parent_class->dispose
-            Expression::FieldAccess(field) => {
-                // field.text contains the whole access like "parent_class->dispose"
-                // Check if it ends with ->method_type
-                let expected_suffix = format!("->{}", method_type);
-                if field.text.ends_with(&expected_suffix) {
+            Expression::FieldAccess(field)
+                if field.field == method_type
                     // Check if the base looks like a parent class
-                    if self.looks_like_parent_class_variable(&field.text)
-                        || self.looks_like_parent_class_cast(&field.text)
-                    {
-                        return true;
-                    }
-                }
+                    && (self.looks_like_parent_class_variable(&field.base)
+                        || self.looks_like_parent_class_cast(&field.text())) =>
+            {
+                return true;
             }
             // Call expression: might contain field access as part of it
-            Expression::Call(call)
+            // e.g., G_OBJECT_CLASS(parent_class)->dispose(object)
+            Expression::Call(call) => {
                 // Check if the function itself is a field access
-                if call.function.contains("->")
-                    && call.function.ends_with(method_type)
-                    && (self.looks_like_parent_class_variable(&call.function)
-                        || self.looks_like_parent_class_cast(&call.function))
-                => {
+                if let Expression::FieldAccess(field) = &*call.function
+                    && field.field == method_type
+                    && (self.looks_like_parent_class_variable(&field.base)
+                        || self.looks_like_parent_class_cast(&field.text()))
+                {
                     return true;
                 }
+            }
             _ => {}
         }
 
@@ -144,17 +141,9 @@ impl GObjectVirtualMethodsChainUp {
         text.contains("_CLASS") && text.contains("parent")
     }
 
-    fn looks_like_parent_class_variable(&self, text: &str) -> bool {
+    fn looks_like_parent_class_variable(&self, var_name: &str) -> bool {
         // Common variable names that hold parent class:
         // parent_object_class, parent_class, object_class, klass, parent_klass
-
-        // Extract just the variable name if this is a field access like
-        // "object_class->dispose"
-        let var_name = if let Some(arrow_pos) = text.find("->") {
-            &text[..arrow_pos]
-        } else {
-            text
-        };
 
         let var_lower = var_name.to_lowercase();
 

@@ -87,7 +87,7 @@ impl GTaskSourceTag {
                     // Check declarations: GTask *task = g_task_new(...)
                     Statement::Declaration(decl) => {
                         if let Some(Expression::Call(call)) = &decl.initializer
-                            && call.function == "g_task_new"
+                            && call.is_function("g_task_new")
                         {
                             // Find the column where the variable name appears
                             let var_name_column = self.find_var_name_column(
@@ -104,10 +104,13 @@ impl GTaskSourceTag {
                     Statement::Expression(expr_stmt) => {
                         if let Expression::Assignment(assignment) = &expr_stmt.expr
                             && let Expression::Call(call) = assignment.rhs.as_ref()
-                            && call.function == "g_task_new"
+                            && call.is_function("g_task_new")
                         {
                             // For assignments, use the assignment location
-                            results.push((assignment.lhs.clone(), assignment.location));
+                            let var_name = assignment.lhs_as_text();
+                            if !var_name.is_empty() {
+                                results.push((var_name, assignment.location));
+                            }
                         }
                     }
                     _ => {}
@@ -146,7 +149,7 @@ impl GTaskSourceTag {
             let mut found = false;
             stmt.walk(&mut |s| {
                 if let Some(call) = s.extract_call()
-                    && call.function == "g_task_set_source_tag"
+                    && call.is_function("g_task_set_source_tag")
                     && !call.arguments.is_empty()
                 {
                     // Check if first argument contains our variable

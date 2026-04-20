@@ -88,7 +88,7 @@ impl UseGClearWeakPointer {
             return;
         };
 
-        if call.function != "g_object_remove_weak_pointer" {
+        if !call.is_function("g_object_remove_weak_pointer") {
             return;
         }
 

@@ -422,7 +422,14 @@ impl Statement {
     {
         if let Statement::Expression(expr_stmt) = self {
             if let Expression::Assignment(assign) = &expr_stmt.expr {
-                return assign.lhs.trim() == target_var.trim() && value_check(&assign.rhs);
+                let lhs_text = match &*assign.lhs {
+                    Expression::Identifier(id) => id.name.as_str(),
+                    Expression::FieldAccess(field) => {
+                        return field.text() == target_var && value_check(&assign.rhs);
+                    }
+                    _ => return false,
+                };
+                return lhs_text.trim() == target_var.trim() && value_check(&assign.rhs);
             }
         }
         false

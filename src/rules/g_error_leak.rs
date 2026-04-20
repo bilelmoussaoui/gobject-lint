@@ -95,7 +95,9 @@ fn calls_noreturn_function(statements: &[Statement]) -> bool {
 
     for stmt in statements {
         for call in stmt.iter_calls() {
-            if noreturn_functions.contains(&call.function.as_str()) {
+            if let Some(func_name) = call.function_name_str()
+                && noreturn_functions.contains(&func_name)
+            {
                 return true;
             }
         }
@@ -152,17 +154,18 @@ fn is_error_propagated(statements: &[Statement], var_name: &str) -> bool {
     // termination Functions like *_terminate_with_error, *_set_error, etc.
     for stmt in statements {
         for call in stmt.iter_calls() {
-            let func_name = call.function.as_str();
-            // Common patterns for functions that take ownership or terminate
-            if func_name.contains("_terminate_") && func_name.contains("error")
-                || func_name.ends_with("_set_error")
-                || func_name.contains("_set_g_error")
-            {
-                // Check if the error variable is in the arguments
-                for arg in &call.arguments {
-                    let gobject_ast::expression::Argument::Expression(arg_expr) = arg;
-                    if arg_expr.contains_identifier(var_name) {
-                        return true;
+            if let Some(func_name) = call.function_name_str() {
+                // Common patterns for functions that take ownership or terminate
+                if func_name.contains("_terminate_") && func_name.contains("error")
+                    || func_name.ends_with("_set_error")
+                    || func_name.contains("_set_g_error")
+                {
+                    // Check if the error variable is in the arguments
+                    for arg in &call.arguments {
+                        let gobject_ast::expression::Argument::Expression(arg_expr) = arg;
+                        if arg_expr.contains_identifier(var_name) {
+                            return true;
+                        }
                     }
                 }
             }
@@ -176,7 +179,9 @@ fn is_error_propagated(statements: &[Statement], var_name: &str) -> bool {
 fn check_error_handled(statements: &[Statement], var_name: &str, functions: &[&str]) -> bool {
     for stmt in statements {
         for call in stmt.iter_calls() {
-            if functions.contains(&call.function.as_str()) {
+            if let Some(func_name) = call.function_name_str()
+                && functions.contains(&func_name)
+            {
                 // Check if the error variable is in the arguments
                 for arg in &call.arguments {
                     let gobject_ast::expression::Argument::Expression(arg_expr) = arg;

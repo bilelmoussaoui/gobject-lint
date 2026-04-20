@@ -14,7 +14,7 @@ pub use expression::{
     NullExpression, NumberLiteralExpression, SizeofExpression, StringLiteralExpression,
     SubscriptExpression, UnaryExpression, UpdateExpression,
 };
-pub use operators::{AssignmentOp, BinaryOp, UnaryOp, UpdateOp};
+pub use operators::{AssignmentOp, BinaryOp, FieldAccessOp, UnaryOp, UpdateOp};
 pub use project::{FileModel, Project};
 pub use source_location::SourceLocation;
 pub use statement::{

@@ -12,9 +12,7 @@ impl Parser {
         source: &[u8],
     ) -> Option<CallExpression> {
         let function_node = node.child_by_field_name("function")?;
-        let function = std::str::from_utf8(&source[function_node.byte_range()])
-            .ok()?
-            .to_owned();
+        let function = self.parse_expression(function_node, source)?;
 
         let mut arguments = Vec::new();
         if let Some(args_node) = node.child_by_field_name("arguments") {
@@ -31,7 +29,7 @@ impl Parser {
         }
 
         Some(CallExpression {
-            function,
+            function: Box::new(function),
             arguments,
             location: self.node_location(node),
         })

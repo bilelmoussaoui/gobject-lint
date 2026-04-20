@@ -136,7 +136,8 @@ impl GParamSpecStaticStrings {
             call.location.column,
             format!(
                 "Add {} to {} flags (saves memory for static strings)",
-                needed_desc, call.function
+                needed_desc,
+                call.function_name()
             ),
             fix,
         ));

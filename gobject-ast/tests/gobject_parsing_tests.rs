@@ -209,9 +209,9 @@ fn test_vfunc_parameters_and_return_types() {
 
     // Check parameters
     assert_eq!(do_something.parameters.len(), 2);
-    assert_eq!(do_something.parameters[0].type_name, "MyObject*");
+    assert_eq!(do_something.parameters[0].type_info.full_text, "MyObject*");
     assert_eq!(do_something.parameters[0].name, Some("self".to_string()));
-    assert_eq!(do_something.parameters[1].type_name, "int");
+    assert_eq!(do_something.parameters[1].type_info.full_text, "int");
     assert_eq!(do_something.parameters[1].name, Some("value".to_string()));
 
     // Find the get_value vfunc
@@ -226,7 +226,7 @@ fn test_vfunc_parameters_and_return_types() {
 
     // Check parameters
     assert_eq!(get_value.parameters.len(), 1);
-    assert_eq!(get_value.parameters[0].type_name, "MyObject*");
+    assert_eq!(get_value.parameters[0].type_info.full_text, "MyObject*");
 }
 
 #[test]

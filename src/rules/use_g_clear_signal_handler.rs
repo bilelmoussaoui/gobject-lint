@@ -242,7 +242,7 @@ impl UseGClearSignalHandler {
             return None;
         };
 
-        if call.function != "g_signal_handler_disconnect" {
+        if !call.is_function("g_signal_handler_disconnect") {
             return None;
         }
 
@@ -262,7 +262,7 @@ impl UseGClearSignalHandler {
 
         match expr.as_ref() {
             Expression::Identifier(id) => Some(id.name.clone()),
-            Expression::FieldAccess(f) => Some(f.text.clone()),
+            Expression::FieldAccess(f) => Some(f.text()),
             _ => None,
         }
     }
@@ -278,7 +278,9 @@ impl UseGClearSignalHandler {
         };
 
         // Check left side matches expected_id and right side is 0
-        assign.lhs == expected_id && assign.operator == AssignmentOp::Assign && assign.rhs.is_zero()
+        assign.lhs_as_text() == expected_id
+            && assign.operator == AssignmentOp::Assign
+            && assign.rhs.is_zero()
     }
 
     /// Check if any statement calls a cleanup function on the target
@@ -293,10 +295,10 @@ impl UseGClearSignalHandler {
             };
 
             // Check if it's a cleanup function
-            if !call.function.contains("free")
-                && !call.function.contains("unref")
-                && !call.function.contains("destroy")
-                && !call.function.contains("clear")
+            if !call.function_contains("free")
+                && !call.function_contains("unref")
+                && !call.function_contains("destroy")
+                && !call.function_contains("clear")
             {
                 continue;
             }
@@ -325,7 +327,7 @@ impl UseGClearSignalHandler {
                     }
                 Expression::FieldAccess(f)
                     // Match field access like `self->source`
-                    if f.text == target => {
+                    if f.text() == target => {
                         found = true;
                     }
                 _ => {}

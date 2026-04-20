@@ -102,7 +102,9 @@ impl UseGAutofree {
                     Statement::Declaration(decl) => {
                         if decl.name == var_name
                             && let Some(Expression::Call(call)) = &decl.initializer
-                            && self.is_autofree_allocation(&call.function)
+                            && call
+                                .function_name_str()
+                                .is_some_and(|name| self.is_autofree_allocation(name))
                         {
                             found = true;
                         }
@@ -110,9 +112,11 @@ impl UseGAutofree {
                     // Check assignment: var = g_strdup(...)
                     Statement::Expression(expr_stmt) => {
                         if let Expression::Assignment(assign) = &expr_stmt.expr
-                            && assign.lhs == var_name
+                            && assign.lhs_as_text() == var_name
                             && let Expression::Call(call) = &*assign.rhs
-                            && self.is_autofree_allocation(&call.function)
+                            && call
+                                .function_name_str()
+                                .is_some_and(|name| self.is_autofree_allocation(name))
                         {
                             found = true;
                         }
@@ -149,7 +153,7 @@ impl UseGAutofree {
     fn is_var_manually_freed(&self, statements: &[Statement], var_name: &str) -> bool {
         for stmt in statements {
             for call in stmt.iter_calls() {
-                if call.function == "g_free" && call.arg_contains_variable(0, var_name) {
+                if call.is_function("g_free") && call.arg_contains_variable(0, var_name) {
                     return true;
                 }
             }

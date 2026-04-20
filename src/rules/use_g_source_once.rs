@@ -43,7 +43,8 @@ impl Rule for UseGSourceOnce {
                     if let Some(callback_fixes) =
                         self.get_callback_fixes(ast_context, &callback_name, path)
                     {
-                        let replacement = match call.function.as_str() {
+                        let func_name = call.function_name();
+                        let replacement = match func_name.as_str() {
                             "g_idle_add" => "g_idle_add_once",
                             "g_timeout_add_seconds" => "g_timeout_add_seconds_once",
                             _ => "g_timeout_add_once",
@@ -73,7 +74,7 @@ impl Rule for UseGSourceOnce {
                             call.location.column,
                             format!(
                                 "Callback '{}' always returns G_SOURCE_REMOVE. Use {} instead of {}",
-                                callback_name, replacement, call.function
+                                callback_name, replacement, func_name
                             ),
                             fixes,
                         ));

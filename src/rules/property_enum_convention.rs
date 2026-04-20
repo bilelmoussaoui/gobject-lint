@@ -540,16 +540,18 @@ impl PropertyEnumConvention {
                             match &expr_stmt.expr {
                                 // Check assignments: my_props[PROP_NAME] = ...
                                 gobject_ast::Expression::Assignment(assignment) => {
-                                    for array_name in &array_names {
-                                        if assignment.lhs.contains(array_name) {
-                                            found = true;
-                                            break;
-                                        }
+                                    if let gobject_ast::Expression::Subscript(subscript) =
+                                        &*assignment.lhs
+                                        && let gobject_ast::Expression::Identifier(id) =
+                                            &*subscript.array
+                                        && array_names.contains(&id.name.as_str())
+                                    {
+                                        found = true;
                                     }
                                 }
                                 // Check calls: g_object_class_install_properties(..., my_props)
                                 gobject_ast::Expression::Call(call)
-                                    if call.function.contains("install_properties") =>
+                                    if call.function_contains("install_properties") =>
                                 {
                                     for arg in &call.arguments {
                                         let gobject_ast::Argument::Expression(expr) = arg;
@@ -580,8 +582,8 @@ impl PropertyEnumConvention {
                     stmt.walk(&mut |s| {
                         if let gobject_ast::Statement::Expression(expr_stmt) = s
                             && let gobject_ast::Expression::Call(call) = &expr_stmt.expr
-                            && call.function.contains("install_property")
-                            && !call.function.contains("install_properties")
+                            && call.function_contains("install_property")
+                            && !call.function_contains("install_properties")
                         {
                             // Check if any argument uses our property enum values
                             for arg in &call.arguments {
@@ -614,18 +616,13 @@ impl PropertyEnumConvention {
                 stmt.walk(&mut |s| {
                     if let gobject_ast::Statement::Expression(expr_stmt) = s
                         && let gobject_ast::Expression::Assignment(assignment) = &expr_stmt.expr
+                        && let gobject_ast::Expression::FieldAccess(field) = &*assignment.lhs
+                        && let gobject_ast::Expression::Identifier(ident) = assignment.rhs.as_ref()
                     {
                         // Check for object_class->get_property = func_name
-                        if assignment.lhs.contains("get_property") {
-                            if let gobject_ast::Expression::Identifier(ident) =
-                                assignment.rhs.as_ref()
-                            {
-                                get_property_func = Some(ident.name.to_string());
-                            }
-                        } else if assignment.lhs.contains("set_property")
-                            && let gobject_ast::Expression::Identifier(ident) =
-                                assignment.rhs.as_ref()
-                        {
+                        if field.field == "get_property" {
+                            get_property_func = Some(ident.name.to_string());
+                        } else if field.field == "set_property" {
                             set_property_func = Some(ident.name.to_string());
                         }
                     }

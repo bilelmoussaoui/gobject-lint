@@ -141,7 +141,7 @@ impl UseGClearHandleId {
             && if_stmt.then_has_braces
             && let Statement::Expression(expr_stmt) = &if_stmt.then_body[0]
             && let Expression::Call(call) = &expr_stmt.expr
-            && call.function == "g_clear_handle_id"
+            && call.is_function("g_clear_handle_id")
         {
             let call_text = call.location.as_str(source).unwrap_or("");
 
@@ -223,10 +223,8 @@ impl UseGClearHandleId {
     fn extract_handle_cleanup(&self, stmt: &Statement, source: &[u8]) -> Option<(String, String)> {
         let call = stmt.extract_call()?;
 
-        let is_handle_cleanup = matches!(
-            call.function.as_str(),
-            "g_source_remove" | "g_source_destroy"
-        );
+        let func_name = call.function_name_str()?;
+        let is_handle_cleanup = matches!(func_name, "g_source_remove" | "g_source_destroy");
 
         if !is_handle_cleanup {
             return None;
@@ -235,7 +233,7 @@ impl UseGClearHandleId {
         let arg_expr = call.get_arg(0)?;
         let var_name = arg_expr.location().as_str(source)?.trim().to_string();
 
-        Some((var_name, call.function.clone()))
+        Some((var_name, func_name.to_string()))
     }
 
     fn extract_id_from_condition(&self, condition: &Expression) -> Option<String> {

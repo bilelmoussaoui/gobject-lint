@@ -166,14 +166,14 @@ impl UseGSetStr {
             return None;
         };
 
-        if call.function == "g_free" {
+        if call.is_function("g_free") {
             // g_free(var) - var can be identifier, field access, or *ptr
             if call.arguments.is_empty() {
                 return None;
             }
             let var = self.arg_to_string(&call.arguments[0]);
             return if var.is_empty() { None } else { Some(var) };
-        } else if call.function == "g_clear_pointer" {
+        } else if call.is_function("g_clear_pointer") {
             // g_clear_pointer(&var, g_free)
             if call.arguments.len() != 2 {
                 return None;
@@ -219,11 +219,14 @@ impl UseGSetStr {
 
         // Direct g_strdup call: var = g_strdup(new_val)
         if let Expression::Call(call) = &*assign.rhs
-            && call.function == "g_strdup"
+            && call.is_function("g_strdup")
             && !call.arguments.is_empty()
         {
             let new_val = self.arg_to_string(&call.arguments[0]);
-            return Some((assign.lhs.clone(), new_val));
+            let var_name = assign.lhs_as_text();
+            if !var_name.is_empty() {
+                return Some((var_name, new_val));
+            }
         }
 
         // Ternary: var = cond ? g_strdup(...) : NULL
@@ -232,7 +235,10 @@ impl UseGSetStr {
         {
             // Use the condition variable as the value
             let cond_text = self.expr_to_string(&cond.condition);
-            return Some((assign.lhs.clone(), cond_text));
+            let var_name = assign.lhs_as_text();
+            if !var_name.is_empty() {
+                return Some((var_name, cond_text));
+            }
         }
 
         None
@@ -246,7 +252,7 @@ impl UseGSetStr {
     fn expr_to_string(&self, expr: &Expression) -> String {
         match expr {
             Expression::Identifier(id) => id.name.clone(),
-            Expression::FieldAccess(f) => f.text.clone(),
+            Expression::FieldAccess(f) => f.text(),
             Expression::StringLiteral(s) => format!("\"{}\"", s.value),
             Expression::Unary(unary) => {
                 // Handle *ptr, &ptr, etc.
@@ -263,7 +269,7 @@ impl UseGSetStr {
                     .iter()
                     .map(|a| self.arg_to_string(a))
                     .collect();
-                format!("{} ({})", call.function, args.join(", "))
+                format!("{} ({})", call.function_name(), args.join(", "))
             }
             _ => String::new(),
         }

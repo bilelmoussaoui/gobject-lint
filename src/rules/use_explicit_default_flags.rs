@@ -104,7 +104,7 @@ impl UseExplicitDefaultFlags {
     ) {
         // Find the matching replacement rule
         for &(target_func, arg_pos, replacement_const) in FLAG_REPLACEMENTS {
-            if call.function == target_func {
+            if call.is_function(target_func) {
                 if let Some(arg_expr) = call.get_arg(arg_pos)
                     && arg_expr.is_zero()
                 {

@@ -77,7 +77,7 @@ impl UseGSettingsTyped {
             return;
         };
 
-        if variant_call.function != "g_variant_new" {
+        if !variant_call.is_function("g_variant_new") {
             return;
         }
 
@@ -143,7 +143,7 @@ impl UseGSettingsTyped {
             return;
         };
 
-        if inner_call.function != "g_settings_get_value" {
+        if !inner_call.is_function("g_settings_get_value") {
             return;
         }
 
@@ -160,7 +160,10 @@ impl UseGSettingsTyped {
         };
 
         // Map g_variant_get_* to g_settings_get_*
-        let typed_func = match call.function.as_str() {
+        let Some(func_name) = call.function_name_str() else {
+            return;
+        };
+        let typed_func = match func_name {
             "g_variant_get_string" => "g_settings_get_string",
             "g_variant_get_boolean" => "g_settings_get_boolean",
             "g_variant_get_byte" => "g_settings_get_byte",

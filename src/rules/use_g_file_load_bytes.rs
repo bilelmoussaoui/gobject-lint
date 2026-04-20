@@ -128,7 +128,7 @@ impl UseGFileLoadBytes {
         violations: &mut Vec<Violation>,
     ) {
         if let Expression::Call(call) = expr
-            && call.function == "g_bytes_new_take"
+            && call.is_function("g_bytes_new_take")
             && call.arguments.len() >= 2
         {
             // Extract the first argument (contents variable)
@@ -168,10 +168,10 @@ impl UseGFileLoadBytes {
         match expr.as_ref() {
             // Direct variable: contents
             Expression::Identifier(id) => Some(id.name.clone()),
-            Expression::FieldAccess(f) => Some(f.text.clone()),
+            Expression::FieldAccess(f) => Some(f.text()),
             // g_steal_pointer(&contents)
             Expression::Call(call) => {
-                if call.function == "g_steal_pointer" && !call.arguments.is_empty() {
+                if call.is_function("g_steal_pointer") && !call.arguments.is_empty() {
                     self.extract_pointer_var(&call.arguments[0])
                 } else {
                     None

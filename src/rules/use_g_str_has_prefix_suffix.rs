@@ -124,7 +124,7 @@ impl UseGStrHasPrefixSuffix {
             return;
         };
 
-        if call.function != "strncmp" {
+        if !call.is_function("strncmp") {
             return;
         }
 
@@ -187,7 +187,7 @@ impl UseGStrHasPrefixSuffix {
             return;
         };
 
-        if call.function != "strcmp" {
+        if !call.is_function("strcmp") {
             return;
         }
 
@@ -284,7 +284,7 @@ impl UseGStrHasPrefixSuffix {
             return false;
         };
 
-        if call.function != "strlen" {
+        if !call.is_function("strlen") {
             return false;
         }
 
@@ -306,7 +306,7 @@ impl UseGStrHasPrefixSuffix {
             return false;
         };
 
-        if call.function != "strlen" {
+        if !call.is_function("strlen") {
             return false;
         }
 
@@ -324,7 +324,7 @@ impl UseGStrHasPrefixSuffix {
             return false;
         };
 
-        if call.function != "strlen" {
+        if !call.is_function("strlen") {
             return false;
         }
 
@@ -349,7 +349,7 @@ impl UseGStrHasPrefixSuffix {
         match expr {
             Expression::StringLiteral(s) => format!("\"{}\"", s.value),
             Expression::Identifier(id) => id.name.clone(),
-            Expression::FieldAccess(f) => f.text.clone(),
+            Expression::FieldAccess(f) => f.text(),
             _ => String::new(),
         }
     }
