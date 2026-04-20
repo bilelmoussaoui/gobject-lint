@@ -131,20 +131,10 @@ impl Rule for PropertyEnumConvention {
                     let n_props_points_to_override = if n_props_value.value_start_byte.is_some()
                         && n_props_value.value.is_none()
                     {
-                        // Extract the identifier from source (e.g., "PROP_ORIENTATION")
-                        if let (Some(start), Some(end)) =
-                            (n_props_value.value_start_byte, n_props_value.value_end_byte)
-                        {
-                            std::str::from_utf8(&file.source[start..end])
-                                .ok()
-                                .and_then(|value_text| {
-                                    let trimmed = value_text.trim();
-                                    property_map.get(trimmed).copied()
-                                })
-                                .unwrap_or(false)
-                        } else {
-                            false
-                        }
+                        n_props_value
+                            .value_text(&file.source)
+                            .and_then(|value_text| property_map.get(value_text).copied())
+                            .unwrap_or(false)
                     } else {
                         false
                     };

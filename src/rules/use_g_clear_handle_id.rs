@@ -101,9 +101,8 @@ impl UseGClearHandleId {
                 } else if stmt_count == 2 {
                     // Find braces around the statements
                     let first_start = if_stmt.then_body[0].location().start_byte;
-                    let second_end = if_stmt.then_body[1].location().end_byte;
                     let (mut brace_start, brace_end) =
-                        self.find_braces_around(first_start, second_end, source);
+                        gobject_ast::SourceLocation::find_braces_around(first_start, source);
 
                     // Include the newline before the brace in the replacement
                     while brace_start > 0 && source[brace_start - 1] != b'\n' {
@@ -111,8 +110,10 @@ impl UseGClearHandleId {
                     }
                     brace_start = brace_start.saturating_sub(1);
 
-                    // Extract indentation from the brace line
-                    let indent = self.get_indentation(brace_start + 1, source);
+                    // Extract indentation from the line after the brace
+                    let brace_location =
+                        gobject_ast::SourceLocation::new(0, 0, brace_start + 1, brace_start + 1);
+                    let indent = brace_location.extract_line_indentation(source);
                     let formatted_replacement = format!("\n{}{}", indent, replacement);
 
                     Fix::new(brace_start, brace_end, formatted_replacement)
@@ -248,51 +249,5 @@ impl UseGClearHandleId {
         }
 
         None
-    }
-
-    fn find_braces_around(&self, start: usize, _end: usize, source: &[u8]) -> (usize, usize) {
-        // Search backwards from start to find '{'
-        let mut brace_start = start;
-        while brace_start > 0 && source[brace_start - 1] != b'{' {
-            brace_start -= 1;
-            if start - brace_start > 100 {
-                break;
-            }
-        }
-        if brace_start > 0 && source[brace_start - 1] == b'{' {
-            brace_start -= 1;
-        }
-
-        // Search forwards from opening brace to find matching closing brace
-        let mut brace_end = brace_start + 1;
-        let mut depth = 1;
-        while brace_end < source.len() && depth > 0 {
-            if source[brace_end] == b'{' {
-                depth += 1;
-            } else if source[brace_end] == b'}' {
-                depth -= 1;
-            }
-            brace_end += 1;
-        }
-
-        (brace_start, brace_end)
-    }
-
-    fn get_indentation(&self, pos: usize, source: &[u8]) -> String {
-        // Find the start of the line
-        let mut line_start = pos;
-        while line_start > 0 && source[line_start - 1] != b'\n' {
-            line_start -= 1;
-        }
-
-        // Extract whitespace from line start
-        let mut indent = String::new();
-        let mut i = line_start;
-        while i < source.len() && (source[i] == b' ' || source[i] == b'\t') {
-            indent.push(source[i] as char);
-            i += 1;
-        }
-
-        indent
     }
 }

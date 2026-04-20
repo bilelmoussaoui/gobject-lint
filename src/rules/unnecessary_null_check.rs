@@ -115,10 +115,7 @@ impl UnnecessaryNullCheck {
 
         // Create a fix: replace the if statement with the call statement
         // Extract the statement text from the source
-        let stmt_text = std::str::from_utf8(
-            &source[expr_stmt.location.start_byte..expr_stmt.location.end_byte],
-        )
-        .unwrap_or("");
+        let stmt_text = expr_stmt.location.as_str(source).unwrap_or_default();
 
         let fix = Fix::new(
             if_stmt.location.start_byte,

@@ -92,4 +92,16 @@ impl EnumValue {
             || (self.name.starts_with("N_") && self.name.ends_with("_SIGNALS"))
             || (self.name.starts_with("NUM_") && self.name.ends_with("_SIGNALS"))
     }
+
+    /// Extract the value text from source (e.g., for `N_PROPS =
+    /// PROP_ORIENTATION`, returns "PROP_ORIENTATION")
+    pub fn value_text<'a>(&self, source: &'a [u8]) -> Option<&'a str> {
+        if let (Some(start), Some(end)) = (self.value_start_byte, self.value_end_byte) {
+            std::str::from_utf8(&source[start..end])
+                .ok()
+                .map(|s| s.trim())
+        } else {
+            None
+        }
+    }
 }

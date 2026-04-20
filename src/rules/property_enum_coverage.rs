@@ -1,3 +1,5 @@
+use gobject_ast::Expression;
+
 use super::Rule;
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
@@ -199,26 +201,21 @@ impl PropertyEnumCoverage {
         fn search_item<'a>(
             item: &'a TopLevelItem,
             sentinel_name: &str,
-            source: &[u8],
             array_names: &mut Vec<&'a str>,
         ) {
             match item {
                 TopLevelItem::Declaration(Statement::Declaration(decl))
                     if decl.type_info.is_base_type("GParamSpec") && decl.type_info.is_pointer() =>
                 {
-                    let decl_text = std::str::from_utf8(
-                        &source[decl.location.start_byte..decl.location.end_byte],
-                    )
-                    .unwrap_or("");
-
-                    let pattern = format!("[{}]", sentinel_name);
-                    if decl_text.contains(&pattern) {
+                    if let Some(Expression::Identifier(size_id)) = &decl.array_size
+                        && size_id.name == sentinel_name
+                    {
                         array_names.push(&decl.name);
                     }
                 }
                 TopLevelItem::Preprocessor(PreprocessorDirective::Conditional { body, .. }) => {
                     for nested_item in body {
-                        search_item(nested_item, sentinel_name, source, array_names);
+                        search_item(nested_item, sentinel_name, array_names);
                     }
                 }
                 _ => {}
@@ -226,7 +223,7 @@ impl PropertyEnumCoverage {
         }
 
         for item in &file.top_level_items {
-            search_item(item, sentinel_name, &file.source, &mut array_names);
+            search_item(item, sentinel_name, &mut array_names);
         }
 
         array_names

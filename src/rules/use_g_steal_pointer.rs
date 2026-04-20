@@ -401,18 +401,12 @@ impl UseGStealPointer {
             } else if if_stmt.then_has_braces {
                 // If it has braces, remove them and replace body with single statement
                 let body_start = if_stmt.then_body[0].location().start_byte;
-                let body_end = if_stmt.then_body[1].location().end_byte;
-                if let Some((open_brace, close_brace)) =
-                    self.find_braces(source, body_start, body_end)
-                {
-                    // The `{` is on its own line with indentation already in the source.
-                    // When we replace from `{` to `}`, that indentation before `{` stays in place.
-                    // So we don't add any extra indentation to the replacement.
-                    Fix::new(open_brace, close_brace + 1, replacement.clone())
-                } else {
-                    // Fallback: just replace the body
-                    Fix::new(body_start, body_end, replacement.clone())
-                }
+                let (open_brace, close_brace) =
+                    gobject_ast::SourceLocation::find_braces_around(body_start, source);
+                // The `{` is on its own line with indentation already in the source.
+                // When we replace from `{` to `}`, that indentation before `{` stays in place.
+                // So we don't add any extra indentation to the replacement.
+                Fix::new(open_brace, close_brace, replacement.clone())
             } else {
                 // No braces, just replace the body
                 let body_start = if_stmt.then_body[0].location().start_byte;
@@ -485,18 +479,12 @@ impl UseGStealPointer {
             } else if if_stmt.then_has_braces {
                 // If it has braces, remove them and replace body with single statement
                 let body_start = if_stmt.then_body[0].location().start_byte;
-                let body_end = if_stmt.then_body[2].location().end_byte;
-                if let Some((open_brace, close_brace)) =
-                    self.find_braces(source, body_start, body_end)
-                {
-                    // The `{` is on its own line with indentation already in the source.
-                    // When we replace from `{` to `}`, that indentation before `{` stays in place.
-                    // So we don't add any extra indentation to the replacement.
-                    Fix::new(open_brace, close_brace + 1, replacement.clone())
-                } else {
-                    // Fallback: just replace the body
-                    Fix::new(body_start, body_end, replacement.clone())
-                }
+                let (open_brace, close_brace) =
+                    gobject_ast::SourceLocation::find_braces_around(body_start, source);
+                // The `{` is on its own line with indentation already in the source.
+                // When we replace from `{` to `}`, that indentation before `{` stays in place.
+                // So we don't add any extra indentation to the replacement.
+                Fix::new(open_brace, close_brace, replacement.clone())
             } else {
                 // No braces, just replace the body
                 let body_start = if_stmt.then_body[0].location().start_byte;
@@ -550,47 +538,5 @@ impl UseGStealPointer {
             return None;
         }
         Some((lhs, rhs))
-    }
-
-    /// Find the position of opening and closing braces around a block of
-    /// statements Returns (opening_brace_pos, closing_brace_pos) or None if
-    /// not found
-    fn find_braces(
-        &self,
-        source: &[u8],
-        first_stmt_byte: usize,
-        last_stmt_byte: usize,
-    ) -> Option<(usize, usize)> {
-        // Search backwards from first statement to find '{'
-        let mut opening_brace = None;
-        for i in (0..first_stmt_byte).rev() {
-            if source[i] == b'{' {
-                opening_brace = Some(i);
-                break;
-            }
-            // Stop if we hit something that's not whitespace/newline
-            if source[i] != b' ' && source[i] != b'\t' && source[i] != b'\n' && source[i] != b'\r' {
-                break;
-            }
-        }
-
-        // Search forwards from last statement to find '}'
-        let mut closing_brace = None;
-        for (offset, byte) in source[last_stmt_byte..].iter().enumerate() {
-            if *byte == b'}' {
-                closing_brace = Some(last_stmt_byte + offset);
-                break;
-            }
-            // Stop if we hit something that's not whitespace/newline/semicolon
-            if *byte != b' ' && *byte != b'\t' && *byte != b'\n' && *byte != b'\r' && *byte != b';'
-            {
-                break;
-            }
-        }
-
-        match (opening_brace, closing_brace) {
-            (Some(open), Some(close)) => Some((open, close)),
-            _ => None,
-        }
     }
 }

@@ -107,8 +107,24 @@ impl SourceLocation {
     }
 
     /// Extract indentation (leading whitespace) from the line containing this
-    /// location Returns the spaces/tabs before the location on the same
-    /// line
+    /// location. Returns all leading spaces/tabs from the start of the line.
+    pub fn extract_line_indentation(&self, source: &[u8]) -> String {
+        let line_start = self.find_line_start(source);
+
+        // Extract all leading whitespace from the line
+        let mut indent = String::new();
+        let mut i = line_start;
+        while i < source.len() && (source[i] == b' ' || source[i] == b'\t') {
+            indent.push(source[i] as char);
+            i += 1;
+        }
+
+        indent
+    }
+
+    /// Extract indentation (leading whitespace) up to this location
+    /// Returns the spaces/tabs from line start up to (but not past) the
+    /// location
     pub fn extract_indentation(&self, source: &[u8]) -> String {
         let line_start = self.find_line_start(source);
 
@@ -124,5 +140,37 @@ impl SourceLocation {
         }
 
         indent
+    }
+
+    /// Find braces surrounding a range in the source
+    /// Returns (opening_brace_pos, closing_brace_pos) using depth tracking to
+    /// find matching braces
+    pub fn find_braces_around(start: usize, source: &[u8]) -> (usize, usize) {
+        // Search backwards from start to find '{'
+        let mut brace_start = start;
+        while brace_start > 0 && source[brace_start - 1] != b'{' {
+            brace_start -= 1;
+            if start - brace_start > 100 {
+                break;
+            }
+        }
+        if brace_start > 0 && source[brace_start - 1] == b'{' {
+            brace_start -= 1;
+        }
+
+        // Search forwards from opening brace to find matching closing brace using depth
+        // tracking
+        let mut brace_end = brace_start + 1;
+        let mut depth = 1;
+        while brace_end < source.len() && depth > 0 {
+            if source[brace_end] == b'{' {
+                depth += 1;
+            } else if source[brace_end] == b'}' {
+                depth -= 1;
+            }
+            brace_end += 1;
+        }
+
+        (brace_start, brace_end)
     }
 }
