@@ -50,19 +50,39 @@ impl Rule for UseGSourceOnce {
                             _ => "g_timeout_add_once",
                         };
 
+                        // Determine callback argument index
+                        let callback_arg_index = if func_name == "g_idle_add" { 0 } else { 1 };
+
+                        // Build arguments, replacing GSourceFunc cast with GSourceOnceFunc if
+                        // present
+                        let args_str = call
+                            .arguments
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(idx, arg)| {
+                                if idx == callback_arg_index {
+                                    // Callback argument - replace cast type if present
+                                    let gobject_ast::Argument::Expression(expr) = arg;
+                                    if let Expression::Cast(cast) = &**expr
+                                        && let Some(callback_name) =
+                                            cast.operand.to_source_string(source)
+                                    {
+                                        return Some(format!(
+                                            "(GSourceOnceFunc) {}",
+                                            callback_name
+                                        ));
+                                    }
+                                }
+                                arg.to_source_string(source)
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+
                         // Fix 1: Replace g_idle_add → g_idle_add_once
                         let mut fixes = vec![Fix::new(
                             call.location.start_byte,
                             call.location.end_byte,
-                            format!(
-                                "{} ({})",
-                                replacement,
-                                call.arguments
-                                    .iter()
-                                    .filter_map(|arg| arg.to_source_string(source))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ),
+                            format!("{} ({})", replacement, args_str),
                         )];
 
                         // Add callback fixes (return type + return statements)
@@ -91,17 +111,32 @@ impl UseGSourceOnce {
         call: &gobject_ast::CallExpression,
         _source: &[u8],
     ) -> Option<String> {
-        // Get the first argument (the callback function)
-        if call.arguments.is_empty() {
-            return None;
+        // Determine which argument is the callback based on the function name
+        // g_idle_add(callback, user_data) -> arg 0
+        // g_timeout_add(interval, callback, user_data) -> arg 1
+        // g_timeout_add_seconds(interval, callback, user_data) -> arg 1
+        let func_name = call.function_name();
+        let callback_arg_index = if func_name == "g_idle_add" {
+            0
+        } else {
+            1 // g_timeout_add or g_timeout_add_seconds
+        };
+
+        let arg_expr = call.get_arg(callback_arg_index)?;
+
+        // Handle direct identifier
+        if let Expression::Identifier(id) = arg_expr {
+            return Some(id.name.clone());
         }
 
-        let arg_expr = call.get_arg(0)?;
-        if let Expression::Identifier(id) = arg_expr {
-            Some(id.name.clone())
-        } else {
-            None
+        // Handle casted callback: (GSourceFunc) callback_name
+        if let Expression::Cast(cast) = arg_expr
+            && let Expression::Identifier(id) = &*cast.operand
+        {
+            return Some(id.name.clone());
         }
+
+        None
     }
 
     fn get_callback_fixes(
@@ -311,10 +346,23 @@ impl UseGSourceOnce {
                 "g_timeout_add_seconds",
             ])
             && let Expression::Call(call) = &expr_stmt.expr
-            && let Some(arg_expr) = call.get_arg(0)
-            && let Expression::Identifier(id) = arg_expr
         {
-            return id.name == callback_name;
+            // Determine which argument is the callback
+            let func_name = call.function_name();
+            let callback_arg_index = if func_name == "g_idle_add" { 0 } else { 1 };
+
+            if let Some(arg_expr) = call.get_arg(callback_arg_index) {
+                // Handle direct identifier
+                if let Expression::Identifier(id) = arg_expr {
+                    return id.name == callback_name;
+                }
+                // Handle casted callback: (GSourceFunc) callback_name
+                if let Expression::Cast(cast) = arg_expr
+                    && let Expression::Identifier(id) = &*cast.operand
+                {
+                    return id.name == callback_name;
+                }
+            }
         }
         false
     }
