@@ -101,10 +101,12 @@ impl GTaskSourceTag {
                             && let Expression::Call(call) = assignment.rhs.as_ref()
                             && call.is_function("g_task_new")
                         {
-                            // For assignments, use the assignment location for both
+                            // For assignments, use assignment location for name, expr_stmt location
+                            // for statement (expr_stmt.location
+                            // includes the semicolon, assignment.location does not)
                             let var_name = assignment.lhs_as_text();
                             if !var_name.is_empty() {
-                                results.push((var_name, assignment.location, assignment.location));
+                                results.push((var_name, assignment.location, expr_stmt.location));
                             }
                         }
                     }
