@@ -297,6 +297,7 @@ rule_test!(
     goblint::rules::UseGObjectNewWithProperties
 );
 rule_test!(use_g_autofree, goblint::rules::UseGAutofree);
+rule_test!(use_g_autolist, goblint::rules::UseGAutolist);
 rule_test!(
     use_g_bytes_unref_to_data,
     goblint::rules::UseGBytesUnrefToData

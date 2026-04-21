@@ -68,17 +68,16 @@ impl UseGAutoptrInlineCleanup {
         // For each variable, check if it's a candidate for g_autoptr
         for (var_name, (type_info, location)) in &local_vars {
             // Check if variable is allocated
-            let is_allocated = self.is_var_allocated(&func.body_statements, var_name);
+            let is_allocated = func.is_var_allocated(type_info);
 
             // Check if variable is manually freed
-            let is_manually_freed = self.is_var_manually_freed(&func.body_statements, var_name);
+            let is_manually_freed = func.is_var_passed_to_cleanup(type_info);
 
             // Check if variable is returned without being freed
-            let is_returned = self.is_var_returned(&func.body_statements, var_name);
+            let is_returned = func.is_var_returned(type_info);
 
             // Check if variable is freed with g_free (should use g_autofree instead)
-            let is_freed_with_g_free =
-                self.is_var_freed_with_g_free(&func.body_statements, var_name);
+            let is_freed_with_g_free = func.is_var_passed_to_function(type_info, "g_free", 0);
 
             // Suggest g_autoptr if:
             // 1. Variable is allocated
@@ -122,8 +121,8 @@ impl UseGAutoptrInlineCleanup {
     ) {
         for stmt in statements {
             for decl in stmt.iter_declarations() {
-                // Skip variables already using g_autoptr/g_autofree
-                if decl.type_info.contains("g_autoptr") || decl.type_info.contains("g_autofree") {
+                // Skip variables already using auto-cleanup macros
+                if decl.type_info.uses_auto_cleanup() {
                     continue;
                 }
 
@@ -133,78 +132,5 @@ impl UseGAutoptrInlineCleanup {
                 }
             }
         }
-    }
-
-    fn is_var_allocated(&self, statements: &[Statement], var_name: &str) -> bool {
-        use gobject_ast::Expression;
-
-        for stmt in statements {
-            let mut found = false;
-            stmt.walk(&mut |s| {
-                match s {
-                    // Check init: Type *var = allocation_call()
-                    Statement::Declaration(decl) => {
-                        if decl.name == var_name
-                            && let Some(Expression::Call(call)) = &decl.initializer
-                            && call.is_allocation_call()
-                        {
-                            found = true;
-                        }
-                    }
-                    // Check assignment: var = allocation_call()
-                    Statement::Expression(expr_stmt) => {
-                        if let Expression::Assignment(assign) = &expr_stmt.expr
-                            && assign.lhs_as_text() == var_name
-                            && let Expression::Call(call) = &*assign.rhs
-                            && call.is_allocation_call()
-                        {
-                            found = true;
-                        }
-                    }
-                    _ => {}
-                }
-            });
-            if found {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn is_var_manually_freed(&self, statements: &[Statement], var_name: &str) -> bool {
-        for stmt in statements {
-            for call in stmt.iter_calls() {
-                if call.is_cleanup_call() && call.arg_contains_variable(0, var_name) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    fn is_var_freed_with_g_free(&self, statements: &[Statement], var_name: &str) -> bool {
-        for stmt in statements {
-            for call in stmt.iter_calls() {
-                if call.is_function("g_free") && call.arg_contains_variable(0, var_name) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    fn is_var_returned(&self, statements: &[Statement], var_name: &str) -> bool {
-        use gobject_ast::Expression;
-
-        for stmt in statements {
-            for ret in stmt.iter_returns() {
-                if let Some(Expression::Identifier(id)) = &ret.value
-                    && id.name == var_name
-                {
-                    return true;
-                }
-            }
-        }
-        false
     }
 }

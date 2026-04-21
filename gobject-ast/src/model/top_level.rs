@@ -224,6 +224,154 @@ impl FunctionDefItem {
         values
     }
 
+    /// Check if any variable of the given type is directly returned from the
+    /// function
+    pub fn is_var_returned(&self, type_info: &crate::TypeInfo) -> bool {
+        use super::expression::Expression;
+
+        for stmt in &self.body_statements {
+            for ret in stmt.iter_returns() {
+                if let Some(Expression::Identifier(id)) = &ret.value {
+                    // Find the declaration of this identifier in all body statements
+                    for body_stmt in &self.body_statements {
+                        for decl in body_stmt.iter_declarations() {
+                            if decl.name == id.name
+                                && decl.type_info.base_type == type_info.base_type
+                                && decl.type_info.is_pointer() == type_info.is_pointer()
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if any variable of the given type is passed to a cleanup call
+    /// (g_object_unref, g_free, etc.)
+    pub fn is_var_passed_to_cleanup(&self, type_info: &crate::TypeInfo) -> bool {
+        use super::expression::Expression;
+
+        for stmt in &self.body_statements {
+            for call in stmt.iter_calls() {
+                if call.is_cleanup_call() {
+                    if let Some(arg) = call.get_arg(0)
+                        && let Expression::Identifier(id) = arg
+                    {
+                        // Find the declaration of this identifier
+                        for body_stmt in &self.body_statements {
+                            for decl in body_stmt.iter_declarations() {
+                                if decl.name == id.name
+                                    && decl.type_info.base_type == type_info.base_type
+                                    && decl.type_info.is_pointer() == type_info.is_pointer()
+                                {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if any variable of the given type is passed to a specific function
+    /// at a specific argument position
+    pub fn is_var_passed_to_function(
+        &self,
+        type_info: &crate::TypeInfo,
+        func_name: &str,
+        arg_index: usize,
+    ) -> bool {
+        use super::expression::Expression;
+
+        for stmt in &self.body_statements {
+            for call in stmt.iter_calls() {
+                if call.is_function(func_name) {
+                    if let Some(arg) = call.get_arg(arg_index)
+                        && let Expression::Identifier(id) = arg
+                    {
+                        // Find the declaration of this identifier
+                        for body_stmt in &self.body_statements {
+                            for decl in body_stmt.iter_declarations() {
+                                if decl.name == id.name
+                                    && decl.type_info.base_type == type_info.base_type
+                                    && decl.type_info.is_pointer() == type_info.is_pointer()
+                                {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if any variable of the given type is allocated via an allocation
+    /// call Uses `call.is_allocation_call()` to detect allocations by
+    /// default
+    pub fn is_var_allocated(&self, type_info: &crate::TypeInfo) -> bool {
+        self.is_var_allocated_with(type_info, |call| call.is_allocation_call())
+    }
+
+    /// Check if any variable of the given type is allocated via a custom
+    /// allocation predicate
+    pub fn is_var_allocated_with(
+        &self,
+        type_info: &crate::TypeInfo,
+        is_allocation: impl Fn(&super::expression::CallExpression) -> bool,
+    ) -> bool {
+        use super::expression::Expression;
+
+        for stmt in &self.body_statements {
+            let mut found = false;
+            stmt.walk(&mut |s| {
+                match s {
+                    // Check init: Type *var = allocation_call()
+                    Statement::Declaration(decl) => {
+                        if decl.type_info.base_type == type_info.base_type
+                            && decl.type_info.is_pointer() == type_info.is_pointer()
+                            && let Some(Expression::Call(call)) = &decl.initializer
+                            && is_allocation(call)
+                        {
+                            found = true;
+                        }
+                    }
+                    // Check assignment: var = allocation_call()
+                    Statement::Expression(expr_stmt) => {
+                        if let Expression::Assignment(assign) = &expr_stmt.expr
+                            && let Expression::Identifier(id) = &*assign.lhs
+                            && let Expression::Call(call) = &*assign.rhs
+                            && is_allocation(call)
+                        {
+                            // Find the declaration of the assigned variable
+                            for body_stmt in &self.body_statements {
+                                for decl in body_stmt.iter_declarations() {
+                                    if decl.name == id.name
+                                        && decl.type_info.base_type == type_info.base_type
+                                        && decl.type_info.is_pointer() == type_info.is_pointer()
+                                    {
+                                        found = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            });
+            if found {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Find all g_object_class_install_properties calls in the function body
     pub fn find_install_properties_calls(&self) -> Vec<&super::expression::CallExpression> {
         self.find_calls(&["g_object_class_install_properties"])

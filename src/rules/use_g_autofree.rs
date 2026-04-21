@@ -40,13 +40,16 @@ impl Rule for UseGAutofree {
             }
 
             // Check if variable is allocated
-            let is_allocated = self.is_var_allocated(&func.body_statements, var_name);
+            let is_allocated = func.is_var_allocated_with(type_info, |call| {
+                call.function_name_str()
+                    .is_some_and(|name| self.is_autofree_allocation(name))
+            });
 
             // Check if variable is manually freed
-            let is_manually_freed = self.is_var_manually_freed(&func.body_statements, var_name);
+            let is_manually_freed = func.is_var_passed_to_function(type_info, "g_free", 0);
 
             // Check if variable is returned
-            let is_returned = self.is_var_returned(&func.body_statements, var_name);
+            let is_returned = func.is_var_returned(type_info);
 
             // Suggest g_autofree if:
             // 1. Variable is allocated
@@ -91,46 +94,6 @@ impl UseGAutofree {
         }
     }
 
-    fn is_var_allocated(&self, statements: &[Statement], var_name: &str) -> bool {
-        use gobject_ast::Expression;
-
-        for stmt in statements {
-            let mut found = false;
-            stmt.walk(&mut |s| {
-                match s {
-                    // Check init: char *var = g_strdup(...)
-                    Statement::Declaration(decl) => {
-                        if decl.name == var_name
-                            && let Some(Expression::Call(call)) = &decl.initializer
-                            && call
-                                .function_name_str()
-                                .is_some_and(|name| self.is_autofree_allocation(name))
-                        {
-                            found = true;
-                        }
-                    }
-                    // Check assignment: var = g_strdup(...)
-                    Statement::Expression(expr_stmt) => {
-                        if let Expression::Assignment(assign) = &expr_stmt.expr
-                            && assign.lhs_as_text() == var_name
-                            && let Expression::Call(call) = &*assign.rhs
-                            && call
-                                .function_name_str()
-                                .is_some_and(|name| self.is_autofree_allocation(name))
-                        {
-                            found = true;
-                        }
-                    }
-                    _ => {}
-                }
-            });
-            if found {
-                return true;
-            }
-        }
-        false
-    }
-
     fn is_autofree_allocation(&self, func_name: &str) -> bool {
         // Functions that allocate memory suitable for g_autofree
         matches!(
@@ -148,31 +111,5 @@ impl UseGAutofree {
                 | "g_new"
                 | "g_new0"
         )
-    }
-
-    fn is_var_manually_freed(&self, statements: &[Statement], var_name: &str) -> bool {
-        for stmt in statements {
-            for call in stmt.iter_calls() {
-                if call.is_function("g_free") && call.arg_contains_variable(0, var_name) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    fn is_var_returned(&self, statements: &[Statement], var_name: &str) -> bool {
-        use gobject_ast::Expression;
-
-        for stmt in statements {
-            for ret in stmt.iter_returns() {
-                if let Some(Expression::Identifier(id)) = &ret.value
-                    && id.name == var_name
-                {
-                    return true;
-                }
-            }
-        }
-        false
     }
 }

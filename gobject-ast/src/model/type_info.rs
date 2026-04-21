@@ -86,4 +86,14 @@ impl TypeInfo {
     pub fn contains(&self, pattern: &str) -> bool {
         self.full_text.contains(pattern)
     }
+
+    /// Check if the type uses any auto-cleanup macro (g_autoptr, g_autofree,
+    /// g_autolist, etc.)
+    pub fn uses_auto_cleanup(&self) -> bool {
+        self.full_text.contains("g_autoptr")
+            || self.full_text.contains("g_autofree")
+            || self.full_text.contains("g_autolist")
+            || self.full_text.contains("g_autoslist")
+            || self.full_text.contains("g_autoqueue")
+    }
 }

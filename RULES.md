@@ -69,6 +69,7 @@ Rules that suggest simpler alternatives to complex patterns.
     ignore_types = ["cairo_*", "Pango*", "RsvgHandle"]
     ```
 - **use_g_autofree** - Suggest g_autofree for string/buffer types instead of manual g_free
+- **use_g_autolist** - Suggest g_autolist/g_autoslist instead of manual g_list_free_full/g_slist_free_full cleanup
 - **use_g_clear_handle_id** - Suggest g_clear_handle_id instead of manual cleanup and zero assignment
 - **use_g_clear_signal_handler** - Use g_clear_signal_handler() instead of g_signal_handler_disconnect() and zeroing the ID
 - **use_g_clear_list** - Suggest g_clear_list/g_clear_slist instead of manual g_list_free/g_slist_free and NULL assignment
