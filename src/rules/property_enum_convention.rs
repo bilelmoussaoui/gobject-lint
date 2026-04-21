@@ -324,6 +324,53 @@ impl Rule for PropertyEnumConvention {
                     ));
                 }
             }
+
+            // Check modern enums (without PROP_0/N_PROPS) for outdated array sizes
+            for enum_info in file.iter_property_enums() {
+                let has_prop_0 = enum_info
+                    .values
+                    .first()
+                    .map(|v| v.is_prop_0())
+                    .unwrap_or(false);
+                let has_n_props = enum_info
+                    .values
+                    .last()
+                    .map(|v| v.is_prop_last())
+                    .unwrap_or(false);
+
+                // Skip old-style enums (already handled above)
+                if has_prop_0 || has_n_props {
+                    continue;
+                }
+
+                // Find class_init to get property override map
+                let (_, assignments) = match file.find_class_init_for_property_enum(enum_info) {
+                    Some(pair) => pair,
+                    None => continue,
+                };
+
+                let property_map = self.build_property_override_map(&assignments);
+
+                // Find the last real (non-override) property
+                let last_real_prop = enum_info
+                    .values
+                    .iter()
+                    .rev()
+                    .find(|v| !property_map.get(&v.name).copied().unwrap_or(false));
+
+                let Some(last_real_prop) = last_real_prop else {
+                    continue;
+                };
+
+                // Check GParamSpec arrays for outdated PROP_X + 1 pattern
+                self.check_outdated_array_sizes(
+                    file,
+                    path,
+                    enum_info,
+                    &last_real_prop.name,
+                    violations,
+                );
+            }
         }
     }
 }
@@ -598,5 +645,52 @@ impl PropertyEnumConvention {
         }
 
         property_map
+    }
+
+    /// Check for GParamSpec arrays with outdated PROP_X + 1 sizes
+    fn check_outdated_array_sizes(
+        &self,
+        file: &gobject_ast::FileModel,
+        path: &std::path::Path,
+        enum_info: &gobject_ast::EnumInfo,
+        expected_last_prop: &str,
+        violations: &mut Vec<Violation>,
+    ) {
+        // Build set of property names from this enum
+        let property_names: std::collections::HashSet<&str> =
+            enum_info.values.iter().map(|v| v.name.as_str()).collect();
+
+        // Find all GParamSpec pointer arrays
+        let arrays = file.find_typed_arrays("GParamSpec", true, None);
+
+        for decl in arrays {
+            // Check for PROP_X + 1 pattern
+            if let Some(Expression::Binary(binary)) = &decl.array_size
+                && let Expression::Identifier(prop_id) = &*binary.left
+                && property_names.contains(prop_id.name.as_str())
+            {
+                // This array uses a property from our enum
+                // Check if this property is outdated (not the expected last property)
+                if prop_id.name != expected_last_prop {
+                    let replacement = format!("{} + 1", expected_last_prop);
+                    let fix = Fix::new(
+                        binary.location.start_byte,
+                        binary.location.end_byte,
+                        replacement,
+                    );
+
+                    violations.push(self.violation_with_fixes(
+                        path,
+                        binary.location.line,
+                        binary.location.column,
+                        format!(
+                            "GParamSpec array size uses outdated property (should be {} + 1)",
+                            expected_last_prop
+                        ),
+                        vec![fix],
+                    ));
+                }
+            }
+        }
     }
 }

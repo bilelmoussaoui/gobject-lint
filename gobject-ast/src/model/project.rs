@@ -220,10 +220,20 @@ impl FileModel {
                 if decl.type_info.is_base_type(base_type)
                     && decl.type_info.is_pointer() == is_pointer =>
             {
-                if let Some(Expression::Identifier(size_id)) = &decl.array_size {
-                    if sentinel_name.map_or(true, |s| size_id.name == s) {
-                        arrays.push(decl);
+                let matches = match &decl.array_size {
+                    Some(Expression::Identifier(size_id)) => {
+                        sentinel_name.map_or(true, |s| size_id.name == s)
                     }
+                    Some(Expression::Binary(_)) => {
+                        // Binary expressions like PROP_X + 1 - match if no specific sentinel
+                        // requested
+                        sentinel_name.is_none()
+                    }
+                    Some(_) => sentinel_name.is_none(),
+                    None => false,
+                };
+                if matches {
+                    arrays.push(decl);
                 }
             }
             TopLevelItem::Preprocessor(PreprocessorDirective::Conditional { body, .. }) => {
@@ -277,8 +287,14 @@ impl FileModel {
 
             // Check if any param_spec assignments use our array or enum values
             let has_param_spec_usage = assignments.iter().any(|a| match a {
-                ParamSpecAssignment::ArraySubscript { array_name, .. } => {
+                ParamSpecAssignment::ArraySubscript {
+                    array_name,
+                    enum_value,
+                    ..
+                } => {
+                    // Match if array is in our tracked arrays OR if enum_value is from our enum
                     array_names.contains(&array_name.as_str())
+                        || property_names.contains(&enum_value.as_str())
                 }
                 ParamSpecAssignment::OverrideProperty { enum_value, .. } => {
                     property_names.contains(&enum_value.as_str())
