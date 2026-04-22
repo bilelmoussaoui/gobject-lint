@@ -2,10 +2,27 @@ const ruleList = document.getElementById("ruleList");
 const ruleDetail = document.getElementById("ruleDetail");
 const searchInput = document.getElementById("search");
 const categoryFilter = document.getElementById("categoryFilter");
+const mobileMenuBtn = document.getElementById("mobileMenuBtn");
+const mobileOverlay = document.getElementById("mobileOverlay");
+const sidebar = document.getElementById("sidebar");
 
 let rules = [];
 let filteredRules = [];
 let selectedRuleName = null;
+
+// Mobile menu toggle
+function toggleMobileMenu() {
+  sidebar.classList.toggle("mobile-open");
+  mobileOverlay.classList.toggle("active");
+}
+
+function closeMobileMenu() {
+  sidebar.classList.remove("mobile-open");
+  mobileOverlay.classList.remove("active");
+}
+
+mobileMenuBtn.addEventListener("click", toggleMobileMenu);
+mobileOverlay.addEventListener("click", closeMobileMenu);
 
 function formatCategory(category) {
   const categoryMap = {
@@ -25,6 +42,10 @@ function badge(text, colorClass) {
   return `<span class="px-2.5 py-1 text-sm rounded border ${colorClass}">${text}</span>`;
 }
 
+function formatType(type) {
+  return type.replace(/</g, "[").replace(/>/g, "]");
+}
+
 function renderList() {
   // Sort rules alphabetically by name
   const sortedRules = [...filteredRules].sort((a, b) =>
@@ -32,18 +53,16 @@ function renderList() {
   );
 
   ruleList.innerHTML = sortedRules
-    .map(
-      (r) => {
-        const isActive = r.name === selectedRuleName;
-        const activeClass = isActive ? ' active' : '';
-        return `
+    .map((r) => {
+      const isActive = r.name === selectedRuleName;
+      const activeClass = isActive ? " active" : "";
+      return `
     <div onclick="selectRule('${r.name}')" class="rule-item${activeClass} px-4 py-3 border-b cursor-pointer">
       <div class="rule-item-name" title="${r.name}">${r.name}</div>
       <div class="text-sm rule-item-category mt-1">${formatCategory(r.category)}</div>
     </div>
   `;
-      },
-    )
+    })
     .join("");
 }
 
@@ -52,24 +71,31 @@ function renderDetail(rule) {
     rule.config_options && rule.config_options.length > 0
       ? `
     <div>
-      <h3 class="text-lg font-semibold detail-label mb-3">Configuration</h3>
-      ${rule.config_options
-        .map(
-          (opt) => `
-        <div class="mb-4 code-block p-4 rounded-lg border">
-          <div class="flex items-baseline gap-2 mb-1">
-            <code class="detail-text font-semibold">${opt.name}</code>
-            <span class="text-sm detail-label">(${opt.option_type})</span>
+      <h3 class="text-lg font-semibold detail-label mb-4">Configuration</h3>
+      <div class="config-grid mb-6">
+        ${rule.config_options
+          .map(
+            (opt) => `
+          <div class="config-option">
+            <div class="config-option-header">
+              <code class="config-option-name">${opt.name}</code>
+              <span class="config-option-type">${formatType(opt.option_type)}</span>
+            </div>
+            <p class="config-option-desc">${opt.description}</p>
+            <div class="config-option-default">
+              Default: <code>${opt.default_value}</code>
+            </div>
           </div>
-          <div class="text-sm detail-text mb-1">${opt.description}</div>
-          <div class="text-sm detail-label">Default: <code class="detail-text">${opt.default_value}</code></div>
+        `,
+          )
+          .join("")}
+      </div>
+      <div class="config-example">
+        <div class="config-example-header">
+          <span class="config-example-title">Example Configuration</span>
+          <span class="config-example-file">goblint.toml</span>
         </div>
-      `,
-        )
-        .join("")}
-      <div class="text-sm detail-label mt-3">
-        Example configuration in <code>goblint.toml</code>:
-        <pre class="code-block p-3 rounded-lg border mt-2 text-xs">[rules.${rule.name}]
+        <pre class="config-example-code">[rules.${rule.name}]
 ${rule.config_options.map((opt) => `${opt.name} = ${opt.example_value}`).join("\n")}</pre>
       </div>
     </div>
@@ -113,6 +139,7 @@ function selectRule(name) {
   renderDetail(rule);
   renderList(); // Re-render to update active state
   location.hash = name;
+  closeMobileMenu(); // Close menu on mobile after selecting
 }
 
 function applyFilters() {
@@ -152,7 +179,9 @@ fetch("rules.json")
       selectRule(hash);
     } else if (rules.length > 0) {
       // Auto-select first rule alphabetically
-      const sortedRules = [...rules].sort((a, b) => a.name.localeCompare(b.name));
+      const sortedRules = [...rules].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
       selectRule(sortedRules[0].name);
     }
   });
