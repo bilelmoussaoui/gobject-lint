@@ -1,6 +1,6 @@
 use gobject_ast::{CallExpression, types::Property};
 
-use super::{Fix, Rule};
+use super::{ConfigOption, Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct GParamSpecStaticStrings;
@@ -20,6 +20,22 @@ impl Rule for GParamSpecStaticStrings {
 
     fn fixable(&self) -> bool {
         true
+    }
+
+    fn config_options(&self) -> &'static [ConfigOption] {
+        use std::sync::LazyLock;
+
+        static OPTIONS: LazyLock<Vec<ConfigOption>> = LazyLock::new(|| {
+            vec![ConfigOption {
+                name: "static_flags",
+                option_type: "array<string>",
+                default_value: "[]",
+                example_value: "[\"ST_PARAM_READWRITE\", \"ST_PARAM_READABLE\"]",
+                description: "List of custom flag constants that already include G_PARAM_STATIC_STRINGS",
+            }]
+        });
+
+        &OPTIONS
     }
 
     fn check_func_impl(

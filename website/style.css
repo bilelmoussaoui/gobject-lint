@@ -1,0 +1,244 @@
+html {
+  zoom: 1.33;
+}
+
+body {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 15px;
+}
+
+.sidebar {
+  font-size: 14px;
+}
+
+@media (prefers-color-scheme: light) {
+  body {
+    background-color: #ffffff;
+    color: #1f2937;
+  }
+  .sidebar {
+    background-color: #f9fafb;
+    border-color: #d1d5db;
+  }
+  .search-input,
+  .filter-select {
+    background-color: #ffffff;
+    border-color: #d1d5db;
+    color: #1f2937;
+  }
+  .rule-item {
+    border-color: #e5e7eb;
+    color: #111827;
+  }
+  .rule-item:hover {
+    background-color: #e5e7eb;
+  }
+  .rule-item-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rule-item-category {
+    color: #6b7280;
+  }
+  .badge {
+    background-color: #dbeafe;
+    color: #1e40af;
+    border-color: #93c5fd;
+  }
+  .badge-green {
+    background-color: #d1fae5;
+    color: #065f46;
+    border-color: #6ee7b7;
+  }
+  .badge-orange {
+    background-color: #fed7aa;
+    color: #9a3412;
+    border-color: #fb923c;
+  }
+  .badge-purple {
+    background-color: #e9d5ff;
+    color: #6b21a8;
+    border-color: #c084fc;
+  }
+  .rule-title {
+    color: #4338ca;
+  }
+  .detail-text {
+    color: #1f2937;
+  }
+  .detail-label {
+    color: #4b5563;
+  }
+  .code-block {
+    background-color: #f3f4f6;
+    border-color: #d1d5db;
+    color: #1f2937;
+  }
+  .divider {
+    border-color: #d1d5db;
+  }
+  .github-icon {
+    filter: invert(0);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: #030712;
+    color: #f9fafb;
+  }
+  .sidebar {
+    background-color: #111827;
+    border-color: #1f2937;
+  }
+  .search-input,
+  .filter-select {
+    background-color: #030712;
+    border-color: #1f2937;
+    color: #f9fafb;
+  }
+  .rule-item {
+    border-color: #1f2937;
+  }
+  .rule-item:hover {
+    background-color: #1f2937;
+  }
+  .rule-item-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rule-item-category {
+    color: #9ca3af;
+  }
+  .badge {
+    background-color: rgba(79, 70, 229, 0.1);
+    color: #a5b4fc;
+    border-color: rgba(79, 70, 229, 0.2);
+  }
+  .badge-green {
+    background-color: rgba(34, 197, 94, 0.1);
+    color: #86efac;
+    border-color: rgba(34, 197, 94, 0.2);
+  }
+  .badge-orange {
+    background-color: rgba(249, 115, 22, 0.1);
+    color: #fdba74;
+    border-color: rgba(249, 115, 22, 0.2);
+  }
+  .badge-purple {
+    background-color: rgba(168, 85, 247, 0.1);
+    color: #c084fc;
+    border-color: rgba(168, 85, 247, 0.2);
+  }
+  .rule-title {
+    color: #818cf8;
+  }
+  .detail-text {
+    color: #d1d5db;
+  }
+  .detail-label {
+    color: #9ca3af;
+  }
+  .code-block {
+    background-color: #111827;
+    border-color: #1f2937;
+  }
+  .divider {
+    border-color: #1f2937;
+  }
+  .github-icon {
+    filter: invert(1);
+  }
+}
+
+/* Markdown prose styling */
+.prose-custom h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+.prose-custom h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.prose-custom p {
+  margin-bottom: 1rem;
+  line-height: 1.6;
+}
+.prose-custom ul {
+  list-style: disc;
+  margin-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+.prose-custom li {
+  margin-bottom: 0.25rem;
+}
+.prose-custom strong {
+  font-weight: 600;
+}
+.prose-custom code {
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+}
+.prose-custom pre {
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin-bottom: 1rem;
+  border: 1px solid;
+}
+.prose-custom pre code {
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+@media (prefers-color-scheme: light) {
+  .prose-custom h2,
+  .prose-custom h3 {
+    color: #1f2937;
+  }
+  .prose-custom p,
+  .prose-custom li {
+    color: #374151;
+  }
+  .prose-custom code {
+    background-color: #f3f4f6;
+    color: #1f2937;
+  }
+  .prose-custom pre {
+    background-color: #f9fafb;
+    border-color: #d1d5db;
+  }
+  .prose-custom pre code {
+    color: #1f2937;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .prose-custom h2,
+  .prose-custom h3 {
+    color: #f3f4f6;
+  }
+  .prose-custom p,
+  .prose-custom li {
+    color: #d1d5db;
+  }
+  .prose-custom code {
+    background-color: #1f2937;
+    color: #e5e7eb;
+  }
+  .prose-custom pre {
+    background-color: #0f172a;
+    border-color: #1f2937;
+  }
+  .prose-custom pre code {
+    color: #e5e7eb;
+  }
+}

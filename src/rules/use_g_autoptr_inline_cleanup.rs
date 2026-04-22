@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use gobject_ast::Statement;
 
-use super::Rule;
+use super::{ConfigOption, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct UseGAutoptrInlineCleanup;
@@ -17,8 +17,30 @@ impl Rule for UseGAutoptrInlineCleanup {
         "Suggest g_autoptr instead of inline manual cleanup (g_object_unref/g_free)"
     }
 
+    fn long_description(&self) -> Option<&'static str> {
+        Some(include_str!(
+            "../../docs/rules/use_g_autoptr_inline_cleanup.md"
+        ))
+    }
+
     fn category(&self) -> super::Category {
         super::Category::Complexity
+    }
+
+    fn config_options(&self) -> &'static [ConfigOption] {
+        use std::sync::LazyLock;
+
+        static OPTIONS: LazyLock<Vec<ConfigOption>> = LazyLock::new(|| {
+            vec![ConfigOption {
+                name: "ignore_types",
+                option_type: "array<string>",
+                default_value: "[]",
+                example_value: "[\"cairo_*\", \"Pango*\", \"RsvgHandle\"]",
+                description: "List of glob patterns for types to ignore",
+            }]
+        });
+
+        &OPTIONS
     }
 
     fn check_func_impl(

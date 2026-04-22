@@ -400,10 +400,14 @@ pub fn list_all_rules_json(config: &Config) -> String {
     #[derive(Serialize)]
     struct RuleMetadata {
         name: String,
+        description: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        long_description: Option<String>,
         category: String,
         fixable: bool,
         min_glib_version: String,
         requires_auto_cleanup: bool,
+        config_options: Vec<crate::rules::ConfigOption>,
     }
 
     #[derive(Serialize)]
@@ -420,10 +424,13 @@ pub fn list_all_rules_json(config: &Config) -> String {
         .iter()
         .map(|entry| RuleMetadata {
             name: entry.rule.name().to_string(),
+            description: entry.rule.description().to_string(),
+            long_description: entry.rule.long_description().map(|s| s.to_string()),
             category: entry.rule.category().as_str().to_string(),
             fixable: entry.rule.fixable(),
             min_glib_version: format!("{}.{}", entry.min_glib_version.0, entry.min_glib_version.1),
             requires_auto_cleanup: entry.requires_auto_cleanup,
+            config_options: entry.rule.config_options().to_vec(),
         })
         .collect();
 

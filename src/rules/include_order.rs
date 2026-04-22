@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::{Fix, Rule};
+use super::{ConfigOption, Fix, Rule};
 use crate::{ast_context::AstContext, config::Config, rules::Violation};
 
 pub struct IncludeOrder;
@@ -20,6 +20,22 @@ impl Rule for IncludeOrder {
 
     fn fixable(&self) -> bool {
         true
+    }
+
+    fn config_options(&self) -> &'static [ConfigOption] {
+        use std::sync::LazyLock;
+
+        static OPTIONS: LazyLock<Vec<ConfigOption>> = LazyLock::new(|| {
+            vec![ConfigOption {
+                name: "config_header",
+                option_type: "string",
+                default_value: "\"config.h\"",
+                example_value: "\"myproject-config.h\"",
+                description: "Name of the config header file",
+            }]
+        });
+
+        &OPTIONS
     }
 
     fn check_all(

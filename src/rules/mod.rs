@@ -84,6 +84,21 @@ impl Fix {
     }
 }
 
+/// Configuration option metadata for a rule
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigOption {
+    /// Option name (e.g., "config_header")
+    pub name: &'static str,
+    /// Option type (e.g., "string", "array<string>", "boolean")
+    pub option_type: &'static str,
+    /// Default value as a string representation (e.g., "\"config.h\"", "[]")
+    pub default_value: &'static str,
+    /// Example value for documentation (e.g., "[\"cairo_*\", \"Pango*\"]")
+    pub example_value: &'static str,
+    /// Description of what this option does
+    pub description: &'static str,
+}
+
 pub mod deprecated_add_private;
 pub mod g_declare_semicolon;
 pub mod g_error_init;
@@ -215,12 +230,22 @@ pub trait Rule: Send + Sync {
     /// Human-readable description of what this rule checks
     fn description(&self) -> &'static str;
 
+    /// Long-form markdown documentation (optional)
+    fn long_description(&self) -> Option<&'static str> {
+        None
+    }
+
     /// Rule category
     fn category(&self) -> Category;
 
     /// Whether this rule supports automated fixes via --fix
     fn fixable(&self) -> bool {
         false
+    }
+
+    /// Configuration options supported by this rule
+    fn config_options(&self) -> &'static [ConfigOption] {
+        &[]
     }
 
     /// Check a function implementation (from C files)
