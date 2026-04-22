@@ -105,6 +105,7 @@ macro_rules! for_each_rule {
             (include_order, IncludeOrder, 2, 0),
             (use_pragma_once, UsePragmaOnce, 2, 0),
             (missing_implementation, MissingImplementation, 2, 0),
+            (no_g_auto_macros, NoGAutoMacros, 2, 0),
             (deprecated_add_private, DeprecatedAddPrivate, 2, 0),
             (matching_declare_define, MatchingDeclareDefine, 2, 70),
             (use_g_new, UseGNew, 2, 0),

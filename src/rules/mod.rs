@@ -21,6 +21,8 @@ pub enum Category {
     Pedantic,
     /// Lints which prevent the use of language/library features
     Restriction,
+    /// Code that may cause portability issues across platforms/compilers
+    Portability,
 }
 
 impl Category {
@@ -33,6 +35,7 @@ impl Category {
             Category::Perf => "perf",
             Category::Pedantic => "pedantic",
             Category::Restriction => "restriction",
+            Category::Portability => "portability",
         }
     }
 }
@@ -94,6 +97,7 @@ pub mod g_task_source_tag;
 pub mod include_order;
 pub mod matching_declare_define;
 pub mod missing_implementation;
+pub mod no_g_auto_macros;
 pub mod property_enum_convention;
 pub mod property_enum_coverage;
 pub mod property_switch_exhaustiveness;
@@ -146,6 +150,7 @@ pub use g_task_source_tag::GTaskSourceTag;
 pub use include_order::IncludeOrder;
 pub use matching_declare_define::MatchingDeclareDefine;
 pub use missing_implementation::MissingImplementation;
+pub use no_g_auto_macros::NoGAutoMacros;
 pub use property_enum_convention::PropertyEnumConvention;
 pub use property_enum_coverage::PropertyEnumCoverage;
 pub use property_switch_exhaustiveness::PropertySwitchExhaustiveness;

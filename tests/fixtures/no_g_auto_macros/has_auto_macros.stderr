@@ -1,0 +1,7 @@
+has_auto_macros.c:7:9: no_g_auto_macros: g_autofree requires compiler cleanup attribute support
+has_auto_macros.c:8:9: no_g_auto_macros: g_autofree requires compiler cleanup attribute support
+has_auto_macros.c:9:9: no_g_auto_macros: g_autoptr(GFile) requires compiler cleanup attribute support
+has_auto_macros.c:10:9: no_g_auto_macros: g_autoptr(GError) requires compiler cleanup attribute support
+has_auto_macros.c:11:9: no_g_auto_macros: g_autolist(GFile) requires compiler cleanup attribute support
+has_auto_macros.c:12:9: no_g_auto_macros: g_autoslist(GFile) requires compiler cleanup attribute support
+has_auto_macros.c:13:9: no_g_auto_macros: g_autoqueue(GFile) requires compiler cleanup attribute support

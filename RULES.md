@@ -126,6 +126,12 @@ Rules that are rather strict or have occasional false positives.
 - **matching_declare_define** - Ensure G_DECLARE_* and G_DEFINE_* macros are used consistently
 - **untranslated_string** - Detect user-visible strings in GTK/Adwaita functions that should be wrapped with gettext (use inline ignore for strings that don't need translation)
 
+## Portability
+
+Rules that detect platform or compiler-specific code patterns.
+
+- **no_g_auto_macros** - Forbid g_auto* macros (g_autoptr, g_autofree, g_autolist, g_autoslist, g_autoqueue, g_auto) for MSVC compatibility. These macros require compiler cleanup attribute support which is not available in MSVC. Not auto-fixable as removing automatic cleanup requires manual resource management code.
+
 ## Restriction
 
 Rules that prevent the use of deprecated language/library features.
@@ -147,4 +153,4 @@ goblint --category perf
 goblint --list-rules --category style
 ```
 
-Available categories: `correctness`, `suspicious`, `style`, `complexity`, `perf`, `pedantic`, `restriction`
+Available categories: `correctness`, `suspicious`, `style`, `complexity`, `perf`, `pedantic`, `portability`, `restriction`

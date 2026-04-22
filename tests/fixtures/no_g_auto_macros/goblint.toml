@@ -1,0 +1,2 @@
+[rules.no_g_auto_macros]
+level = "error"

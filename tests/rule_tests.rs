@@ -286,6 +286,7 @@ rule_test!(
     missing_implementation,
     goblint::rules::MissingImplementation
 );
+rule_test!(no_g_auto_macros, goblint::rules::NoGAutoMacros);
 rule_test!(
     property_enum_convention,
     goblint::rules::PropertyEnumConvention

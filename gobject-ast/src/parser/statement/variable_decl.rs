@@ -29,7 +29,8 @@ impl Parser {
                 | "type_identifier"
                 | "primitive_type"
                 | "sized_type_specifier"
-                | "struct_specifier" => {
+                | "struct_specifier"
+                | "macro_type_specifier" => {
                     type_parts.push(std::str::from_utf8(&source[child.byte_range()]).ok()?);
                     if first_type_node.is_none() {
                         first_type_node = Some(child);
