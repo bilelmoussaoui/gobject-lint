@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{ast_context::AstContext, config::Config};
 
 /// Rule category (similar to Clippy's lint categories)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize)]
 pub enum Category {
     /// Code that is outright wrong or very useless
     Correctness,
@@ -190,7 +190,7 @@ pub use use_g_value_set_static_string::UseGValueSetStaticString;
 pub use use_g_variant_new_typed::UseGVariantNewTyped;
 pub use use_pragma_once::UsePragmaOnce;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Violation {
     pub file: PathBuf,
     pub line: usize,

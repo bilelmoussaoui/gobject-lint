@@ -64,7 +64,7 @@ pub struct Config {
 }
 
 /// Rule severity level
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum RuleLevel {
     /// Report as error and exit with failure code
     Error,

@@ -93,6 +93,8 @@ pub struct RuleEntry {
     pub rule: Box<dyn Rule>,
     pub level: crate::config::RuleLevel,
     pub rule_config: RuleConfig,
+    pub min_glib_version: (u32, u32),
+    pub requires_auto_cleanup: bool,
 }
 
 /// Macro to define all rules in execution order with their minimum GLib version
@@ -175,6 +177,8 @@ macro_rules! impl_create_all_rules {
                             crate::config::RuleLevel::Ignore
                         },
                         rule_config: config.rules.$config_field.clone(),
+                        min_glib_version: ($major, $minor),
+                        requires_auto_cleanup: $requires_auto_cleanup,
                     },
                 )*
             ]
@@ -359,7 +363,7 @@ pub fn scan_with_ast(
     Ok(violations)
 }
 
-/// List all available rules with their descriptions
+/// List all available rules with their descriptions (text format)
 pub fn list_all_rules(config: &Config) {
     let rules = create_all_rules(config);
 
@@ -387,6 +391,49 @@ pub fn list_all_rules(config: &Config) {
         };
         println!("  {} {} {}{} - {}", status, name, category, fixable, desc);
     }
+}
+
+/// List all available rules as JSON
+pub fn list_all_rules_json(config: &Config) -> String {
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    struct RuleMetadata {
+        name: String,
+        category: String,
+        fixable: bool,
+        min_glib_version: String,
+        requires_auto_cleanup: bool,
+    }
+
+    #[derive(Serialize)]
+    struct RulesOutput {
+        rules: Vec<RuleMetadata>,
+        total: usize,
+        fixable_count: usize,
+    }
+
+    let rules = create_all_rules(config);
+    let fixable_count = rules.iter().filter(|e| e.rule.fixable()).count();
+
+    let metadata: Vec<RuleMetadata> = rules
+        .iter()
+        .map(|entry| RuleMetadata {
+            name: entry.rule.name().to_string(),
+            category: entry.rule.category().as_str().to_string(),
+            fixable: entry.rule.fixable(),
+            min_glib_version: format!("{}.{}", entry.min_glib_version.0, entry.min_glib_version.1),
+            requires_auto_cleanup: entry.requires_auto_cleanup,
+        })
+        .collect();
+
+    let output = RulesOutput {
+        total: rules.len(),
+        fixable_count,
+        rules: metadata,
+    };
+
+    serde_json::to_string_pretty(&output).unwrap()
 }
 
 /// Keep only the violation with the highest rule_index for each (file, line)

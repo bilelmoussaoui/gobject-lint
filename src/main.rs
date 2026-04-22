@@ -9,6 +9,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 enum OutputFormat {
     /// Human-readable colorized output (default)
     Text,
+    /// JSON format
+    Json,
     /// SARIF JSON format for GitHub Code Scanning, VS Code, etc.
     Sarif,
     /// GCC-compatible format for Emacs, Vim, and other tools
@@ -87,16 +89,18 @@ fn parse_glib_version_arg(s: &str) -> Result<(u32, u32), String> {
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Auto-disable colors if not outputting to a terminal (for Emacs, pipes, etc.)
-    // unless using gcc format (which never uses colors)
-    if !matches!(args.format, OutputFormat::Gcc) {
+    // Auto-disable colors for machine-readable formats or when not a terminal
+    if matches!(
+        args.format,
+        OutputFormat::Json | OutputFormat::Sarif | OutputFormat::Gcc
+    ) {
+        // Machine-readable formats never use colors
+        colored::control::set_override(false);
+    } else {
         use std::io::IsTerminal;
         if !std::io::stdout().is_terminal() {
             colored::control::set_override(false);
         }
-    } else {
-        // GCC format never uses colors
-        colored::control::set_override(false);
     }
 
     // Load configuration
@@ -132,7 +136,14 @@ fn main() -> Result<()> {
 
     // Handle --list-rules
     if args.list_rules {
-        scanner::list_all_rules(&config);
+        match args.format {
+            OutputFormat::Json => {
+                println!("{}", scanner::list_all_rules_json(&config));
+            }
+            _ => {
+                scanner::list_all_rules(&config);
+            }
+        }
         return Ok(());
     }
 
@@ -239,6 +250,11 @@ fn main() -> Result<()> {
     match args.format {
         OutputFormat::Text => {
             reporter::report_violations(&violations, args.verbose, &config);
+        }
+        OutputFormat::Json => {
+            let json_output = serde_json::to_string_pretty(&violations)
+                .expect("Failed to serialize violations to JSON");
+            println!("{}", json_output);
         }
         OutputFormat::Sarif => {
             let sarif_output = output::sarif::generate_sarif(&violations, &config, &project_root);
