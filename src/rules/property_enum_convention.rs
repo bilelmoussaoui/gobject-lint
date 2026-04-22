@@ -176,28 +176,7 @@ impl Rule for PropertyEnumConvention {
 
                 // Fix 0: Convert anonymous enum to typedef if needed
                 if let Some(ref enum_name) = derived_enum_name {
-                    // Add "typedef " before "enum"
-                    fixes.push(Fix::new(
-                        enum_info.location.start_byte,
-                        enum_info.location.start_byte,
-                        "typedef ".to_string(),
-                    ));
-
-                    // Add enum name and semicolon after the closing brace
-                    // Find the semicolon after the enum body
-                    let mut semicolon_pos = enum_info.body_location.end_byte;
-                    while semicolon_pos < file.source.len() && file.source[semicolon_pos] != b';' {
-                        semicolon_pos += 1;
-                    }
-
-                    if semicolon_pos < file.source.len() {
-                        // Replace the semicolon with " EnumName;"
-                        fixes.push(Fix::new(
-                            semicolon_pos,
-                            semicolon_pos + 1,
-                            format!(" {};", enum_name),
-                        ));
-                    }
+                    fixes.extend(self.create_typedef_fixes(file, enum_info, enum_name));
                 }
 
                 // Fix 1: Remove PROP_0 line entirely (including any blank line after it)
@@ -326,6 +305,7 @@ impl Rule for PropertyEnumConvention {
             }
 
             // Check modern enums (without PROP_0/N_PROPS) for outdated array sizes
+            // and missing switch casts
             for enum_info in file.iter_property_enums() {
                 let has_prop_0 = enum_info
                     .values
@@ -343,11 +323,22 @@ impl Rule for PropertyEnumConvention {
                     continue;
                 }
 
-                // Find class_init to get property override map
-                let (_, assignments) = match file.find_class_init_for_property_enum(enum_info) {
-                    Some(pair) => pair,
-                    None => continue,
-                };
+                // Only check already-modern enums (ones with explicit = 1 on first value)
+                let is_already_modern = enum_info
+                    .values
+                    .first()
+                    .and_then(|v| v.value.as_ref())
+                    .is_some_and(|val| *val == 1);
+
+                if !is_already_modern {
+                    continue;
+                }
+
+                let (class_context, assignments) =
+                    match self.find_class_context_for_enum(file, enum_info) {
+                        Some(pair) => pair,
+                        None => continue,
+                    };
 
                 let property_map = self.build_property_override_map(&assignments);
 
@@ -368,6 +359,15 @@ impl Rule for PropertyEnumConvention {
                     path,
                     enum_info,
                     &last_real_prop.name,
+                    violations,
+                );
+
+                // Check if getter/setter need switch casts or typedef
+                self.check_modern_enum_switch_casts(
+                    file,
+                    path,
+                    enum_info,
+                    &class_context,
                     violations,
                 );
             }
@@ -645,6 +645,100 @@ impl PropertyEnumConvention {
         }
 
         property_map
+    }
+
+    /// Check if modern enum needs switch casts in getter/setter (and typedef if
+    /// anonymous)
+    fn check_modern_enum_switch_casts(
+        &self,
+        file: &gobject_ast::FileModel,
+        path: &std::path::Path,
+        enum_info: &gobject_ast::EnumInfo,
+        class_context: &ClassContext,
+        violations: &mut Vec<Violation>,
+    ) {
+        // Determine the enum name (derive if anonymous)
+        let enum_name = if let Some(ref name) = enum_info.name {
+            name.clone()
+        } else {
+            // For anonymous enums, derive the name from the class type
+            match self.derive_enum_name_from_class_type(&class_context.class_type_info) {
+                Some(name) => name,
+                None => return, // Can't derive a name
+            }
+        };
+
+        let mut fixes = Vec::new();
+
+        // If anonymous enum, add typedef
+        if enum_info.name.is_none() {
+            fixes.extend(self.create_typedef_fixes(file, enum_info, &enum_name));
+        }
+
+        // Add switch casts for getter/setter functions
+        if let Some(ref func_name) = class_context.get_property_func {
+            self.add_switch_cast_for_function(file, func_name, &enum_name, &mut fixes);
+        }
+        if let Some(ref func_name) = class_context.set_property_func {
+            self.add_switch_cast_for_function(file, func_name, &enum_name, &mut fixes);
+        }
+
+        // Only create a violation if we actually need to add fixes
+        if !fixes.is_empty() {
+            let message = if enum_info.name.is_none() {
+                format!(
+                    "Add typedef {} and use cast in switch statements for type safety",
+                    enum_name
+                )
+            } else {
+                format!(
+                    "Add ({}) cast to switch statements for type safety",
+                    enum_name
+                )
+            };
+
+            violations.push(self.violation_with_fixes(
+                path,
+                enum_info.location.line,
+                1,
+                message,
+                fixes,
+            ));
+        }
+    }
+
+    /// Create fixes to convert an anonymous enum to a typedef enum
+    fn create_typedef_fixes(
+        &self,
+        file: &gobject_ast::FileModel,
+        enum_info: &gobject_ast::EnumInfo,
+        enum_name: &str,
+    ) -> Vec<Fix> {
+        let mut fixes = Vec::new();
+
+        // Add "typedef " before "enum"
+        fixes.push(Fix::new(
+            enum_info.location.start_byte,
+            enum_info.location.start_byte,
+            "typedef ".to_string(),
+        ));
+
+        // Add enum name and semicolon after the closing brace
+        let mut semicolon_pos = enum_info.body_location.end_byte;
+        while semicolon_pos < file.source.len() && file.source[semicolon_pos] != b';' {
+            semicolon_pos += 1;
+        }
+
+        if semicolon_pos < file.source.len() {
+            // Replace the semicolon with " EnumName;"
+            fixes.push(Fix::new(
+                semicolon_pos,
+                semicolon_pos + 1,
+                format!(" {};", enum_name),
+            ));
+        }
+
+        fixes
     }
 
     /// Check for GParamSpec arrays with outdated PROP_X + 1 sizes
