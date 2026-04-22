@@ -79,7 +79,7 @@ body {
     border-color: #d1d5db;
   }
   .github-icon {
-    filter: invert(0);
+    color: #374151;
   }
 }
 
@@ -149,7 +149,7 @@ body {
     border-color: #1f2937;
   }
   .github-icon {
-    filter: invert(1);
+    color: #d1d5db;
   }
 }
 
