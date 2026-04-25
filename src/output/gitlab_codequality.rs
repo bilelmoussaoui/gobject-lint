@@ -50,20 +50,25 @@ fn generate_issue(violation: &Violation, project_root: &Path) -> serde_json::Val
         "description": violation.message,
         "check_name": violation.rule,
         "fingerprint": geneerate_issue_fingerprint(violation, &relative_path),
-        "severity": rule_level_to_codequality_severity(violation.level),
+        "severity": rule_level_to_codequality_severity(violation),
         "categories": [violation.category],
         "location": location,
     })
 }
 
 // The severity of the violation, can be one of info, minor, major, critical, or blocker.
-fn rule_level_to_codequality_severity(level: crate::config::RuleLevel) -> &'static str {
-    match level {
-        crate::config::RuleLevel::Error => "blocker",
-        // FIXME: Decide which one?
-        // crate::config::RuleLevel::Warn => "critical",
-        crate::config::RuleLevel::Warn => "info",
-        crate::config::RuleLevel::Ignore => {
+fn rule_level_to_codequality_severity(violation: &Violation) -> &'static str {
+    use crate::config::RuleLevel;
+    use crate::rules::Category;
+
+    match (violation.level, violation.category) {
+        (RuleLevel::Error, _) => "blocker",
+        // Bump Correctness and Perf to critical if they are warnings
+        // Only matters for how its displayed in Gitlab.
+        (RuleLevel::Warn, Category::Correctness) => "critical",
+        (RuleLevel::Warn, Category::Perf) => "critical",
+        (RuleLevel::Warn, _) => "info",
+        (RuleLevel::Ignore, _) => {
             unreachable!("Ignored violations should not be reported")
         }
     }
