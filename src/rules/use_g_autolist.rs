@@ -56,10 +56,10 @@ impl UseGAutolist {
                 let is_returned = func.is_var_returned(type_info);
 
                 if !is_returned {
-                    let auto_type = if type_info.base_type == "GList" {
-                        "g_autolist"
-                    } else {
-                        "g_autoslist"
+                    let (auto_type, base_type) = match type_info.base_type.as_str() {
+                        "GList" => ("g_autolist", "g_list"),
+                        "GSList" => ("g_autoslist", "g_slist"),
+                        _ => unreachable!(),
                     };
 
                     violations.push(self.violation(
@@ -67,9 +67,7 @@ impl UseGAutolist {
                         location.line,
                         location.column,
                         format!(
-                            "Consider using {} to avoid manual {}_free_full cleanup",
-                            auto_type,
-                            type_info.base_type.to_lowercase()
+                            "Consider using {auto_type} to avoid manual {base_type}_free_full cleanup",
                         ),
                     ));
                 }
