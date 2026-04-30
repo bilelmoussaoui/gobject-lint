@@ -52,6 +52,12 @@ impl UseGAutolist {
             };
 
             if func.is_var_passed_to_function(type_info, free_func, 0) {
+                // Skip if using basic free functions (g_free, free) as those indicate
+                // primitive types (char*, etc.) that don't support g_autoptr
+                if self.uses_basic_destructor(func, free_func) {
+                    continue;
+                }
+
                 // Check if variable is returned (would need different handling)
                 let is_returned = func.is_var_returned(type_info);
 
@@ -100,5 +106,34 @@ impl UseGAutolist {
         }
 
         result
+    }
+
+    /// Check if any call to the free function uses a basic destructor (g_free,
+    /// free, etc.) This indicates a list of primitive types that don't
+    /// support g_autoptr
+    fn uses_basic_destructor(
+        &self,
+        func: &gobject_ast::top_level::FunctionDefItem,
+        free_func: &str,
+    ) -> bool {
+        use gobject_ast::{Expression, expression::Argument};
+
+        let calls = func.find_calls(&[free_func]);
+
+        for call in calls {
+            if call.arguments.len() >= 2 {
+                let Argument::Expression(expr) = &call.arguments[1];
+                if let Expression::Identifier(destructor) = expr.as_ref()
+                    && matches!(
+                        destructor.name.as_str(),
+                        "g_free" | "free" | "g_slice_free" | "g_slice_free1"
+                    )
+                {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 }
