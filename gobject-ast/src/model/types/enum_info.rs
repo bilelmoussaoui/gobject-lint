@@ -33,28 +33,38 @@ impl EnumInfo {
             return false;
         }
 
-        let mut has_bit_shift = false;
-        let mut has_power_of_two = false;
+        let mut flag_like_count = 0;
+        let mut total_count = 0;
 
         for value in &self.values {
-            // Check if the value expression is a bit shift operation
-            if let Some(expr) = &value.value_expr {
-                if is_bit_shift_expr(expr) {
-                    has_bit_shift = true;
-                }
+            // Skip values without explicit values (auto-incremented)
+            if value.value_expr.is_none() {
+                continue;
             }
 
-            // Check if the evaluated value is a power of 2
-            if let Some(num) = value.value {
-                if num > 0 && (num & (num - 1)) == 0 {
-                    has_power_of_two = true;
-                }
+            total_count += 1;
+
+            // Check if the value expression is a bit shift operation
+            let is_bit_shift = value
+                .value_expr
+                .as_ref()
+                .map(|expr| is_bit_shift_expr(expr))
+                .unwrap_or(false);
+
+            // Check if the evaluated value is a power of 2 (or 0)
+            let is_power_of_two = value
+                .value
+                .map(|num| num == 0 || (num > 0 && (num & (num - 1)) == 0))
+                .unwrap_or(false);
+
+            if is_bit_shift || is_power_of_two {
+                flag_like_count += 1;
             }
         }
 
-        // Consider it a flags enum if it uses bit shifts or multiple power-of-two
-        // values
-        has_bit_shift || (has_power_of_two && self.values.len() > 2)
+        // Consider it a flags enum if most values (>= 80%) are flag-like
+        // and there are at least 2 explicit values
+        total_count >= 2 && flag_like_count * 100 / total_count >= 80
     }
 
     /// Check if this enum has a specific attribute (e.g., G_GNUC_FLAG_ENUM)

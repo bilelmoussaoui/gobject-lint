@@ -413,34 +413,6 @@ impl Parser {
         })
     }
 
-    /// Extract attributes between closing brace and declarator in typedef enum
-    /// e.g., "typedef enum { ... } G_GNUC_FLAG_ENUM Name;" ->
-    /// ["G_GNUC_FLAG_ENUM"]
-    fn extract_typedef_enum_attributes(
-        &self,
-        type_node: Node,
-        declarator_node: Node,
-        source: &[u8],
-    ) -> Vec<String> {
-        // Get the text between the closing brace of the enum and the declarator
-        let enum_end = type_node.end_byte();
-        let decl_start = declarator_node.start_byte();
-
-        if decl_start <= enum_end {
-            return Vec::new();
-        }
-
-        let between = &source[enum_end..decl_start];
-        let between_str = std::str::from_utf8(between).unwrap_or("");
-
-        // Split by whitespace and filter out empty strings and punctuation
-        between_str
-            .split_whitespace()
-            .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_'))
-            .map(|s| s.to_owned())
-            .collect()
-    }
-
     pub(super) fn extract_enum(&self, node: Node, source: &[u8]) -> Option<EnumInfo> {
         // Check if this is a typedef or regular declaration containing an enum
         let node_text = std::str::from_utf8(&source[node.byte_range()]).ok()?;
@@ -474,24 +446,45 @@ impl Parser {
         if node.kind() == "type_definition" {
             if let Some(type_node) = node.child_by_field_name("type") {
                 if type_node.kind() == "enum_specifier" {
-                    if let Some(declarator_node) = node.child_by_field_name("declarator") {
-                        let name =
-                            std::str::from_utf8(&source[declarator_node.byte_range()]).ok()?;
-                        if let Some(body) = type_node.child_by_field_name("body") {
-                            let values = self.extract_enum_values(body, source);
-                            let attributes = self.extract_typedef_enum_attributes(
-                                type_node,
-                                declarator_node,
-                                source,
-                            );
-                            return Some(EnumInfo {
-                                name: Some(name.to_owned()),
-                                location: self.node_location(node),
-                                values,
-                                body_location: self.node_location(body),
-                                attributes,
-                            });
+                    if let Some(body) = type_node.child_by_field_name("body") {
+                        // Collect type_identifiers from type_definition children (these are
+                        // attributes)
+                        let mut attributes = Vec::new();
+                        let mut cursor = node.walk();
+                        for child in node.children(&mut cursor) {
+                            if child.kind() == "type_identifier" {
+                                if let Some(text) =
+                                    std::str::from_utf8(&source[child.byte_range()]).ok()
+                                {
+                                    attributes.push(text.to_owned());
+                                }
+                            }
                         }
+
+                        // The actual type name is the next sibling after type_definition
+                        // (tree-sitter quirk)
+                        let name = if let Some(next) = node.next_sibling() {
+                            if next.kind() == "type_identifier" {
+                                std::str::from_utf8(&source[next.byte_range()])
+                                    .ok()
+                                    .map(|s| s.to_owned())
+                            } else {
+                                // No sibling type_identifier, last child is the name
+                                attributes.pop()
+                            }
+                        } else {
+                            // No sibling, last child is the name
+                            attributes.pop()
+                        };
+
+                        let values = self.extract_enum_values(body, source);
+                        return Some(EnumInfo {
+                            name,
+                            location: self.node_location(node),
+                            values,
+                            body_location: self.node_location(body),
+                            attributes,
+                        });
                     }
                 }
             }
