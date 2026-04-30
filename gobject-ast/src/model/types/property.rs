@@ -429,6 +429,20 @@ fn extract_flags_arg(arg: &Argument) -> Vec<ParamFlag> {
                     collect_flags(&*binary.right, flags);
                 }
             }
+            Expression::Cast(cast) => {
+                // Unwrap cast expressions like (GParamFlags)(flags)
+                collect_flags(&cast.operand, flags);
+            }
+            Expression::Call(call) => {
+                // Handle casts that tree-sitter parses as calls: (Type)(expr)
+                // This happens when Type is a simple identifier
+                // If it's a "call" with a single argument and the function is a parenthesized
+                // type, treat the argument as the actual flags
+                if call.arguments.len() == 1 {
+                    let Argument::Expression(arg_expr) = &call.arguments[0];
+                    collect_flags(arg_expr, flags);
+                }
+            }
             _ => {}
         }
     }
