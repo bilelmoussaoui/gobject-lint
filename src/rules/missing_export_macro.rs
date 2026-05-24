@@ -21,8 +21,6 @@ impl Rule for MissingExportMacro {
         Some(
             "Detects functions and types in public headers that lack export macros.\n\
              Public API should be marked with appropriate export macros (e.g., G_MODULE_EXPORT, \
-             CLUTTER_EXPORT, META_EXPORT) to ensure proper symbol visibility.\n\
-             Public API should be marked with appropriate export macros (e.g., G_MODULE_EXPORT, \
              CLUTTER_EXPORT, META_EXPORT) to ensure proper symbol visibility.",
         )
     }
