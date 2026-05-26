@@ -42,6 +42,7 @@ impl AstContext {
             .git_global(true) // Respect global gitignore
             .git_exclude(true) // Respect .git/info/exclude
             .require_git(false) // Work in non-git directories too
+            .parents(false)
             .build()
             .filter_map(std::result::Result::ok)
             .filter(|e| {
