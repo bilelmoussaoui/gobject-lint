@@ -1,0 +1,6 @@
+fd_basic.c:14:3: use_clear_functions: Use g_clear_fd (&self->fd, NULL) instead of close and -1 assignment
+fd_basic.c:23:3: use_clear_functions: Use g_clear_fd (&self->fd, NULL) instead of manual validity check, close, and -1 assignment
+fd_basic.c:34:3: use_clear_functions: Use g_clear_fd (&self->sock, NULL) instead of manual validity check, close, and -1 assignment
+fd_basic.c:45:3: use_clear_functions: Use g_clear_fd (&self->fd, NULL) instead of g_close and -1 assignment
+fd_basic.c:54:3: use_clear_functions: Use g_clear_fd (&self->fd, error) instead of g_close and -1 assignment
+fd_basic.c:84:5: use_clear_functions: Use g_clear_fd (&self->fd, NULL) instead of close and -1 assignment

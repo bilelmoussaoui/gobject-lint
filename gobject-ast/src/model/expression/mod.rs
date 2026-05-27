@@ -36,7 +36,7 @@ pub use subscript::SubscriptExpression;
 pub use unary::UnaryExpression;
 pub use update::UpdateExpression;
 
-use crate::model::{DefineValue, SourceLocation};
+use crate::model::{DefineValue, SourceLocation, UnaryOp};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -210,6 +210,18 @@ impl Expression {
     /// Check if this expression is the number 0
     pub fn is_zero(&self) -> bool {
         matches!(self, Self::NumberLiteral(n) if n.value.trim() == "0")
+    }
+
+    /// Check if this expression is -1 (number literal or unary negation)
+    pub fn is_negative_one(&self) -> bool {
+        match self {
+            Self::NumberLiteral(n) => n.value.trim() == "-1",
+            Self::Unary(u) => {
+                u.operator == UnaryOp::Negate
+                    && matches!(u.operand.as_ref(), Self::NumberLiteral(n) if n.value.trim() == "1")
+            }
+            _ => false,
+        }
     }
 
     /// Check if this expression is a string literal
