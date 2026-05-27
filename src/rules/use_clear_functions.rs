@@ -9,11 +9,12 @@ use crate::{
     rules::{Fix, Rule, Violation},
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum NullCheck {
     Null,
     Zero,
     NullOrZero,
+    NegativeOne,
 }
 
 impl NullCheck {
@@ -22,6 +23,32 @@ impl NullCheck {
             Self::Null => expr.is_null(),
             Self::Zero => expr.is_zero(),
             Self::NullOrZero => expr.is_null() || expr.is_zero(),
+            Self::NegativeOne => expr.is_negative_one(),
+        }
+    }
+
+    fn sentinel_desc(self) -> &'static str {
+        match self {
+            Self::Null => "NULL",
+            Self::Zero => "zero",
+            Self::NullOrZero => "NULL/zero",
+            Self::NegativeOne => "-1",
+        }
+    }
+
+    fn guard_desc(self) -> &'static str {
+        match self {
+            Self::Null | Self::NullOrZero => "NULL",
+            Self::Zero => "non-zero",
+            Self::NegativeOne => "validity",
+        }
+    }
+
+    fn is_compatible_with(self, other: Self) -> bool {
+        match (self, other) {
+            (Self::NegativeOne, Self::NegativeOne) => true,
+            (Self::NegativeOne, _) | (_, Self::NegativeOne) => false,
+            _ => true,
         }
     }
 }
@@ -35,6 +62,7 @@ enum ClearReplacement {
     WeakPointer,
     List { clear_func: &'static str },
     Error,
+    Fd,
 }
 
 #[derive(Clone, Copy)]
@@ -57,6 +85,18 @@ macro_rules! PointerMapping {
 }
 
 const CLEAR_MAPPINGS: &[ClearMapping] = &[
+    ClearMapping {
+        source_func: "close",
+        replacement: ClearReplacement::Fd,
+        null_check: NullCheck::NegativeOne,
+        min_version: (2, 76),
+    },
+    ClearMapping {
+        source_func: "g_close",
+        replacement: ClearReplacement::Fd,
+        null_check: NullCheck::NegativeOne,
+        min_version: (2, 76),
+    },
     ClearMapping {
         source_func: "g_source_remove",
         replacement: ClearReplacement::HandleId,
@@ -183,7 +223,7 @@ fn address_of(var_name: &str) -> String {
 fn format_replacement(
     mapping: &ClearMapping,
     var_name: &str,
-    obj: Option<&str>,
+    extra_arg: Option<&str>,
     style: &crate::config::Style,
 ) -> String {
     let addr = address_of(var_name);
@@ -196,15 +236,19 @@ fn format_replacement(
             style.format_call_stmt("g_clear_handle_id", &[&addr, mapping.source_func])
         }
         ClearReplacement::SignalHandler => {
-            let obj = obj.unwrap_or("obj");
+            let obj = extra_arg.unwrap_or("obj");
             style.format_call_stmt("g_clear_signal_handler", &[&addr, obj])
         }
         ClearReplacement::WeakPointer => style.format_call_stmt("g_clear_weak_pointer", &[&addr]),
         ClearReplacement::List { clear_func } => {
-            let func = obj.unwrap_or("NULL");
+            let func = extra_arg.unwrap_or("NULL");
             style.format_call_stmt(clear_func, &[&addr, func])
         }
         ClearReplacement::Error => style.format_call_stmt("g_clear_error", &[&addr]),
+        ClearReplacement::Fd => {
+            let err = extra_arg.unwrap_or("NULL");
+            style.format_call_stmt("g_clear_fd", &[&addr, err])
+        }
     }
 }
 
@@ -366,12 +410,13 @@ impl UseClearFunctions {
                 continue;
             }
 
-            let obj = call.get_arg_text(1);
-            let replacement = format_replacement(mapping, var_name, obj, &config.style);
+            let extra_arg = call.get_arg_text(1);
+            let replacement = format_replacement(mapping, var_name, extra_arg, &config.style);
             let message = format!(
-                "Use {} instead of {} and NULL/zero assignment",
+                "Use {} instead of {} and {} assignment",
                 replacement.trim_end_matches(';'),
-                mapping.source_func
+                mapping.source_func,
+                mapping.null_check.sentinel_desc()
             );
 
             let stmt1_end = stmt1.location().find_semicolon_end();
@@ -403,7 +448,9 @@ impl UseClearFunctions {
             return false;
         }
 
-        let Some(checked_var) = self.find_variable_in_condition(&if_stmt.condition) else {
+        let Some((checked_var, condition_sentinel)) =
+            self.find_variable_in_condition(&if_stmt.condition)
+        else {
             return false;
         };
 
@@ -411,21 +458,27 @@ impl UseClearFunctions {
             return false;
         }
 
-        let Some(mapping) = self.find_unref_in_body(&if_stmt.then_body, checked_var, config) else {
+        let Some((mapping, extra_arg)) =
+            self.find_unref_in_body(&if_stmt.then_body, checked_var, config)
+        else {
             return false;
         };
+
+        if !condition_sentinel.is_compatible_with(mapping.null_check) {
+            return false;
+        }
 
         if !self.has_null_assignment(&if_stmt.then_body, checked_var, mapping.null_check) {
             return false;
         }
 
-        let obj = if_stmt.then_body[0]
-            .extract_call()
-            .and_then(|call| call.get_arg_text(1));
-        let replacement = format_replacement(&mapping, checked_var, obj, &config.style);
+        let replacement = format_replacement(&mapping, checked_var, extra_arg, &config.style);
         let message = format!(
-            "Use {} instead of manual NULL check, unref, and assignment",
-            replacement.trim_end_matches(';')
+            "Use {} instead of manual {} check, {}, and {} assignment",
+            replacement.trim_end_matches(';'),
+            mapping.null_check.guard_desc(),
+            mapping.source_func,
+            mapping.null_check.sentinel_desc()
         );
 
         let fix = Fix::new(
@@ -439,9 +492,9 @@ impl UseClearFunctions {
         true
     }
 
-    fn find_variable_in_condition<'a>(&self, expr: &'a Expression) -> Option<&'a str> {
+    fn find_variable_in_condition<'a>(&self, expr: &'a Expression) -> Option<(&'a str, NullCheck)> {
         if let Some(var) = expr.extract_variable_name() {
-            return Some(var);
+            return Some((var, NullCheck::NullOrZero));
         }
 
         match expr {
@@ -453,11 +506,35 @@ impl UseClearFunctions {
             }) => {
                 let l_empty = l.is_null() || l.is_zero();
                 let r_empty = r.is_null() || r.is_zero();
-                match (op, l_empty, r_empty) {
-                    (BinaryOp::NotEqual, true, false) => r.extract_variable_name(),
-                    (BinaryOp::Less, true, false) => r.extract_variable_name(),
-                    (BinaryOp::NotEqual, false, true) => l.extract_variable_name(),
-                    (BinaryOp::Greater, false, true) => l.extract_variable_name(),
+                let l_neg1 = l.is_negative_one();
+                let r_neg1 = r.is_negative_one();
+                match (op, l_empty, r_empty, l_neg1, r_neg1) {
+                    (BinaryOp::NotEqual, true, false, ..) => {
+                        Some((r.extract_variable_name()?, NullCheck::NullOrZero))
+                    }
+                    (BinaryOp::Less, true, false, ..) => {
+                        Some((r.extract_variable_name()?, NullCheck::NullOrZero))
+                    }
+                    (BinaryOp::NotEqual, false, true, ..) => {
+                        Some((l.extract_variable_name()?, NullCheck::NullOrZero))
+                    }
+                    (BinaryOp::Greater, false, true, ..) => {
+                        Some((l.extract_variable_name()?, NullCheck::NullOrZero))
+                    }
+                    // fd >= 0 or 0 <= fd
+                    (BinaryOp::GreaterEqual, false, ..) if r_empty => {
+                        Some((l.extract_variable_name()?, NullCheck::NegativeOne))
+                    }
+                    (BinaryOp::LessEqual, _, false, ..) if l_empty => {
+                        Some((r.extract_variable_name()?, NullCheck::NegativeOne))
+                    }
+                    // fd != -1 or -1 != fd
+                    (BinaryOp::NotEqual, _, _, _, true) => {
+                        Some((l.extract_variable_name()?, NullCheck::NegativeOne))
+                    }
+                    (BinaryOp::NotEqual, _, _, true, _) => {
+                        Some((r.extract_variable_name()?, NullCheck::NegativeOne))
+                    }
                     _ => None,
                 }
             }
@@ -465,8 +542,8 @@ impl UseClearFunctions {
                 operator: UnaryOp::Not,
                 operand: op,
                 ..
-            }) => op.extract_variable_name(),
-            _ => expr.location().as_str(),
+            }) => Some((op.extract_variable_name()?, NullCheck::NullOrZero)),
+            _ => Some((expr.location().as_str()?, NullCheck::NullOrZero)),
         }
     }
 
@@ -482,12 +559,12 @@ impl UseClearFunctions {
         found
     }
 
-    fn find_unref_in_body(
+    fn find_unref_in_body<'a>(
         &self,
-        statements: &[Statement],
+        statements: &'a [Statement],
         var_name: &str,
         config: &Config,
-    ) -> Option<ClearMapping> {
+    ) -> Option<(ClearMapping, Option<&'a str>)> {
         for stmt in statements {
             if let Some(call) = stmt.extract_call() {
                 for mapping in CLEAR_MAPPINGS {
@@ -508,7 +585,8 @@ impl UseClearFunctions {
                             if let Some(arg_text) = arg.location().as_str()
                                 && arg_text.contains(var_name)
                             {
-                                return Some(*mapping);
+                                let extra = call.get_arg(1).and_then(|a| a.location().as_str());
+                                return Some((*mapping, extra));
                             }
                         }
                     }
