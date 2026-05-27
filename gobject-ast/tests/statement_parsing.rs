@@ -514,3 +514,35 @@ fn test_for_statement_init_variants() {
         "fourth loop should have no initializer"
     );
 }
+
+#[test]
+fn test_negative_one_expression() {
+    let project = parse_fixture("negative_one.c");
+    let fixture_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/negative_one.c");
+    let file = project.get_file(&fixture_path).expect("file not parsed");
+
+    let func = file
+        .iter_function_definitions()
+        .next()
+        .expect("no function");
+
+    let assign_stmt = func
+        .body_statements
+        .iter()
+        .find_map(|s| {
+            if let Statement::Expression(expr) = s
+                && let Expression::Assignment(a) = expr.as_ref()
+            {
+                Some(a)
+            } else {
+                None
+            }
+        })
+        .expect("should have assignment fd = -1");
+
+    assert!(
+        assign_stmt.rhs.is_negative_one(),
+        "RHS of `fd = -1` should be recognized as negative one"
+    );
+}
