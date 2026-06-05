@@ -160,17 +160,17 @@ fn main() -> Result<()> {
         std::process::exit(1);
     }
 
+    // Apply --category filter if specified
+    if let Some(category) = args.category {
+        config.filter_by_category(category)?;
+    }
+
     // Apply --exclude filter if specified
     if !args.exclude.is_empty()
         && let Err(e) = config.disable_rules(&args.exclude)
     {
         eprintln!("{} {}", "error:".red().bold(), e);
         std::process::exit(1);
-    }
-
-    // Apply --category filter if specified
-    if let Some(category) = args.category {
-        config.filter_by_category(category)?;
     }
 
     // Validate that explicitly enabled rules don't conflict with config
