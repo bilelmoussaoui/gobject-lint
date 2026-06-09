@@ -81,7 +81,10 @@ impl UnnecessaryNullCheck {
         let Some(func_name) = call.function_name_str() else {
             return;
         };
-        if !func_name.starts_with("g_free") && !func_name.starts_with("g_clear_") {
+        if !func_name.starts_with("g_free")
+            && !func_name.starts_with("g_clear_")
+            && func_name != "g_strfreev"
+        {
             return;
         }
 
