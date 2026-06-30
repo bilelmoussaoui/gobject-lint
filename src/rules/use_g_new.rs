@@ -1,4 +1,8 @@
-use gobject_ast::model::{CallExpression, Expression, FileModel, FunctionDefItem};
+use std::collections::HashMap;
+
+use gobject_ast::model::{
+    CallExpression, Expression, FileModel, FunctionDefItem, SizeofOperand, TypeInfo, UnaryOp,
+};
 
 use crate::{
     ast_context::AstContext,
@@ -33,8 +37,9 @@ impl Rule for UseGNew {
         file: &FileModel,
         violations: &mut Vec<Violation>,
     ) {
+        let var_types = func.local_var_types();
         for call in func.find_calls(&["g_malloc", "g_malloc0"]) {
-            self.check_call(file, call, config, violations);
+            self.check_call(file, call, &var_types, config, violations);
         }
     }
 }
@@ -44,15 +49,14 @@ impl UseGNew {
         &self,
         file: &FileModel,
         call: &CallExpression,
+        var_types: &HashMap<&str, &TypeInfo>,
         config: &Config,
         violations: &mut Vec<Violation>,
     ) {
-        // Need exactly 1 argument
         if call.arguments.len() != 1 {
             return;
         }
 
-        // Check if argument is sizeof(Type)
         let Some(arg_expr) = call.get_arg(0) else {
             return;
         };
@@ -60,10 +64,49 @@ impl UseGNew {
             return;
         };
 
-        // Extract the type - only works for simple types/identifiers
-        let Some(type_name) = sizeof_expr.type_name() else {
-            // Complex expression, not a simple type - skip
-            return;
+        let resolved_type;
+        let type_name = match &sizeof_expr.operand {
+            Some(SizeofOperand::Type(t)) => {
+                resolved_type = t.qualified_base_name();
+                resolved_type.as_str()
+            }
+            Some(SizeofOperand::Expression(expr)) => {
+                if let Expression::Identifier(id) = expr.as_ref() {
+                    if let Some(type_info) = var_types.get(id.name.as_str()) {
+                        if type_info.pointer_depth > 0 {
+                            return;
+                        }
+                        resolved_type = type_info.qualified_base_name();
+                        resolved_type.as_str()
+                    } else if Self::looks_like_macro_constant(&id.name) {
+                        return;
+                    } else {
+                        id.name.as_str()
+                    }
+                } else if let Expression::Unary(unary) = expr.as_ref()
+                    && unary.operator == UnaryOp::Dereference
+                    && let Expression::Identifier(id) = unary.operand.as_ref()
+                {
+                    if let Some(type_info) = var_types.get(id.name.as_str()) {
+                        if type_info.pointer_depth < 1 {
+                            return;
+                        }
+                        let base = type_info.qualified_base_name();
+                        let deref_depth = type_info.pointer_depth - 1;
+                        if deref_depth > 0 {
+                            resolved_type = format!("{} {}", base, "*".repeat(deref_depth));
+                        } else {
+                            resolved_type = base;
+                        }
+                        resolved_type.as_str()
+                    } else {
+                        return;
+                    }
+                } else {
+                    return;
+                }
+            }
+            None => return,
         };
 
         let func_name = call.function_name();
@@ -85,5 +128,12 @@ impl UseGNew {
         );
 
         violations.push(self.violation_with_fix_at(&file.path, &call.location, message, fix));
+    }
+
+    fn looks_like_macro_constant(name: &str) -> bool {
+        name.len() > 1
+            && name
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
     }
 }

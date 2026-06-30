@@ -3,6 +3,8 @@ sources = [
   'basic.fixed.c',
   'separate_assignment.c',
   'separate_assignment.fixed.c',
+  'sizeof_value.c',
+  'sizeof_value.fixed.c',
 ]
 
 foreach src : sources
