@@ -5,7 +5,8 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::Shell;
 use colored::Colorize;
 use gobject_linter::{
     ast_context,
@@ -14,7 +15,7 @@ use gobject_linter::{
     meson::MesonIntrospection,
     output, reporter,
     rules::Category,
-    scanner,
+    scanner::{self, RuleName},
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use unidiff::PatchSet;
@@ -44,12 +45,12 @@ struct Args {
     list_rules: bool,
 
     /// Enable only specific rules (can be repeated, overrides config)
-    #[arg(long, value_name = "RULE")]
-    only: Vec<String>,
+    #[arg(long, value_enum, value_name = "RULE")]
+    only: Vec<RuleName>,
 
     /// Disable specific rules (can be repeated, overrides config)
-    #[arg(long, value_name = "RULE")]
-    exclude: Vec<String>,
+    #[arg(long, value_enum, value_name = "RULE")]
+    exclude: Vec<RuleName>,
 
     /// Enable only rules from this category (e.g., correctness, style, perf)
     #[arg(long, value_name = "CATEGORY")]
@@ -81,6 +82,10 @@ struct Args {
     /// to read from stdin). Useful for CI to report only on PR changes.
     #[arg(long, value_name = "FILE")]
     diff: Option<PathBuf>,
+
+    /// Generate shell completion script and exit
+    #[arg(long, value_name = "SHELL")]
+    completions: Option<Shell>,
 }
 
 /// Parse GLib version string for clap
@@ -95,6 +100,16 @@ fn parse_glib_version_arg(s: &str) -> Result<(u32, u32), String> {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    if let Some(shell) = args.completions {
+        clap_complete::generate(
+            shell,
+            &mut Args::command(),
+            "gobject-linter",
+            &mut std::io::stdout(),
+        );
+        return Ok(());
+    }
 
     // Initialize tracing
     tracing_subscriber::fmt()
@@ -153,11 +168,8 @@ fn main() -> Result<()> {
     }
 
     // Apply --only filter if specified
-    if !args.only.is_empty()
-        && let Err(e) = config.enable_only_rules(&args.only)
-    {
-        eprintln!("{} {}", "error:".red().bold(), e);
-        std::process::exit(1);
+    if !args.only.is_empty() {
+        config.enable_only_rules(&args.only);
     }
 
     // Apply --category filter if specified
@@ -166,11 +178,8 @@ fn main() -> Result<()> {
     }
 
     // Apply --exclude filter if specified
-    if !args.exclude.is_empty()
-        && let Err(e) = config.disable_rules(&args.exclude)
-    {
-        eprintln!("{} {}", "error:".red().bold(), e);
-        std::process::exit(1);
+    if !args.exclude.is_empty() {
+        config.disable_rules(&args.exclude);
     }
 
     // Validate that explicitly enabled rules don't conflict with config
