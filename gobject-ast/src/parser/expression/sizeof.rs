@@ -23,15 +23,26 @@ impl Parser {
             match child.kind() {
                 "sizeof" | "(" | ")" => continue,
 
-                // tree-sitter gives us type_descriptor for explicit type contexts
                 "type_descriptor" => {
                     let type_text = std::str::from_utf8(&source[child.byte_range()]).ok()?;
                     let type_info = TypeInfo::new(type_text, self.node_location(child));
                     operand = Some(SizeofOperand::Type(type_info));
                 }
 
-                // Parenthesized expression is ambiguous - could be type or expression
-                // Just parse as expression and let the rule decide what to do with it
+                // sizeof(X) where X is an identifier is ambiguous — tree-sitter
+                // defaults to expression, but X may be a typedef'd type.  Check
+                // the pre-scanned known_types to resolve the ambiguity.
+                "parenthesized_expression"
+                    if child.named_child_count() == 1
+                        && let Some(id_node) = child.named_child(0)
+                        && id_node.kind() == "identifier"
+                        && let Ok(id_text) = std::str::from_utf8(&source[id_node.byte_range()])
+                        && self.known_types.contains(id_text) =>
+                {
+                    let type_info = TypeInfo::new(id_text, self.node_location(id_node));
+                    operand = Some(SizeofOperand::Type(type_info));
+                }
+
                 _ if child.is_named() && Self::is_expression_node(&child) => {
                     if let Some(expr) = self.parse_expression(child, source) {
                         operand = Some(SizeofOperand::Expression(Box::new(expr)));

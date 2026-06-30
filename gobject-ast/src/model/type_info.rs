@@ -204,6 +204,18 @@ impl TypeInfo {
         self.base_type == name
     }
 
+    /// Base type with `struct`/`union` tag when applicable, e.g.
+    /// `"struct Foo"`, `"union Bar"`, or `"int"`.
+    pub fn qualified_base_name(&self) -> String {
+        if self.is_struct {
+            format!("struct {}", self.base_type)
+        } else if self.is_union {
+            format!("union {}", self.base_type)
+        } else {
+            self.base_type.clone()
+        }
+    }
+
     /// Human-readable type string reconstructed from structured fields,
     /// e.g. `"const char *"`.
     pub fn display_name(&self) -> String {
@@ -211,12 +223,7 @@ impl TypeInfo {
         if self.is_const {
             s.push_str("const ");
         }
-        if self.is_struct {
-            s.push_str("struct ");
-        } else if self.is_union {
-            s.push_str("union ");
-        }
-        s.push_str(&self.base_type);
+        s.push_str(&self.qualified_base_name());
         if self.pointer_depth > 0 {
             s.push(' ');
             for _ in 0..self.pointer_depth {
