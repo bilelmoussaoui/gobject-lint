@@ -1,0 +1,8 @@
+sizeof_value.c:13:10: use_g_new: Use g_new (MyBitmask, 1) instead of g_malloc(sizeof(MyBitmask)) for type safety
+sizeof_value.c:23:10: use_g_new: Use g_new (int, 1) instead of g_malloc(sizeof(int)) for type safety
+sizeof_value.c:33:14: use_g_new: Use g_new (ctx_t, 1) instead of g_malloc(sizeof(ctx_t)) for type safety
+sizeof_value.c:34:13: use_g_new: Use g_new (ctx_t, 1) instead of g_malloc(sizeof(ctx_t)) for type safety
+sizeof_value.c:49:25: use_g_new: Use g_new (struct NoTypedef, 1) instead of g_malloc(sizeof(struct NoTypedef)) for type safety
+sizeof_value.c:50:13: use_g_new: Use g_new (struct NoTypedef, 1) instead of g_malloc(sizeof(struct NoTypedef)) for type safety
+sizeof_value.c:51:13: use_g_new: Use g_new (struct NoTypedef, 1) instead of g_malloc(sizeof(struct NoTypedef)) for type safety
+sizeof_value.c:61:10: use_g_new: Use g_new (struct NoTypedef, 1) instead of g_malloc(sizeof(struct NoTypedef)) for type safety

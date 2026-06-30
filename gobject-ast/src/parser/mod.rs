@@ -4,6 +4,7 @@ mod statement;
 mod top_level;
 
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -19,6 +20,7 @@ pub struct Parser {
     parser: TSParser,
     current_file: Option<std::path::PathBuf>,
     current_source: Arc<Vec<u8>>,
+    known_types: HashSet<String>,
 }
 
 impl Parser {
@@ -32,6 +34,7 @@ impl Parser {
             parser,
             current_file: None,
             current_source: Arc::new(Vec::new()),
+            known_types: HashSet::new(),
         })
     }
 
@@ -133,6 +136,9 @@ impl Parser {
             .parse(source.as_slice(), None)
             .context("Failed to parse file")?;
 
+        self.known_types.clear();
+        self.collect_known_types(tree.root_node(), source.as_slice());
+
         let mut file_model = FileModel::new(path.to_path_buf());
 
         self.visit_node(tree.root_node(), source.as_slice(), &mut file_model);
@@ -140,6 +146,30 @@ impl Parser {
         file_model.source = source;
 
         Ok((path.to_path_buf(), file_model))
+    }
+
+    fn collect_known_types(&mut self, node: Node, source: &[u8]) {
+        match node.kind() {
+            "type_definition" => {
+                if let Some(declarator) = node.child_by_field_name("declarator")
+                    && let Some(name) = self.extract_declarator_name(declarator, source)
+                {
+                    self.known_types.insert(name.to_owned());
+                }
+            }
+            "struct_specifier" | "union_specifier" | "enum_specifier" => {
+                if let Some(name_node) = node.child_by_field_name("name")
+                    && let Ok(name) = std::str::from_utf8(&source[name_node.byte_range()])
+                {
+                    self.known_types.insert(name.to_owned());
+                }
+            }
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.collect_known_types(child, source);
+        }
     }
 
     fn find_export_macros_in_declaration(

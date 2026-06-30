@@ -1,4 +1,6 @@
-use gobject_ast::model::{CallExpression, Expression, FileModel, FunctionDefItem};
+use gobject_ast::model::{
+    CallExpression, Expression, FileModel, FunctionDefItem, SizeofOperand, TypeInfo, UnaryOp,
+};
 
 use crate::{
     ast_context::AstContext,
@@ -34,7 +36,7 @@ impl Rule for UseGNew {
         violations: &mut Vec<Violation>,
     ) {
         for call in func.find_calls(&["g_malloc", "g_malloc0"]) {
-            self.check_call(file, call, config, violations);
+            self.check_call(file, call, func, config, violations);
         }
     }
 }
@@ -44,6 +46,7 @@ impl UseGNew {
         &self,
         file: &FileModel,
         call: &CallExpression,
+        func: &FunctionDefItem,
         config: &Config,
         violations: &mut Vec<Violation>,
     ) {
@@ -60,10 +63,45 @@ impl UseGNew {
             return;
         };
 
-        // Extract the type - only works for simple types/identifiers
-        let Some(type_name) = sizeof_expr.type_name() else {
-            // Complex expression, not a simple type - skip
-            return;
+        let resolved_type;
+        let type_name = match &sizeof_expr.operand {
+            Some(SizeofOperand::Type(t)) => {
+                resolved_type = Self::full_type_name(t);
+                resolved_type.as_str()
+            }
+            Some(SizeofOperand::Expression(expr)) => {
+                if let Expression::Identifier(id) = expr.as_ref() {
+                    let var_types = func.local_var_types();
+                    if let Some(type_info) = var_types.get(id.name.as_str()) {
+                        if type_info.pointer_depth > 0 {
+                            return;
+                        }
+                        resolved_type = Self::full_type_name(type_info);
+                        resolved_type.as_str()
+                    } else if id.name.starts_with(|c: char| c.is_ascii_uppercase()) {
+                        id.name.as_str()
+                    } else {
+                        return;
+                    }
+                } else if let Expression::Unary(unary) = expr.as_ref()
+                    && unary.operator == UnaryOp::Dereference
+                    && let Expression::Identifier(id) = unary.operand.as_ref()
+                {
+                    let var_types = func.local_var_types();
+                    if let Some(type_info) = var_types.get(id.name.as_str()) {
+                        if type_info.pointer_depth < 1 {
+                            return;
+                        }
+                        resolved_type = Self::full_type_name(type_info);
+                        resolved_type.as_str()
+                    } else {
+                        return;
+                    }
+                } else {
+                    return;
+                }
+            }
+            None => return,
         };
 
         let func_name = call.function_name();
@@ -85,5 +123,15 @@ impl UseGNew {
         );
 
         violations.push(self.violation_with_fix_at(&file.path, &call.location, message, fix));
+    }
+
+    fn full_type_name(type_info: &TypeInfo) -> String {
+        if type_info.is_struct {
+            format!("struct {}", type_info.base_type)
+        } else if type_info.is_union {
+            format!("union {}", type_info.base_type)
+        } else {
+            type_info.base_type.clone()
+        }
     }
 }
