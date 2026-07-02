@@ -76,6 +76,9 @@ pub struct TypeInfo {
     /// True when spelled with the `union` keyword (`union Foo *`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_union: bool,
+    /// True when spelled with the `enum` keyword (`enum Foo`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_enum: bool,
     /// Pointer indirections: 0 = value, 1 = `*`, 2 = `**`.
     #[serde(skip_serializing_if = "is_zero")]
     pub pointer_depth: usize,
@@ -130,9 +133,9 @@ impl TypeInfo {
         let pointer_depth = without_qualifiers.chars().filter(|&c| c == '*').count();
 
         let raw_base = without_qualifiers.replace('*', "").trim().to_string();
-        let (base_type, is_struct, is_union) = if let Some(ref auto) = auto_cleanup {
+        let (base_type, is_struct, is_union, is_enum) = if let Some(ref auto) = auto_cleanup {
             if let Some(type_arg) = auto.type_arg() {
-                (type_arg.to_owned(), false, false)
+                (type_arg.to_owned(), false, false, false)
             } else {
                 Self::extract_base_type(&raw_base)
             }
@@ -146,19 +149,22 @@ impl TypeInfo {
             is_volatile,
             is_struct,
             is_union,
+            is_enum,
             pointer_depth,
             location,
             auto_cleanup,
         }
     }
 
-    fn extract_base_type(raw_base: &str) -> (String, bool, bool) {
+    fn extract_base_type(raw_base: &str) -> (String, bool, bool, bool) {
         if let Some(rest) = raw_base.strip_prefix("struct ") {
-            (rest.trim().to_string(), true, false)
+            (rest.trim().to_string(), true, false, false)
         } else if let Some(rest) = raw_base.strip_prefix("union ") {
-            (rest.trim().to_string(), false, true)
+            (rest.trim().to_string(), false, true, false)
+        } else if let Some(rest) = raw_base.strip_prefix("enum ") {
+            (rest.trim().to_string(), false, false, true)
         } else {
-            (raw_base.to_string(), false, false)
+            (raw_base.to_string(), false, false, false)
         }
     }
 
@@ -211,6 +217,8 @@ impl TypeInfo {
             format!("struct {}", self.base_type)
         } else if self.is_union {
             format!("union {}", self.base_type)
+        } else if self.is_enum {
+            format!("enum {}", self.base_type)
         } else {
             self.base_type.clone()
         }
@@ -239,9 +247,11 @@ impl TypeInfo {
         self.auto_cleanup.is_some()
     }
 
-    /// GLib C aliases normalised to their C equivalents (`gint` → `int`).
+    /// GLib C aliases and C-standard shorthand forms normalised to a single
+    /// canonical spelling (`gint` → `int`, `unsigned` → `unsigned int`, etc.).
     pub fn normalized_base_type(&self) -> &str {
         match self.base_type.as_str() {
+            // GLib → C
             "gint" => "int",
             "guint" => "unsigned int",
             "glong" => "long",
@@ -252,6 +262,28 @@ impl TypeInfo {
             "guchar" => "unsigned char",
             "gfloat" => "float",
             "gdouble" => "double",
+            "gint8" | "signed char" => "int8_t",
+            "guint8" => "uint8_t",
+            "gint16" => "int16_t",
+            "guint16" => "uint16_t",
+            "gint32" => "int32_t",
+            "guint32" => "uint32_t",
+            "gint64" => "int64_t",
+            "guint64" => "uint64_t",
+            "gsize" => "size_t",
+            "gssize" => "ssize_t",
+            "gintptr" => "intptr_t",
+            "guintptr" => "uintptr_t",
+            // C shorthand forms (§6.7.2: `unsigned` alone means `unsigned int`)
+            "unsigned" => "unsigned int",
+            "signed" | "signed int" => "int",
+            "short int" | "signed short" | "signed short int" => "short",
+            "unsigned short int" => "unsigned short",
+            "long int" | "signed long" | "signed long int" => "long",
+            "unsigned long int" => "unsigned long",
+            "long long int" | "signed long long" | "signed long long int" => "long long",
+            "unsigned long long int" => "unsigned long long",
+            "_Bool" => "bool",
             other => other,
         }
     }
@@ -262,6 +294,21 @@ impl TypeInfo {
         self.normalized_base_type() == other.normalized_base_type()
             && self.pointer_depth == other.pointer_depth
             && self.is_const == other.is_const
+            && self.tag_keyword_matches(other)
+    }
+
+    /// True unless both sides carry an explicit tag keyword and they differ
+    /// (e.g. `struct Foo` vs `union Foo`).  Bare `Foo` matches `struct Foo`
+    /// — that is the normal GLib typedef convention.
+    fn tag_keyword_matches(&self, other: &Self) -> bool {
+        let self_has_tag = self.is_struct || self.is_union || self.is_enum;
+        let other_has_tag = other.is_struct || other.is_union || other.is_enum;
+        if !self_has_tag || !other_has_tag {
+            return true;
+        }
+        self.is_struct == other.is_struct
+            && self.is_union == other.is_union
+            && self.is_enum == other.is_enum
     }
 
     /// Returns the `BasicType` if this C type is a primitive scalar.
@@ -314,84 +361,13 @@ impl TypeInfo {
             "goffset" => Some(BasicType::Offset),
             "gintptr" | "intptr_t" => Some(BasicType::IntPtr),
             "guintptr" | "uintptr_t" => Some(BasicType::UIntPtr),
+            "gpointer" | "gconstpointer" => Some(BasicType::Pointer),
             _ => None,
         }
     }
 
     pub fn is_basic(&self) -> bool {
-        matches!(
-            self.base_type.as_str(),
-            "gboolean"
-                | "gchar"
-                | "char"
-                | "guchar"
-                | "unsigned char"
-                | "gint"
-                | "int"
-                | "signed"
-                | "signed int"
-                | "guint"
-                | "unsigned int"
-                | "unsigned"
-                | "glong"
-                | "long"
-                | "signed long"
-                | "long int"
-                | "signed long int"
-                | "gulong"
-                | "unsigned long"
-                | "unsigned long int"
-                | "gint64"
-                | "int64_t"
-                | "guint64"
-                | "uint64_t"
-                | "gfloat"
-                | "float"
-                | "gdouble"
-                | "double"
-                | "gpointer"
-                | "void"
-                | "gconstpointer"
-                | "_Bool"
-                | "bool"
-                | "gshort"
-                | "short"
-                | "signed short"
-                | "short int"
-                | "signed short int"
-                | "gushort"
-                | "unsigned short"
-                | "unsigned short int"
-                | "long long"
-                | "signed long long"
-                | "long long int"
-                | "signed long long int"
-                | "unsigned long long"
-                | "unsigned long long int"
-                | "long double"
-                | "gint8"
-                | "int8_t"
-                | "signed char"
-                | "guint8"
-                | "uint8_t"
-                | "gint16"
-                | "int16_t"
-                | "guint16"
-                | "uint16_t"
-                | "gint32"
-                | "int32_t"
-                | "guint32"
-                | "uint32_t"
-                | "gsize"
-                | "size_t"
-                | "gssize"
-                | "ssize_t"
-                | "goffset"
-                | "gintptr"
-                | "intptr_t"
-                | "guintptr"
-                | "uintptr_t"
-        )
+        self.as_basic().is_some()
     }
 }
 
@@ -502,5 +478,24 @@ mod tests {
         assert_eq!(t.auto_cleanup, None);
         assert_eq!(t.base_type, "char");
         assert_eq!(t.pointer_depth, 1);
+    }
+
+    #[test]
+    fn test_void_as_basic() {
+        let void_val = TypeInfo::new("void", SourceLocation::default());
+        assert_eq!(void_val.pointer_depth, 0);
+        assert_eq!(void_val.as_basic(), None);
+
+        let void_ptr = TypeInfo::new("void *", SourceLocation::default());
+        assert_eq!(void_ptr.pointer_depth, 1);
+        assert_eq!(void_ptr.as_basic(), Some(BasicType::Pointer));
+    }
+
+    #[test]
+    fn test_bool_normalization() {
+        let a = TypeInfo::new("_Bool", SourceLocation::default());
+        let b = TypeInfo::new("bool", SourceLocation::default());
+        assert!(a.matches(&b));
+        assert_eq!(a.normalized_base_type(), "bool");
     }
 }

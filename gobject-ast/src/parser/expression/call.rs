@@ -93,8 +93,9 @@ impl Parser {
                 base_type,
                 is_const,
                 is_volatile: false,
-                is_struct: false, // We don't track this in g_new calls
+                is_struct: false,
                 is_union: false,
+                is_enum: false,
                 pointer_depth,
                 location: self.node_location(args_node),
                 auto_cleanup: None,

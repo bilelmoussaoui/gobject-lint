@@ -27,7 +27,11 @@ impl Parser {
                 "type_identifier" if type_node.is_none() => {
                     type_node = Some(child);
                 }
-                "primitive_type" | "sized_type_specifier" | "struct_specifier"
+                "primitive_type"
+                | "sized_type_specifier"
+                | "struct_specifier"
+                | "enum_specifier"
+                | "union_specifier"
                     if type_node.is_none() =>
                 {
                     type_node = Some(child);
