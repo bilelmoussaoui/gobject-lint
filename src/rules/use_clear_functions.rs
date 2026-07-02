@@ -419,15 +419,17 @@ impl UseClearFunctions {
                 mapping.null_check.sentinel_desc()
             );
 
-            let stmt1_end = stmt1.location().find_semicolon_end();
+            let inner1 = stmt1.inner_statement();
+            let inner2 = stmt2.inner_statement();
+            let stmt1_end = inner1.location().find_semicolon_end();
             let fixes = vec![
-                Fix::new(stmt1.location().start_byte, stmt1_end, replacement),
-                Fix::delete_line(stmt2.location()),
+                Fix::new(inner1.location().start_byte, stmt1_end, replacement),
+                Fix::delete_line(inner2.location()),
             ];
 
             violations.push(self.violation_with_fixes_at(
                 &file.path,
-                stmt1.location(),
+                inner1.location(),
                 message,
                 fixes,
             ));
@@ -583,7 +585,7 @@ impl UseClearFunctions {
                     if call.is_function(mapping.source_func) {
                         for arg in &call.arguments {
                             if let Some(arg_text) = arg.location().as_str()
-                                && arg_text.contains(var_name)
+                                && arg_text == var_name
                             {
                                 let extra = call.get_arg(1).and_then(|a| a.location().as_str());
                                 return Some((*mapping, extra));
@@ -821,14 +823,21 @@ impl UseClearFunctions {
             "Use {} instead of g_signal_handler_disconnect and zeroing the ID",
             replacement.trim_end_matches(';')
         );
-        let s1_end = s1.location().find_semicolon_end();
+        let inner1 = s1.inner_statement();
+        let inner2 = s2.inner_statement();
+        let s1_end = inner1.location().find_semicolon_end();
 
         let fixes = vec![
-            Fix::new(s1.location().start_byte, s1_end, replacement),
-            Fix::delete_line(s2.location()),
+            Fix::new(inner1.location().start_byte, s1_end, replacement),
+            Fix::delete_line(inner2.location()),
         ];
 
-        violations.push(self.violation_with_fixes_at(&file.path, s1.location(), message, fixes));
+        violations.push(self.violation_with_fixes_at(
+            &file.path,
+            inner1.location(),
+            message,
+            fixes,
+        ));
         true
     }
 
@@ -867,10 +876,11 @@ impl UseClearFunctions {
             "Use {} instead of g_signal_handler_disconnect (also zeroes the stored ID)",
             replacement.trim_end_matches(';')
         );
-        let stmt_end = stmt.location().find_semicolon_end();
-        let fix = Fix::new(stmt.location().start_byte, stmt_end, replacement);
+        let inner = stmt.inner_statement();
+        let stmt_end = inner.location().find_semicolon_end();
+        let fix = Fix::new(inner.location().start_byte, stmt_end, replacement);
 
-        violations.push(self.violation_with_fix_at(&file.path, stmt.location(), message, fix));
+        violations.push(self.violation_with_fix_at(&file.path, inner.location(), message, fix));
         true
     }
 
@@ -901,7 +911,7 @@ impl UseClearFunctions {
     }
 
     fn is_zero_assign(&self, stmt: &Statement, expected_id: &str) -> bool {
-        let Statement::Expression(expr_stmt) = stmt else {
+        let Statement::Expression(expr_stmt) = stmt.inner_statement() else {
             return false;
         };
 
