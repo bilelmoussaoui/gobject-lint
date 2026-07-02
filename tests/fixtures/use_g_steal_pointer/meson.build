@@ -3,6 +3,8 @@ sources = [
   'basic.fixed.c',
   'if_condition_removal.c',
   'if_condition_removal.fixed.c',
+  'labeled.c',
+  'labeled.fixed.c',
   'no_match.c',
 ]
 

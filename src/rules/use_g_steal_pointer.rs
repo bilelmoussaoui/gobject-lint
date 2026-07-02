@@ -179,13 +179,11 @@ impl UseGStealPointer {
         let replacement = format!("{other_expr} = {steal};");
         let message = format!("Use {steal} instead of copying and setting to NULL");
 
-        // Use two separate fixes to preserve comments between statements
-        let s2_end = s2.location().find_semicolon_end();
+        let inner2 = s2.inner_statement();
+        let s2_end = inner2.location().find_semicolon_end();
         let fixes = vec![
-            // Delete the entire first line
             Fix::delete_line(s1.location()),
-            // Replace the second statement
-            Fix::new(s2.location().start_byte, s2_end, replacement),
+            Fix::new(inner2.location().start_byte, s2_end, replacement),
         ];
 
         violations.push(self.violation_with_fixes_at(&file.path, s1.location(), message, fixes));
@@ -404,7 +402,7 @@ impl UseGStealPointer {
 
     /// Extract (lhs, rhs) from assignment statement
     fn extract_assignment<'a>(&self, stmt: &'a Statement) -> Option<(&'a str, &'a str)> {
-        let Statement::Expression(expr_stmt) = stmt else {
+        let Statement::Expression(expr_stmt) = stmt.inner_statement() else {
             return None;
         };
 

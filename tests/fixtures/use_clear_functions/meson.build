@@ -10,6 +10,8 @@ sources = [
   'handle_id_multi_stmt.fixed.c',
   'if_statements.c',
   'if_statements.fixed.c',
+  'labeled.c',
+  'labeled.fixed.c',
   'list_basic.c',
   'list_basic.fixed.c',
   'signal_handler_basic.c',

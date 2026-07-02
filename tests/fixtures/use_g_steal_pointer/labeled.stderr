@@ -1,0 +1,2 @@
+labeled.c:12:3: use_g_steal_pointer: Use g_steal_pointer (&name) instead of copying and setting to NULL
+labeled.c:23:1: use_g_steal_pointer: Use g_steal_pointer (&name) instead of copying and setting to NULL
