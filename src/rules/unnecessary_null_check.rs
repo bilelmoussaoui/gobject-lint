@@ -1,4 +1,4 @@
-use gobject_ast::model::{Expression, FileModel, FunctionDefItem, IfStatement, Statement};
+use gobject_ast::model::{Expression, FileModel, FunctionDefItem, IfStatement, Statement, UnaryOp};
 
 use crate::{
     ast_context::AstContext,
@@ -88,13 +88,29 @@ impl UnnecessaryNullCheck {
             return;
         }
 
-        // Check if the call arguments reference the checked variable
-        let references_var = call
-            .arguments
-            .iter()
-            .any(|e| e.contains_identifier(checked_var));
+        // Verify the null check is actually redundant by checking argument form.
+        // g_clear_* dereferences its first argument (a pointer-to-pointer), so:
+        //   if (var) g_clear_pointer(&var, free) → redundant (&var is never NULL)
+        //   if (var) g_clear_pointer(var, free)  → NOT redundant (var is dereferenced)
+        //   if (var) g_clear_pointer(&var->field, free) → NOT redundant (var is
+        // dereferenced) g_free/g_strfreev take the value directly:
+        //   if (var) g_free(var)        → redundant
+        //   if (var) g_free(var->field) → NOT redundant (var is dereferenced)
+        let is_redundant = if func_name.starts_with("g_clear_") {
+            call.arguments.first().is_some_and(|arg| {
+                matches!(arg.as_ref(),
+                    Expression::Unary(u)
+                    if u.operator == UnaryOp::AddressOf
+                        && matches!(u.operand.as_ref(),
+                            Expression::Identifier(id) if id.name == checked_var))
+            })
+        } else {
+            call.arguments.iter().any(
+                |arg| matches!(arg.as_ref(), Expression::Identifier(id) if id.name == checked_var),
+            )
+        };
 
-        if !references_var {
+        if !is_redundant {
             return;
         }
 
