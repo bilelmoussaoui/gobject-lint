@@ -76,6 +76,9 @@ pub struct TypeInfo {
     /// True when spelled with the `union` keyword (`union Foo *`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_union: bool,
+    /// True when spelled with the `enum` keyword (`enum Foo`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_enum: bool,
     /// Pointer indirections: 0 = value, 1 = `*`, 2 = `**`.
     #[serde(skip_serializing_if = "is_zero")]
     pub pointer_depth: usize,
@@ -130,9 +133,9 @@ impl TypeInfo {
         let pointer_depth = without_qualifiers.chars().filter(|&c| c == '*').count();
 
         let raw_base = without_qualifiers.replace('*', "").trim().to_string();
-        let (base_type, is_struct, is_union) = if let Some(ref auto) = auto_cleanup {
+        let (base_type, is_struct, is_union, is_enum) = if let Some(ref auto) = auto_cleanup {
             if let Some(type_arg) = auto.type_arg() {
-                (type_arg.to_owned(), false, false)
+                (type_arg.to_owned(), false, false, false)
             } else {
                 Self::extract_base_type(&raw_base)
             }
@@ -146,19 +149,22 @@ impl TypeInfo {
             is_volatile,
             is_struct,
             is_union,
+            is_enum,
             pointer_depth,
             location,
             auto_cleanup,
         }
     }
 
-    fn extract_base_type(raw_base: &str) -> (String, bool, bool) {
+    fn extract_base_type(raw_base: &str) -> (String, bool, bool, bool) {
         if let Some(rest) = raw_base.strip_prefix("struct ") {
-            (rest.trim().to_string(), true, false)
+            (rest.trim().to_string(), true, false, false)
         } else if let Some(rest) = raw_base.strip_prefix("union ") {
-            (rest.trim().to_string(), false, true)
+            (rest.trim().to_string(), false, true, false)
+        } else if let Some(rest) = raw_base.strip_prefix("enum ") {
+            (rest.trim().to_string(), false, false, true)
         } else {
-            (raw_base.to_string(), false, false)
+            (raw_base.to_string(), false, false, false)
         }
     }
 
@@ -215,6 +221,8 @@ impl TypeInfo {
             s.push_str("struct ");
         } else if self.is_union {
             s.push_str("union ");
+        } else if self.is_enum {
+            s.push_str("enum ");
         }
         s.push_str(&self.base_type);
         if self.pointer_depth > 0 {
@@ -232,9 +240,11 @@ impl TypeInfo {
         self.auto_cleanup.is_some()
     }
 
-    /// GLib C aliases normalised to their C equivalents (`gint` → `int`).
+    /// GLib C aliases and C-standard shorthand forms normalised to a single
+    /// canonical spelling (`gint` → `int`, `unsigned` → `unsigned int`, etc.).
     pub fn normalized_base_type(&self) -> &str {
         match self.base_type.as_str() {
+            // GLib → C
             "gint" => "int",
             "guint" => "unsigned int",
             "glong" => "long",
@@ -245,6 +255,15 @@ impl TypeInfo {
             "guchar" => "unsigned char",
             "gfloat" => "float",
             "gdouble" => "double",
+            // C shorthand forms (§6.7.2: `unsigned` alone means `unsigned int`)
+            "unsigned" => "unsigned int",
+            "signed" | "signed int" => "int",
+            "short int" | "signed short" | "signed short int" => "short",
+            "unsigned short int" => "unsigned short",
+            "long int" | "signed long" | "signed long int" => "long",
+            "unsigned long int" => "unsigned long",
+            "long long int" | "signed long long" | "signed long long int" => "long long",
+            "unsigned long long int" => "unsigned long long",
             other => other,
         }
     }
