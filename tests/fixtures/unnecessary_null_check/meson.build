@@ -4,6 +4,7 @@ sources = [
   'different_variable.c',
   'different_variable.fixed.c',
   'for_loop.c',
+  'indirect_reference.c',
   'issue_26.c',
   'pointer_comparison.c',
 ]

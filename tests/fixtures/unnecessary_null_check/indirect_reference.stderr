@@ -1,0 +1,1 @@
+indirect_reference.c:41:3: unnecessary_null_check: Remove unnecessary NULL check before g_clear_pointer (g_clear_pointer handles NULL)
