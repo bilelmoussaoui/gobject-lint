@@ -1,6 +1,11 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
-use gobject_ast::model::{Parameter, SourceLocation, TypeInfo};
+use gobject_ast::model::{
+    Parameter, PreprocessorDirective, SourceLocation, TopLevelItem, TypeDefItem, TypeInfo,
+};
 
 use crate::{
     ast_context::AstContext,
@@ -41,6 +46,8 @@ impl Rule for InconsistentFunctionSignature {
         _config: &Config,
         violations: &mut Vec<Violation>,
     ) {
+        let known_types = Self::collect_known_types(ast_context);
+
         let mut global_decls: HashMap<&str, DeclInfo> = HashMap::new();
         let mut all_defs: HashMap<&str, Vec<DefInfo>> = HashMap::new();
         let mut static_violations: Vec<Violation> = Vec::new();
@@ -83,6 +90,7 @@ impl Rule for InconsistentFunctionSignature {
                                 &func.parameters,
                                 path,
                                 &func.location,
+                                &known_types,
                                 &mut static_violations,
                             );
                         }
@@ -124,6 +132,7 @@ impl Rule for InconsistentFunctionSignature {
                     def.parameters,
                     def.path,
                     &def.location,
+                    &known_types,
                     violations,
                 );
             }
@@ -134,6 +143,61 @@ impl Rule for InconsistentFunctionSignature {
 }
 
 impl InconsistentFunctionSignature {
+    fn collect_known_types(ast_context: &AstContext) -> HashSet<String> {
+        let mut known: HashSet<String> = ["void", "GType", "GQuark", "wchar_t", "ptrdiff_t"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+
+        for (_path, file) in ast_context.iter_all_files() {
+            for item in file.iter_all_items() {
+                match item {
+                    TopLevelItem::TypeDefinition(TypeDefItem::Typedef { name, .. }) => {
+                        known.insert(name.clone());
+                    }
+                    TopLevelItem::TypeDefinition(TypeDefItem::Struct { name, .. }) => {
+                        known.insert(name.clone());
+                        if let Some(bare) = name.strip_prefix('_') {
+                            known.insert(bare.to_owned());
+                        }
+                    }
+                    TopLevelItem::TypeDefinition(TypeDefItem::Enum(e)) => {
+                        if let Some(ref name) = e.name {
+                            known.insert(name.clone());
+                            if let Some(bare) = name.strip_prefix('_') {
+                                known.insert(bare.to_owned());
+                            }
+                        }
+                    }
+                    TopLevelItem::Preprocessor(PreprocessorDirective::GObjectType(
+                        gobject_type,
+                    )) => {
+                        known.insert(gobject_type.type_name.clone());
+                    }
+                    _ => {}
+                }
+            }
+
+            // Typedef targets (e.g. from `typedef struct _Foo Foo`, the
+            // target `_Foo` is also a known type name).
+            for (_name, target) in file.iter_typedef_pairs() {
+                known.insert(target.base_type.clone());
+            }
+        }
+
+        known
+    }
+
+    fn is_known_type(type_info: &TypeInfo, known_types: &HashSet<String>) -> bool {
+        if type_info.base_type.contains('{') {
+            return false;
+        }
+        if type_info.pointer_depth > 0 {
+            return true;
+        }
+        type_info.is_basic() || known_types.contains(type_info.base_type.as_str())
+    }
+
     /// `(void)` and `()` both mean "no parameters" in C.
     fn effective_params<'a>(&self, params: &'a [Parameter]) -> &'a [Parameter] {
         if let [
@@ -175,9 +239,13 @@ impl InconsistentFunctionSignature {
         def_params: &[Parameter],
         path: &Path,
         location: &SourceLocation,
+        known_types: &HashSet<String>,
         violations: &mut Vec<Violation>,
     ) {
-        if !decl_ret.matches(def_ret) {
+        if !decl_ret.matches(def_ret)
+            && Self::is_known_type(decl_ret, known_types)
+            && Self::is_known_type(def_ret, known_types)
+        {
             violations.push(self.violation_at(
                 path,
                 location,
@@ -222,7 +290,10 @@ impl InconsistentFunctionSignature {
                         ..
                     },
                 ) => {
-                    if !dt.matches(ft) {
+                    if !dt.matches(ft)
+                        && Self::is_known_type(dt, known_types)
+                        && Self::is_known_type(ft, known_types)
+                    {
                         let param_id = dn
                             .as_deref()
                             .or(fn_.as_deref())

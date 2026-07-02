@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use gobject_ast::model::Project;
 
-/// Bidirectional mapping between typedef names and struct/union tags, plus
+/// Bidirectional mapping between typedef names and struct/union/enum tags, plus
 /// GObject-synthesised aliases (`Foo` ↔ `_Foo`).
 pub struct TypeAliasMap {
     typedef_to_tag: HashMap<String, String>,
@@ -17,7 +17,7 @@ impl TypeAliasMap {
         for (_path, file) in project.files.iter().map(|(p, f)| (p.as_path(), f)) {
             for (name, target) in file.iter_typedef_pairs() {
                 typedef_to_tag.insert(name.to_owned(), target.base_type.clone());
-                if target.is_struct || target.is_union {
+                if target.is_struct || target.is_union || target.is_enum {
                     tag_to_typedef.insert(target.base_type.clone(), name.to_owned());
                 }
             }
