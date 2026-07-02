@@ -87,3 +87,13 @@ clear_bare_member_source_cleared (MyObj *self)
   g_signal_handler_disconnect (self->source, self->signal_id);
   g_clear_object (&self->source);
 }
+
+/* bare disconnect, but the struct is freed under a label — skip */
+
+static void
+clear_bare_member_freed_labeled (MyObj *self)
+{
+  g_signal_handler_disconnect (self->source, self->signal_id);
+cleanup:
+  g_free (self);
+}

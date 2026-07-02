@@ -320,10 +320,18 @@ impl Statement {
         results.into_iter()
     }
 
+    pub fn inner_statement(&self) -> &Self {
+        let mut s = self;
+        while let Self::Labeled(l) = s {
+            s = &l.statement;
+        }
+        s
+    }
+
     /// Extract the call expression if this is an expression statement with a
-    /// call
+    /// call (unwraps labels)
     pub fn extract_call(&self) -> Option<&CallExpression> {
-        if let Self::Expression(expr_stmt) = self
+        if let Self::Expression(expr_stmt) = self.inner_statement()
             && let Expression::Call(call) = expr_stmt.as_ref()
         {
             return Some(call);
@@ -332,12 +340,12 @@ impl Statement {
     }
 
     /// Check if this statement assigns a value matching the predicate to the
-    /// target variable
+    /// target variable (unwraps labels)
     pub fn is_assignment_to<F>(&self, target_var: &str, value_check: F) -> bool
     where
         F: Fn(&Expression) -> bool,
     {
-        if let Self::Expression(expr_stmt) = self
+        if let Self::Expression(expr_stmt) = self.inner_statement()
             && let Expression::Assignment(assign) = expr_stmt.as_ref()
         {
             let lhs_text = assign.lhs.location().as_str().unwrap_or("");
@@ -347,8 +355,9 @@ impl Statement {
     }
 
     /// Extract the assignment expression if this is an assignment statement
+    /// (unwraps labels)
     pub fn extract_assignment(&self) -> Option<&Assignment> {
-        if let Self::Expression(expr_stmt) = self
+        if let Self::Expression(expr_stmt) = self.inner_statement()
             && let Expression::Assignment(assign) = expr_stmt.as_ref()
         {
             return Some(assign);
