@@ -74,6 +74,30 @@ impl CallExpression {
         })
     }
 
+    /// Check if an argument contains a reference to the specified variable
+    /// Handles plain identifiers, field access (obj->field) and unary (&var)
+    pub fn contains_variable(&self, var_name: &str, is_ref: bool) -> bool {
+        let mut var_name = var_name.to_owned();
+        var_name.retain(|c| !c.is_whitespace());
+        if is_ref {
+            var_name.insert(0, '&');
+        }
+
+        self.arguments.iter().any(|expr| {
+            match &**expr {
+                Expression::Identifier(_) | Expression::FieldAccess(_) | Expression::Unary(_) => {
+                    expr.location().as_str()
+                }
+                _ => None,
+            }
+            .is_some_and(|name| {
+                let mut name = name.to_owned();
+                name.retain(|c| !c.is_whitespace());
+                name == var_name
+            })
+        })
+    }
+
     /// Check if this looks like a macro call (ALL_CAPS or ends with _)
     /// Examples: I_, N_, G_STRINGIFY, GINT_TO_POINTER
     pub fn is_likely_macro(&self) -> bool {

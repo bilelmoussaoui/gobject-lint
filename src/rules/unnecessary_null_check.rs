@@ -89,12 +89,7 @@ impl UnnecessaryNullCheck {
         }
 
         // Check if the call arguments reference the checked variable
-        let references_var = call
-            .arguments
-            .iter()
-            .any(|e| e.contains_identifier(checked_var));
-
-        if !references_var {
+        if !call.contains_variable(checked_var, func_name.starts_with("g_clear_")) {
             return;
         }
 
