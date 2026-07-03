@@ -3,7 +3,7 @@ sources = [
   'basic.fixed.c',
   'different_variable.c',
   'different_variable.fixed.c',
-  'for_loop.c',
+  'clear_functions.c',
   'issue_26.c',
   'pointer_comparison.c',
 ]
