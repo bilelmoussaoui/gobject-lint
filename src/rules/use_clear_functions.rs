@@ -85,7 +85,23 @@ const CLEAR_MAPPINGS: &[ClearMapping] = &[
         min_version: (2, 64),
     },
     ClearMapping {
+        source_func: "g_list_free_full",
+        replacement: ClearReplacement::List {
+            clear_func: "g_clear_list",
+        },
+        null_check: NullCheck::Null,
+        min_version: (2, 64),
+    },
+    ClearMapping {
         source_func: "g_slist_free",
+        replacement: ClearReplacement::List {
+            clear_func: "g_clear_slist",
+        },
+        null_check: NullCheck::Null,
+        min_version: (2, 64),
+    },
+    ClearMapping {
+        source_func: "g_slist_free_full",
         replacement: ClearReplacement::List {
             clear_func: "g_clear_slist",
         },
@@ -185,7 +201,8 @@ fn format_replacement(
         }
         ClearReplacement::WeakPointer => style.format_call_stmt("g_clear_weak_pointer", &[&addr]),
         ClearReplacement::List { clear_func } => {
-            style.format_call_stmt(clear_func, &[&addr, "NULL"])
+            let func = obj.unwrap_or("NULL");
+            style.format_call_stmt(clear_func, &[&addr, func])
         }
         ClearReplacement::Error => style.format_call_stmt("g_clear_error", &[&addr]),
     }
@@ -349,7 +366,8 @@ impl UseClearFunctions {
                 continue;
             }
 
-            let replacement = format_replacement(mapping, var_name, None, &config.style);
+            let obj = call.get_arg_text(1);
+            let replacement = format_replacement(mapping, var_name, obj, &config.style);
             let message = format!(
                 "Use {} instead of {} and NULL/zero assignment",
                 replacement.trim_end_matches(';'),
@@ -401,7 +419,10 @@ impl UseClearFunctions {
             return false;
         }
 
-        let replacement = format_replacement(&mapping, checked_var, None, &config.style);
+        let obj = if_stmt.then_body[0]
+            .extract_call()
+            .and_then(|call| call.get_arg_text(1));
+        let replacement = format_replacement(&mapping, checked_var, obj, &config.style);
         let message = format!(
             "Use {} instead of manual NULL check, unref, and assignment",
             replacement.trim_end_matches(';')
