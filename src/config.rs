@@ -5,7 +5,7 @@ use clap::ValueEnum;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::{Deserialize, de};
 
-use crate::{for_each_rule, rules::*};
+use crate::{for_each_rule, rules::*, scanner::RuleName};
 
 #[derive(Default, Debug, Clone, Copy, ValueEnum, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -411,29 +411,12 @@ impl Config {
     }
 
     /// Enable only specific rules, disabling all others
-    pub fn enable_only_rules(&mut self, rule_names: &[String]) -> Result<()> {
-        // First, validate that all provided rule names exist
-        let valid_rules: Vec<&str> = {
-            macro_rules! collect_rule_names {
-                ($(($config_field:ident, $rule_type:ident)),* $(,)?) => {
-                    vec![$(stringify!($config_field)),*]
-                };
-            }
-            for_each_rule!(collect_rule_names)
-        };
-
-        for rule_name in rule_names {
-            if !valid_rules.contains(&rule_name.as_str()) {
-                anyhow::bail!("Unknown rule: {}", rule_name);
-            }
-        }
-
-        // Now enable only the specified rules
+    pub fn enable_only_rules(&mut self, rule_names: &[RuleName]) {
         macro_rules! impl_enable_only_rules {
             ($(($config_field:ident, $rule_type:ident)),* $(,)?) => {
                 {
                     $(
-                        self.rules.$config_field.level = Some(if rule_names.iter().any(|r| r == stringify!($config_field)) {
+                        self.rules.$config_field.level = Some(if rule_names.iter().any(|r| r.as_str() == stringify!($config_field)) {
                             RuleLevel::Error
                         } else {
                             RuleLevel::Ignore
@@ -444,33 +427,15 @@ impl Config {
         }
 
         for_each_rule!(impl_enable_only_rules);
-        Ok(())
     }
 
     /// Disable specific rules (all others remain enabled according to config)
-    pub fn disable_rules(&mut self, rule_names: &[String]) -> Result<()> {
-        // First, validate that all provided rule names exist
-        let valid_rules: Vec<&str> = {
-            macro_rules! collect_rule_names {
-                ($(($config_field:ident, $rule_type:ident)),* $(,)?) => {
-                    vec![$(stringify!($config_field)),*]
-                };
-            }
-            for_each_rule!(collect_rule_names)
-        };
-
-        for rule_name in rule_names {
-            if !valid_rules.contains(&rule_name.as_str()) {
-                anyhow::bail!("Unknown rule: {}", rule_name);
-            }
-        }
-
-        // Now disable the specified rules
+    pub fn disable_rules(&mut self, rule_names: &[RuleName]) {
         macro_rules! impl_disable_rules {
             ($(($config_field:ident, $rule_type:ident)),* $(,)?) => {
                 {
                     $(
-                        if rule_names.iter().any(|r| r == stringify!($config_field)) {
+                        if rule_names.iter().any(|r| r.as_str() == stringify!($config_field)) {
                             self.rules.$config_field.level = Some(RuleLevel::Ignore);
                         }
                     )*
@@ -479,7 +444,6 @@ impl Config {
         }
 
         for_each_rule!(impl_disable_rules);
-        Ok(())
     }
 
     /// Filter rules by category, disabling all others

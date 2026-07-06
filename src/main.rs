@@ -14,7 +14,7 @@ use gobject_linter::{
     meson::MesonIntrospection,
     output, reporter,
     rules::Category,
-    scanner,
+    scanner::{self, RuleName},
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use unidiff::PatchSet;
@@ -44,12 +44,12 @@ struct Args {
     list_rules: bool,
 
     /// Enable only specific rules (can be repeated, overrides config)
-    #[arg(long, value_name = "RULE")]
-    only: Vec<String>,
+    #[arg(long, value_enum, value_name = "RULE")]
+    only: Vec<RuleName>,
 
     /// Disable specific rules (can be repeated, overrides config)
-    #[arg(long, value_name = "RULE")]
-    exclude: Vec<String>,
+    #[arg(long, value_enum, value_name = "RULE")]
+    exclude: Vec<RuleName>,
 
     /// Enable only rules from this category (e.g., correctness, style, perf)
     #[arg(long, value_name = "CATEGORY")]
@@ -153,11 +153,8 @@ fn main() -> Result<()> {
     }
 
     // Apply --only filter if specified
-    if !args.only.is_empty()
-        && let Err(e) = config.enable_only_rules(&args.only)
-    {
-        eprintln!("{} {}", "error:".red().bold(), e);
-        std::process::exit(1);
+    if !args.only.is_empty() {
+        config.enable_only_rules(&args.only);
     }
 
     // Apply --category filter if specified
@@ -166,11 +163,8 @@ fn main() -> Result<()> {
     }
 
     // Apply --exclude filter if specified
-    if !args.exclude.is_empty()
-        && let Err(e) = config.disable_rules(&args.exclude)
-    {
-        eprintln!("{} {}", "error:".red().bold(), e);
-        std::process::exit(1);
+    if !args.exclude.is_empty() {
+        config.disable_rules(&args.exclude);
     }
 
     // Validate that explicitly enabled rules don't conflict with config
