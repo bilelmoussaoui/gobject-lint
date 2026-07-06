@@ -5,7 +5,8 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::Shell;
 use colored::Colorize;
 use gobject_linter::{
     ast_context,
@@ -81,6 +82,10 @@ struct Args {
     /// to read from stdin). Useful for CI to report only on PR changes.
     #[arg(long, value_name = "FILE")]
     diff: Option<PathBuf>,
+
+    /// Generate shell completion script and exit
+    #[arg(long, value_name = "SHELL")]
+    completions: Option<Shell>,
 }
 
 /// Parse GLib version string for clap
@@ -95,6 +100,16 @@ fn parse_glib_version_arg(s: &str) -> Result<(u32, u32), String> {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    if let Some(shell) = args.completions {
+        clap_complete::generate(
+            shell,
+            &mut Args::command(),
+            env!("CARGO_PKG_NAME"),
+            &mut std::io::stdout(),
+        );
+        return Ok(());
+    }
 
     // Initialize tracing
     tracing_subscriber::fmt()
