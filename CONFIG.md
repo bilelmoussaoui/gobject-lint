@@ -2,7 +2,7 @@
 
 ## Config File
 
-Create a `gobject-linter.toml` file in your project root:
+Create a `gobject-linter.toml` (or `.gobject-linter.toml`) file in your project root:
 
 ```toml
 # Set minimum GLib version (disables rules that require newer versions)

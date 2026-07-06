@@ -134,12 +134,18 @@ fn main() -> Result<()> {
     } else {
         // Look in the target directory first, then CWD, then legacy names
         let target_config = args.directory.join("gobject-linter.toml");
+        let target_dot_config = args.directory.join(".gobject-linter.toml");
         let target_legacy = args.directory.join("goblint.toml");
+        let cwd_dot_config = std::path::Path::new(".gobject-linter.toml");
         let cwd_legacy = std::path::Path::new("goblint.toml");
         if target_config.exists() {
             target_config
+        } else if target_dot_config.exists() {
+            target_dot_config
         } else if args.config.exists() {
             args.config.clone()
+        } else if cwd_dot_config.exists() {
+            cwd_dot_config.to_path_buf()
         } else if target_legacy.exists() {
             target_legacy
         } else if cwd_legacy.exists() {

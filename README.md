@@ -39,7 +39,7 @@ Run `gobject-linter --list-rules` to see the current status of all rules in your
 
 ## Configuration
 
-Create a `gobject-linter.toml` file in your project root to configure rules, set minimum GLib version, and define per-rule ignore patterns.
+Create a `gobject-linter.toml` (or `.gobject-linter.toml`) file in your project root to configure rules, set minimum GLib version, and define per-rule ignore patterns.
 
 You can also use inline comments to suppress specific violations:
 
@@ -165,7 +165,7 @@ require('lspconfig.configs').gobject_lsp = {
   default_config = {
     cmd = {"gobject-linter-lsp"},
     filetypes = {'c', 'h'},
-    root_dir = require('lspconfig.util').root_pattern('gobject-linter.toml', 'goblint.toml', '.git'),
+    root_dir = require('lspconfig.util').root_pattern('gobject-linter.toml', '.gobject-linter.toml', 'goblint.toml', '.git'),
   },
 }
 require('lspconfig').gobject_lsp.setup{}
