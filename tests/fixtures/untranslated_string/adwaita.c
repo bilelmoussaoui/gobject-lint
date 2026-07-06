@@ -1,4 +1,5 @@
 #include <adwaita.h>
+#include <glib/gi18n.h>
 
 void test_adwaita(void) {
     AdwToast *toast;
@@ -15,7 +16,7 @@ void test_adwaita(void) {
     adw_toast_set_button_label(toast, "Undo");
 
     // Should be flagged
-    dialog = adw_message_dialog_new(NULL, "Warning");
+    dialog = ADW_MESSAGE_DIALOG(adw_message_dialog_new(NULL, "Warning", "Details"));
 
     // Should be flagged
     adw_message_dialog_set_body(dialog, "This action cannot be undone");
