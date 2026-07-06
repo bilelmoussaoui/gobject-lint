@@ -1,6 +1,11 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use gobject_linter::{ast_context::AstContext, config::Config, meson::MesonIntrospection, scanner};
+use gobject_linter::{
+    ast_context::AstContext,
+    config::{self, Config},
+    meson::MesonIntrospection,
+    scanner,
+};
 use tokio::sync::Mutex;
 use tower_lsp::{Client, LanguageServer, jsonrpc::Result, lsp_types::*};
 
@@ -49,12 +54,7 @@ impl GObjectBackend {
         let mut current = file_path;
         let mut root = None;
         while let Some(parent) = current.parent() {
-            let config_path = if parent.join("gobject-linter.toml").exists() {
-                parent.join("gobject-linter.toml")
-            } else {
-                parent.join("goblint.toml")
-            };
-            if config_path.exists() {
+            if config::has_config_file(parent) {
                 root = Some(parent.to_path_buf());
                 break;
             }
@@ -65,12 +65,7 @@ impl GObjectBackend {
             root.unwrap_or_else(|| file_path.parent().unwrap_or(file_path).to_path_buf());
 
         // Load config
-        let config_path = if workspace_root.join("gobject-linter.toml").exists() {
-            workspace_root.join("gobject-linter.toml")
-        } else {
-            workspace_root.join("goblint.toml")
-        };
-        let config = if config_path.exists() {
+        let config = if let Some(config_path) = config::resolve_config_in_dir(&workspace_root) {
             match Config::load(&config_path) {
                 Ok(c) => c,
                 Err(e) => {
