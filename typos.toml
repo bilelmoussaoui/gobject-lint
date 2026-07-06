@@ -3,6 +3,7 @@ extend-exclude = [
     "tree-sitter-c-gobject/src/*.c",
     "tree-sitter-c-gobject/src/*.h",
     "tree-sitter-c-gobject/src/node-types.json",
+    "tree-sitter-c-gobject/tree-sitter-c/",
 ]
 
 [default.extend-words]
