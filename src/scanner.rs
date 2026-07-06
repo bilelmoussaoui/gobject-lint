@@ -153,6 +153,34 @@ macro_rules! for_each_rule {
     };
 }
 
+macro_rules! impl_rule_name_enum {
+    ($(($config_field:ident, $rule_type:ident)),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+        pub enum RuleName {
+            $(
+                #[value(name = stringify!($config_field))]
+                $rule_type,
+            )*
+        }
+
+        impl RuleName {
+            pub fn as_str(&self) -> &'static str {
+                match self {
+                    $(Self::$rule_type => stringify!($config_field),)*
+                }
+            }
+        }
+
+        impl std::fmt::Display for RuleName {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.as_str())
+            }
+        }
+    };
+}
+
+for_each_rule!(impl_rule_name_enum);
+
 macro_rules! impl_create_all_rules {
     ($(($config_field:ident, $rule_type:ident)),* $(,)?) => {
         /// Create all rule instances in execution order

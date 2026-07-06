@@ -1,7 +1,11 @@
 use std::{fs, path::Path};
 
 use globset::GlobSetBuilder;
-use gobject_linter::{ast_context::AstContext, config::Config, scanner};
+use gobject_linter::{
+    ast_context::AstContext,
+    config::Config,
+    scanner::{self, RuleName},
+};
 
 #[test]
 fn test_inline_ignore() {
@@ -21,9 +25,7 @@ fn test_inline_ignore() {
     // Run scanner
     let mut config = Config::default();
     // Enable only use_g_strlcpy rule for this test
-    config
-        .enable_only_rules(&["use_g_strlcpy".to_string()])
-        .unwrap();
+    config.enable_only_rules(&[RuleName::UseGStrlcpy]);
 
     let (violations, _) =
         scanner::scan_with_ast(&ctx, &config, temp_dir.path(), None, true).expect("failed to scan");
@@ -106,9 +108,7 @@ fn test_inline_ignore_wildcards() {
 
     // Run scanner
     let mut config = Config::default();
-    config
-        .enable_only_rules(&["use_g_strlcpy".to_string()])
-        .unwrap();
+    config.enable_only_rules(&[RuleName::UseGStrlcpy]);
 
     let (violations, _) =
         scanner::scan_with_ast(&ctx, &config, temp_dir.path(), None, true).expect("failed to scan");
@@ -147,9 +147,7 @@ void test(void) {
         .expect("failed to build AstContext");
 
     let mut config = Config::default();
-    config
-        .enable_only_rules(&["use_g_strlcpy".to_string()])
-        .unwrap();
+    config.enable_only_rules(&[RuleName::UseGStrlcpy]);
 
     // Note: This will print a warning to stderr about "invalid_rule_name"
     // We can't easily capture stderr in tests, but the warning is printed
