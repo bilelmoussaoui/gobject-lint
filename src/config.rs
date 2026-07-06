@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fmt, fs, path::Path};
+use std::{
+    collections::HashMap,
+    fmt, fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use clap::ValueEnum;
@@ -32,6 +36,55 @@ pub fn parse_glib_version(version: &str) -> Option<(u32, u32)> {
     let major = parts[0].parse::<u32>().ok()?;
     let minor = parts[1].parse::<u32>().ok()?;
     Some((major, minor))
+}
+
+pub const CONFIG_FILENAMES: &[&str] = &["gobject-linter.toml", ".gobject-linter.toml"];
+pub const LEGACY_CONFIG_FILENAMES: &[&str] = &["goblint.toml"];
+
+pub fn has_config_file(dir: &Path) -> bool {
+    CONFIG_FILENAMES
+        .iter()
+        .chain(LEGACY_CONFIG_FILENAMES)
+        .any(|name| dir.join(name).exists())
+}
+
+pub fn resolve_config_in_dir(dir: &Path) -> Option<PathBuf> {
+    CONFIG_FILENAMES
+        .iter()
+        .chain(LEGACY_CONFIG_FILENAMES)
+        .map(|name| dir.join(name))
+        .find(|path| path.exists())
+}
+
+/// Resolve which config file to use for CLI invocation.
+///
+/// When `explicit_config` is `Some`, that exact path is used (returns `Err` if
+/// missing). Otherwise, searches `target_dir` then `base_dir` with canonical
+/// names first, legacy names last.
+pub fn resolve_config_path(
+    target_dir: &Path,
+    base_dir: &Path,
+    explicit_config: Option<&Path>,
+) -> Result<PathBuf, PathBuf> {
+    if let Some(config) = explicit_config {
+        if config.exists() {
+            return Ok(config.to_path_buf());
+        }
+        return Err(config.to_path_buf());
+    }
+
+    for names in [CONFIG_FILENAMES, LEGACY_CONFIG_FILENAMES] {
+        for dir in [target_dir, base_dir] {
+            for name in names {
+                let path = dir.join(name);
+                if path.exists() {
+                    return Ok(path);
+                }
+            }
+        }
+    }
+
+    Ok(base_dir.join(CONFIG_FILENAMES[0]))
 }
 
 /// Deserialize GLib version from string to (major, minor) tuple

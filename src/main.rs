@@ -121,31 +121,20 @@ fn main() -> Result<()> {
     // Load configuration
     let default_config = std::path::Path::new("gobject-linter.toml");
     let is_explicit = args.config != default_config;
-    let config_path = if is_explicit {
-        if !args.config.exists() {
+    let explicit = if is_explicit {
+        Some(args.config.as_path())
+    } else {
+        None
+    };
+    let config_path = match config::resolve_config_path(&args.directory, ".".as_ref(), explicit) {
+        Ok(path) => path,
+        Err(missing) => {
             eprintln!(
                 "{} config file not found: {}",
                 "error:".red().bold(),
-                args.config.display()
+                missing.display()
             );
             std::process::exit(1);
-        }
-        args.config.clone()
-    } else {
-        // Look in the target directory first, then CWD, then legacy names
-        let target_config = args.directory.join("gobject-linter.toml");
-        let target_legacy = args.directory.join("goblint.toml");
-        let cwd_legacy = std::path::Path::new("goblint.toml");
-        if target_config.exists() {
-            target_config
-        } else if args.config.exists() {
-            args.config.clone()
-        } else if target_legacy.exists() {
-            target_legacy
-        } else if cwd_legacy.exists() {
-            cwd_legacy.to_path_buf()
-        } else {
-            args.config.clone()
         }
     };
     let mut config = config::Config::load(&config_path)?;
