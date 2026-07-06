@@ -151,6 +151,25 @@ If you prefer installing locally instead of using containers:
 cargo install --git https://github.com/bilelmoussaoui/gobject-linter gobject-linter
 ```
 
+## Shell Completions
+
+Generate and load shell completions for tab-completion of options and rules:
+
+**Bash** (add to `~/.bashrc`):
+```bash
+eval "$(gobject-linter --completions bash)"
+```
+
+**Zsh** (add to `~/.zshrc`):
+```zsh
+eval "$(gobject-linter --completions zsh)"
+```
+
+**Fish** (add to `~/.config/fish/config.fish`):
+```fish
+gobject-linter --completions fish | source
+```
+
 ## LSP Server
 
 For real-time linting in your editor:
