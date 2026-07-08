@@ -208,7 +208,7 @@ impl UseGStealPointer {
         };
 
         // Extract tested expression from condition
-        let Some(expr_text) = if_stmt.extract_null_check_variable() else {
+        let Some(expr_text) = if_stmt.extract_null_check_variable_name() else {
             return false;
         };
 
@@ -275,7 +275,7 @@ impl UseGStealPointer {
         }
 
         // Try to extract condition expression
-        let condition_expr = if_stmt.extract_null_check_variable();
+        let condition_expr = if_stmt.extract_null_check_variable_name();
 
         // Pattern 1: 2 statements - dest = ptr; ptr = NULL;
         if if_stmt.then_body.len() == 2 {
