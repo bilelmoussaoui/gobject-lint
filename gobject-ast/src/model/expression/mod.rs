@@ -68,6 +68,7 @@ impl PartialEq for Expression {
     fn eq(&self, other: &Self) -> bool {
         match self {
             Self::Identifier(s) => matches!(other, Self::Identifier(o) if s == o),
+            Self::FieldAccess(s) => matches!(other, Self::FieldAccess(o) if s == o),
             _ => false,
         }
     }
