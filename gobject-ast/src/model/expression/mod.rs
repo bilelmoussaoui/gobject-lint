@@ -64,6 +64,15 @@ pub enum Expression {
     Generic(GenericExpression),
 }
 
+impl PartialEq for Expression {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Self::Identifier(s) => matches!(other, Self::Identifier(o) if s == o),
+            _ => false,
+        }
+    }
+}
+
 impl Expression {
     pub fn location(&self) -> &SourceLocation {
         match self {
@@ -180,13 +189,18 @@ impl Expression {
         }
     }
 
+    /// Extract variable from simple expressions (Identifier or FieldAccess)
+    pub fn extract_variable(&self) -> Option<&Self> {
+        match self {
+            Self::Identifier(_) | Self::FieldAccess(_) => Some(self),
+            _ => None,
+        }
+    }
+
     /// Extract variable name from simple expressions (Identifier or
     /// FieldAccess)
     pub fn extract_variable_name(&self) -> Option<&str> {
-        match self {
-            Self::Identifier(_) | Self::FieldAccess(_) => self.location().as_str(),
-            _ => None,
-        }
+        self.extract_variable().and_then(|v| v.location().as_str())
     }
 
     /// Extract the identifier name, unwrapping macro calls and casts.

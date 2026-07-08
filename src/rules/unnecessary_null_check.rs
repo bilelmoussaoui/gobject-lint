@@ -101,13 +101,10 @@ impl UnnecessaryNullCheck {
                 matches!(arg.as_ref(),
                     Expression::Unary(u)
                     if u.operator == UnaryOp::AddressOf
-                        && matches!(u.operand.as_ref(),
-                            Expression::Identifier(id) if id.name == checked_var))
+                        && u.operand.as_ref() == checked_var)
             })
         } else {
-            call.arguments.iter().any(
-                |arg| matches!(arg.as_ref(), Expression::Identifier(id) if id.name == checked_var),
-            )
+            call.arguments.iter().any(|arg| arg.as_ref() == checked_var)
         };
 
         if !is_redundant {
