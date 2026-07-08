@@ -1,7 +1,7 @@
 #include <glib.h>
 
 static void
-my_func (char *str, char *other, char *ptr, char **strv)
+my_func (char *str, char *other, char *ptr, char **strv, GList *list)
 {
   if (str)
     g_free (str);
@@ -17,4 +17,7 @@ my_func (char *str, char *other, char *ptr, char **strv)
 
   if (other != NULL)
     g_free_size (other, 128);
+
+  if (list->data != NULL)
+    g_free (list->data);
 }

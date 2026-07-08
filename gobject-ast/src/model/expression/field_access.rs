@@ -9,3 +9,9 @@ pub struct FieldAccessExpression {
     pub field: String,
     pub location: SourceLocation,
 }
+
+impl PartialEq for FieldAccessExpression {
+    fn eq(&self, other: &Self) -> bool {
+        self.base == other.base && self.operator == other.operator && self.field == other.field
+    }
+}
