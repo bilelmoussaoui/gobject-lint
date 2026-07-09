@@ -20,4 +20,7 @@ my_func (char *str, char *other, char *ptr, char **strv, GList *list)
 
   if (list->data != NULL)
     g_free (list->data);
+
+  if (*strv != NULL)
+    g_free (*strv);
 }

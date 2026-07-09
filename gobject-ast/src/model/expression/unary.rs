@@ -8,3 +8,9 @@ pub struct UnaryExpression {
     pub operand: Box<Expression>,
     pub location: SourceLocation,
 }
+
+impl PartialEq for UnaryExpression {
+    fn eq(&self, other: &Self) -> bool {
+        self.operator == other.operator && self.operand == other.operand
+    }
+}
