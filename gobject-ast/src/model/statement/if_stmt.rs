@@ -26,16 +26,16 @@ impl IfStatement {
 
     /// Extract variable from non-zero check patterns: (id > 0), (id != 0),
     /// (id), (self->id)
-    pub fn extract_nonzero_check_variable(&self) -> Option<&str> {
+    pub fn extract_nonzero_check_variable(&self) -> Option<&Expression> {
         match &self.condition {
             Expression::Binary(bin) => {
                 if is_nonzero_comparison(bin) {
-                    bin.extract_compared_variable_name()
+                    bin.extract_compared_variable()
                 } else {
                     None
                 }
             }
-            expr => expr.extract_variable_name(),
+            expr => expr.extract_variable(),
         }
     }
 
