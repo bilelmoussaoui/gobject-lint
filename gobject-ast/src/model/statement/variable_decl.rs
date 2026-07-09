@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::model::{Expression, SourceLocation, TypeInfo};
+use crate::model::{Expression, IdentifierExpression, SourceLocation, TypeInfo};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct VariableDecl {
@@ -24,5 +24,12 @@ impl VariableDecl {
     /// obj->field)
     pub fn is_simple_identifier(&self) -> bool {
         !self.name.contains("->") && !self.name.contains('.')
+    }
+
+    pub fn as_expression(&self) -> Expression {
+        Expression::Identifier(IdentifierExpression {
+            name: self.name.clone(),
+            location: self.name_location.clone(),
+        })
     }
 }

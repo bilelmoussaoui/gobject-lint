@@ -24,13 +24,6 @@ impl IfStatement {
         }
     }
 
-    /// Extract variable name from NULL check patterns: (ptr != NULL), (NULL != ptr),
-    /// (ptr)
-    pub fn extract_null_check_variable_name(&self) -> Option<&str> {
-        self.extract_null_check_variable()
-            .and_then(|v| v.location().as_str())
-    }
-
     /// Extract variable from non-zero check patterns: (id > 0), (id != 0),
     /// (id), (self->id)
     pub fn extract_nonzero_check_variable(&self) -> Option<&str> {
