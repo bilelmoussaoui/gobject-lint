@@ -631,14 +631,15 @@ impl UseClearFunctions {
         let has_else = if_stmt.else_body.is_some();
         let cond_id = if_stmt.extract_nonzero_check_variable();
 
-        for (var_name, mapping, first_loc, second_loc) in conversions {
-            let replacement = format_replacement(&mapping, &var_name, None, &config.style);
+        for (var, mapping, first_loc, second_loc) in conversions {
+            let var_name = var.location().as_str().unwrap_or_default();
+            let replacement = format_replacement(&mapping, var_name, None, &config.style);
             let message = format!(
                 "Use {} instead of {} and zero assignment",
                 replacement.trim_end_matches(';'),
                 mapping.source_func
             );
-            let can_remove_if = !has_else && cond_id == Some(var_name.as_str()) && stmt_count == 2;
+            let can_remove_if = !has_else && cond_id == Some(&var) && stmt_count == 2;
 
             let fix = if can_remove_if {
                 Fix::new(
@@ -673,7 +674,7 @@ impl UseClearFunctions {
         &self,
         config: &Config,
         statements: &[Statement],
-    ) -> Vec<(String, ClearMapping, SourceLocation, SourceLocation)> {
+    ) -> Vec<(Expression, ClearMapping, SourceLocation, SourceLocation)> {
         let mut results = Vec::new();
 
         Statement::for_each_pair(statements, |first, second| {
@@ -681,7 +682,7 @@ impl UseClearFunctions {
                 && second.is_assignment_to(var, Expression::is_zero)
             {
                 results.push((
-                    var.location().as_str().unwrap_or_default().to_owned(),
+                    var.clone(),
                     mapping,
                     first.inner_statement().location().clone(),
                     second.inner_statement().location().clone(),
@@ -721,7 +722,12 @@ impl UseClearFunctions {
             && let Expression::Call(call) = expr_stmt.as_ref()
             && call.is_function("g_clear_handle_id")
             && let Some(cond_var) = if_stmt.extract_nonzero_check_variable()
-            && let Some(cleared_var) = call.get_arg_text(0).and_then(|s| s.strip_prefix('&'))
+            && let Some(cleared_var) = call.get_arg(0).and_then(|arg| match arg {
+                Expression::Unary(u) if u.operator == UnaryOp::AddressOf => {
+                    Some(u.operand.as_ref())
+                }
+                _ => None,
+            })
             && cond_var == cleared_var
         {
             let call_text = call.location.as_str().unwrap_or("");
@@ -781,6 +787,8 @@ impl UseClearFunctions {
             return false;
         }
 
+        let handler_id = handler_id.location().as_str().unwrap_or_default();
+        let obj = obj.location().as_str().unwrap_or_default();
         let replacement = format_replacement(&signal_mapping, handler_id, Some(obj), &config.style);
         let message = format!(
             "Use {} instead of if-guarded g_signal_handler_disconnect",
@@ -817,6 +825,8 @@ impl UseClearFunctions {
             return false;
         }
 
+        let handler_id = handler_id.location().as_str().unwrap_or_default();
+        let obj = obj.location().as_str().unwrap_or_default();
         let replacement = format_replacement(&signal_mapping, handler_id, Some(obj), &config.style);
         let message = format!(
             "Use {} instead of g_signal_handler_disconnect and zeroing the ID",
@@ -856,19 +866,19 @@ impl UseClearFunctions {
             return false;
         };
 
-        if !handler_id.contains("->") {
+        let Some(base) = (match handler_id {
+            Expression::FieldAccess(f) => f.base.extract_variable(),
+            _ => None,
+        }) else {
             return false;
-        }
-
-        let base = handler_id.split("->").next().unwrap_or("").trim();
-        if base.is_empty() {
-            return false;
-        }
+        };
 
         if self.is_freed_in_stmts(all_stmts, base) || self.is_freed_in_stmts(all_stmts, obj) {
             return false;
         }
 
+        let handler_id = handler_id.location().as_str().unwrap_or_default();
+        let obj = obj.location().as_str().unwrap_or_default();
         let replacement = format_replacement(&signal_mapping, handler_id, Some(obj), &config.style);
         let message = format!(
             "Use {} instead of g_signal_handler_disconnect (also zeroes the stored ID)",
@@ -891,7 +901,10 @@ impl UseClearFunctions {
             .copied()
     }
 
-    fn extract_disconnect_args<'a>(&self, stmt: &'a Statement) -> Option<(&'a str, &'a str)> {
+    fn extract_disconnect_args<'a>(
+        &self,
+        stmt: &'a Statement,
+    ) -> Option<(&'a Expression, &'a Expression)> {
         let call = stmt.extract_call()?;
 
         if !call.is_function("g_signal_handler_disconnect") {
@@ -902,23 +915,23 @@ impl UseClearFunctions {
             return None;
         }
 
-        let obj = call.get_arg(0)?.extract_variable_name()?;
-        let handler_id = call.get_arg(1)?.extract_variable_name()?;
+        let obj = call.get_arg(0)?.extract_variable()?;
+        let handler_id = call.get_arg(1)?.extract_variable()?;
 
         Some((obj, handler_id))
     }
 
-    fn is_zero_assign(&self, stmt: &Statement, expected_id: &str) -> bool {
+    fn is_zero_assign(&self, stmt: &Statement, expected_id: &Expression) -> bool {
         let Some(assign) = stmt.extract_assignment() else {
             return false;
         };
 
-        assign.lhs_as_text() == expected_id
+        assign.lhs.as_ref() == expected_id
             && assign.operator == AssignmentOp::Assign
             && assign.rhs.is_zero()
     }
 
-    fn is_freed_in_stmts(&self, stmts: &[Statement], target: &str) -> bool {
+    fn is_freed_in_stmts(&self, stmts: &[Statement], target: &Expression) -> bool {
         for stmt in stmts {
             let Statement::Expression(expr_stmt) = stmt.inner_statement() else {
                 continue;
@@ -937,26 +950,17 @@ impl UseClearFunctions {
             }
 
             for arg in &call.arguments {
-                if self.arg_references(arg, target) {
+                if call.function_name().starts_with("g_clear_") {
+                    if matches!(arg.as_ref(), Expression::Unary(u) if u.operator == UnaryOp::AddressOf && u.operand.as_ref() == target)
+                    {
+                        return true;
+                    }
+                } else if arg.as_ref() == target {
                     return true;
                 }
             }
         }
         false
-    }
-
-    fn arg_references(&self, arg: &Expression, target: &str) -> bool {
-        let mut found = false;
-        arg.walk(&mut |e| match e {
-            Expression::Identifier(id) if id.name == target => {
-                found = true;
-            }
-            Expression::FieldAccess(f) if f.location.as_str() == Some(target) => {
-                found = true;
-            }
-            _ => {}
-        });
-        found
     }
 
     fn extract_weak_pointer_var<'a>(&self, expr: &'a Expression) -> Option<&'a Expression> {

@@ -47,11 +47,4 @@ impl BinaryExpression {
             _ => None,
         }
     }
-
-    /// Extract the variable name being compared in expressions like `x != 0`, `x >
-    /// 0`, `0 < x`, `x != NULL`, `NULL != x`
-    pub fn extract_compared_variable_name(&self) -> Option<&str> {
-        self.extract_compared_variable()
-            .and_then(|v| v.location().as_str())
-    }
 }
