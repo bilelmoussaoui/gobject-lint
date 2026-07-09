@@ -399,17 +399,18 @@ impl UseClearFunctions {
                 continue;
             }
 
-            let var_name = match mapping.replacement {
+            let var = match mapping.replacement {
                 ClearReplacement::WeakPointer => {
                     self.extract_weak_pointer_var(call.arguments.get(1)?)?
                 }
-                _ => call.get_arg(0)?.location().as_str()?,
+                _ => call.get_arg(0)?,
             };
 
-            if !stmt2.is_assignment_to(var_name, |expr| mapping.null_check.matches(expr)) {
+            if !stmt2.is_assignment_to(var, |expr| mapping.null_check.matches(expr)) {
                 continue;
             }
 
+            let var_name = var.location().as_str().unwrap_or_default();
             let extra_arg = call.get_arg_text(1);
             let replacement = format_replacement(mapping, var_name, extra_arg, &config.style);
             let message = format!(
@@ -473,6 +474,7 @@ impl UseClearFunctions {
             return false;
         }
 
+        let checked_var = checked_var.location().as_str().unwrap_or_default();
         let replacement = format_replacement(&mapping, checked_var, extra_arg, &config.style);
         let message = format!(
             "Use {} instead of manual {} check, {}, and {} assignment",
@@ -493,8 +495,11 @@ impl UseClearFunctions {
         true
     }
 
-    fn find_variable_in_condition<'a>(&self, expr: &'a Expression) -> Option<(&'a str, NullCheck)> {
-        if let Some(var) = expr.extract_variable_name() {
+    fn find_variable_in_condition<'a>(
+        &self,
+        expr: &'a Expression,
+    ) -> Option<(&'a Expression, NullCheck)> {
+        if let Some(var) = expr.extract_variable() {
             return Some((var, NullCheck::NullOrZero));
         }
 
@@ -511,30 +516,30 @@ impl UseClearFunctions {
                 let r_neg1 = r.is_negative_one();
                 match (op, l_empty, r_empty, l_neg1, r_neg1) {
                     (BinaryOp::NotEqual, true, false, ..) => {
-                        Some((r.extract_variable_name()?, NullCheck::NullOrZero))
+                        Some((r.extract_variable()?, NullCheck::NullOrZero))
                     }
                     (BinaryOp::Less, true, false, ..) => {
-                        Some((r.extract_variable_name()?, NullCheck::NullOrZero))
+                        Some((r.extract_variable()?, NullCheck::NullOrZero))
                     }
                     (BinaryOp::NotEqual, false, true, ..) => {
-                        Some((l.extract_variable_name()?, NullCheck::NullOrZero))
+                        Some((l.extract_variable()?, NullCheck::NullOrZero))
                     }
                     (BinaryOp::Greater, false, true, ..) => {
-                        Some((l.extract_variable_name()?, NullCheck::NullOrZero))
+                        Some((l.extract_variable()?, NullCheck::NullOrZero))
                     }
                     // fd >= 0 or 0 <= fd
                     (BinaryOp::GreaterEqual, false, ..) if r_empty => {
-                        Some((l.extract_variable_name()?, NullCheck::NegativeOne))
+                        Some((l.extract_variable()?, NullCheck::NegativeOne))
                     }
                     (BinaryOp::LessEqual, _, false, ..) if l_empty => {
-                        Some((r.extract_variable_name()?, NullCheck::NegativeOne))
+                        Some((r.extract_variable()?, NullCheck::NegativeOne))
                     }
                     // fd != -1 or -1 != fd
                     (BinaryOp::NotEqual, _, _, _, true) => {
-                        Some((l.extract_variable_name()?, NullCheck::NegativeOne))
+                        Some((l.extract_variable()?, NullCheck::NegativeOne))
                     }
                     (BinaryOp::NotEqual, _, _, true, _) => {
-                        Some((r.extract_variable_name()?, NullCheck::NegativeOne))
+                        Some((r.extract_variable()?, NullCheck::NegativeOne))
                     }
                     _ => None,
                 }
@@ -543,8 +548,8 @@ impl UseClearFunctions {
                 operator: UnaryOp::Not,
                 operand: op,
                 ..
-            }) => Some((op.extract_variable_name()?, NullCheck::NullOrZero)),
-            _ => Some((expr.location().as_str()?, NullCheck::NullOrZero)),
+            }) => Some((op.extract_variable()?, NullCheck::NullOrZero)),
+            _ => Some((expr, NullCheck::NullOrZero)),
         }
     }
 
@@ -563,7 +568,7 @@ impl UseClearFunctions {
     fn find_unref_in_body<'a>(
         &self,
         statements: &'a [Statement],
-        var_name: &str,
+        var: &Expression,
         config: &Config,
     ) -> Option<(ClearMapping, Option<&'a str>)> {
         for stmt in statements {
@@ -583,9 +588,7 @@ impl UseClearFunctions {
                     }
                     if call.is_function(mapping.source_func) {
                         for arg in &call.arguments {
-                            if let Some(arg_text) = arg.location().as_str()
-                                && arg_text == var_name
-                            {
+                            if arg.as_ref() == var {
                                 let extra = call.get_arg(1).and_then(|a| a.location().as_str());
                                 return Some((*mapping, extra));
                             }
@@ -600,12 +603,12 @@ impl UseClearFunctions {
     fn has_null_assignment(
         &self,
         statements: &[Statement],
-        var_name: &str,
+        var: &Expression,
         null_check: NullCheck,
     ) -> bool {
         statements
             .iter()
-            .any(|stmt| stmt.is_assignment_to(var_name, |expr| null_check.matches(expr)))
+            .any(|stmt| stmt.is_assignment_to(var, |expr| null_check.matches(expr)))
     }
 
     fn try_handle_id_if_pattern(
@@ -674,11 +677,11 @@ impl UseClearFunctions {
         let mut results = Vec::new();
 
         Statement::for_each_pair(statements, |first, second| {
-            if let Some((var_name, mapping)) = self.extract_handle_cleanup(first, config)
-                && second.is_assignment_to(&var_name, Expression::is_zero)
+            if let Some((var, mapping)) = self.extract_handle_cleanup(first, config)
+                && second.is_assignment_to(var, Expression::is_zero)
             {
                 results.push((
-                    var_name,
+                    var.location().as_str().unwrap_or_default().to_owned(),
                     mapping,
                     first.inner_statement().location().clone(),
                     second.inner_statement().location().clone(),
@@ -689,11 +692,11 @@ impl UseClearFunctions {
         results
     }
 
-    fn extract_handle_cleanup(
+    fn extract_handle_cleanup<'a>(
         &self,
-        stmt: &Statement,
+        stmt: &'a Statement,
         config: &Config,
-    ) -> Option<(String, ClearMapping)> {
+    ) -> Option<(&'a Expression, ClearMapping)> {
         let call = stmt.extract_call()?;
         let func_name = call.function_name_str()?;
 
@@ -703,10 +706,7 @@ impl UseClearFunctions {
                 && m.is_enabled(config)
         })?;
 
-        let arg_expr = call.get_arg(0)?;
-        let var_name = arg_expr.location().as_str()?.trim().to_owned();
-
-        Some((var_name, *mapping))
+        Some((call.get_arg(0)?, *mapping))
     }
 
     fn check_unnecessary_braces(
@@ -959,7 +959,7 @@ impl UseClearFunctions {
         found
     }
 
-    fn extract_weak_pointer_var<'a>(&self, expr: &'a Expression) -> Option<&'a str> {
+    fn extract_weak_pointer_var<'a>(&self, expr: &'a Expression) -> Option<&'a Expression> {
         // Handle cast expressions: (gpointer*)&var
         let inner_expr = match expr {
             Expression::Cast(cast) => &*cast.operand,
@@ -969,7 +969,7 @@ impl UseClearFunctions {
         if let Expression::Unary(unary) = inner_expr
             && unary.operator == UnaryOp::AddressOf
         {
-            return unary.operand.extract_variable_name();
+            return unary.operand.extract_variable();
         }
 
         None

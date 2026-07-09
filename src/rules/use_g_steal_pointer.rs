@@ -1,4 +1,6 @@
-use gobject_ast::model::{AssignmentOp, Expression, FileModel, FunctionDefItem, Statement};
+use gobject_ast::model::{
+    AssignmentOp, Expression, FileModel, FunctionDefItem, Statement, UnaryOp,
+};
 
 use crate::{
     ast_context::AstContext,
@@ -106,12 +108,12 @@ impl UseGStealPointer {
         }
 
         // Get the variable name from the initializer
-        let Some(ptr_expr) = init_expr.extract_variable_name() else {
+        let Some(ptr_expr) = init_expr.extract_variable() else {
             return false;
         };
 
         // Skip dereferences
-        if ptr_expr.starts_with('*') {
+        if matches!(ptr_expr, Expression::Unary(u) if u.operator == UnaryOp::Dereference) {
             return false;
         }
 
@@ -135,6 +137,7 @@ impl UseGStealPointer {
             return false;
         }
 
+        let ptr_expr = ptr_expr.location().as_str().unwrap_or_default();
         let steal = style.format_addr_call("g_steal_pointer", ptr_expr, &[]);
         let replacement = format!("return {steal};");
         let message =
@@ -167,7 +170,7 @@ impl UseGStealPointer {
             return false;
         };
 
-        if ptr_expr.starts_with('*') {
+        if matches!(ptr_expr, Expression::Unary(u) if u.operator == UnaryOp::Dereference) {
             return false;
         }
 
@@ -175,6 +178,8 @@ impl UseGStealPointer {
             return false;
         }
 
+        let other_expr = other_expr.location().as_str().unwrap_or_default();
+        let ptr_expr = ptr_expr.location().as_str().unwrap_or_default();
         let steal = style.format_addr_call("g_steal_pointer", ptr_expr, &[]);
         let replacement = format!("{other_expr} = {steal};");
         let message = format!("Use {steal} instead of copying and setting to NULL");
@@ -208,12 +213,12 @@ impl UseGStealPointer {
         };
 
         // Extract tested expression from condition
-        let Some(expr_text) = if_stmt.extract_null_check_variable_name() else {
+        let Some(expr) = if_stmt.extract_null_check_variable() else {
             return false;
         };
 
         // Skip dereference expressions
-        if expr_text.starts_with('*') {
+        if matches!(expr, Expression::Unary(u) if u.operator == UnaryOp::Dereference) {
             return false;
         }
 
@@ -226,12 +231,12 @@ impl UseGStealPointer {
         let Some((dest_expr, rhs)) = self.extract_assignment(&if_stmt.then_body[0]) else {
             return false;
         };
-        if rhs != expr_text {
+        if rhs != expr {
             return false;
         }
 
         // then_body[1]: expr = NULL
-        if !if_stmt.then_body[1].is_null_assignment_to(expr_text) {
+        if !if_stmt.then_body[1].is_null_assignment_to(expr) {
             return false;
         }
 
@@ -243,7 +248,9 @@ impl UseGStealPointer {
             return false;
         }
 
-        let steal = style.format_addr_call("g_steal_pointer", expr_text, &[]);
+        let expr = expr.location().as_str().unwrap_or_default();
+        let dest_expr = dest_expr.location().as_str().unwrap_or_default();
+        let steal = style.format_addr_call("g_steal_pointer", expr, &[]);
         let replacement = format!("{dest_expr} = {steal};");
         let message = format!("Use {steal} instead of if/else copy-and-NULL pattern");
         let fix = Fix::new(
@@ -275,7 +282,7 @@ impl UseGStealPointer {
         }
 
         // Try to extract condition expression
-        let condition_expr = if_stmt.extract_null_check_variable_name();
+        let condition_expr = if_stmt.extract_null_check_variable();
 
         // Pattern 1: 2 statements - dest = ptr; ptr = NULL;
         if if_stmt.then_body.len() == 2 {
@@ -284,7 +291,7 @@ impl UseGStealPointer {
             };
 
             // Skip dereference expressions
-            if ptr_expr.starts_with('*') {
+            if matches!(ptr_expr, Expression::Unary(u) if u.operator == UnaryOp::Dereference) {
                 return false;
             }
 
@@ -292,7 +299,9 @@ impl UseGStealPointer {
                 return false;
             }
 
-            let steal = style.format_addr_call("g_steal_pointer", ptr_expr, &[]);
+            let dest_expr = dest_expr.location().as_str().unwrap_or_default();
+            let ptr_expr_str = ptr_expr.location().as_str().unwrap_or_default();
+            let steal = style.format_addr_call("g_steal_pointer", ptr_expr_str, &[]);
             let replacement = format!("{dest_expr} = {steal};");
             let message = format!("Use {steal} instead of copying and setting to NULL");
 
@@ -338,12 +347,12 @@ impl UseGStealPointer {
                 return false;
             }
 
-            let Some(ptr_expr) = init_expr.extract_variable_name() else {
+            let Some(ptr_expr) = init_expr.extract_variable() else {
                 return false;
             };
 
             // Skip dereference expressions
-            if ptr_expr.starts_with('*') {
+            if matches!(ptr_expr, Expression::Unary(u) if u.operator == UnaryOp::Dereference) {
                 return false;
             }
 
@@ -366,10 +375,12 @@ impl UseGStealPointer {
                 return false;
             }
 
-            let steal = style.format_addr_call("g_steal_pointer", ptr_expr, &[]);
+            let ptr_expr_str = ptr_expr.location().as_str().unwrap_or_default();
+            let steal = style.format_addr_call("g_steal_pointer", ptr_expr_str, &[]);
             let replacement = format!("return {steal};");
-            let message =
-                format!("Use {replacement} instead of copying {ptr_expr} and setting it to NULL");
+            let message = format!(
+                "Use {replacement} instead of copying {ptr_expr_str} and setting it to NULL"
+            );
 
             // If condition tests the same variable being stolen, remove entire if
             let fix = if condition_expr == Some(ptr_expr) {
@@ -401,7 +412,10 @@ impl UseGStealPointer {
     }
 
     /// Extract (lhs, rhs) from assignment statement
-    fn extract_assignment<'a>(&self, stmt: &'a Statement) -> Option<(&'a str, &'a str)> {
+    fn extract_assignment<'a>(
+        &self,
+        stmt: &'a Statement,
+    ) -> Option<(&'a Expression, &'a Expression)> {
         let Statement::Expression(expr_stmt) = stmt.inner_statement() else {
             return None;
         };
@@ -414,10 +428,9 @@ impl UseGStealPointer {
             return None;
         }
 
-        // Get rhs as string - handle various expression types
+        // Get rhs - handle various expression types
         let rhs = match &*assign.rhs {
-            Expression::Identifier(id) => id.name.as_str(),
-            Expression::FieldAccess(f) => f.location.as_str().unwrap_or(""),
+            Expression::Identifier(_) | Expression::FieldAccess(_) => &assign.rhs,
             Expression::Null(_) | Expression::Call(_) => {
                 // For NULL or function calls like g_strdup(), we don't want to suggest
                 // g_steal_pointer
@@ -428,10 +441,9 @@ impl UseGStealPointer {
             }
         };
 
-        let lhs = assign.lhs_as_text();
-        if lhs.is_empty() {
+        if assign.lhs_as_text().is_empty() {
             return None;
         }
-        Some((lhs, rhs))
+        Some((&assign.lhs, rhs))
     }
 }

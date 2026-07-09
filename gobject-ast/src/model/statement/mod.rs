@@ -341,15 +341,14 @@ impl Statement {
 
     /// Check if this statement assigns a value matching the predicate to the
     /// target variable (unwraps labels)
-    pub fn is_assignment_to<F>(&self, target_var: &str, value_check: F) -> bool
+    pub fn is_assignment_to<F>(&self, target_var: &Expression, value_check: F) -> bool
     where
         F: Fn(&Expression) -> bool,
     {
         if let Self::Expression(expr_stmt) = self.inner_statement()
             && let Expression::Assignment(assign) = expr_stmt.as_ref()
         {
-            let lhs_text = assign.lhs.location().as_str().unwrap_or("");
-            return lhs_text.trim() == target_var.trim() && value_check(&assign.rhs);
+            return assign.lhs.as_ref() == target_var && value_check(&assign.rhs);
         }
         false
     }
@@ -366,8 +365,8 @@ impl Statement {
     }
 
     /// Check if this statement assigns NULL to the target variable
-    pub fn is_null_assignment_to(&self, var_name: &str) -> bool {
-        self.is_assignment_to(var_name, Expression::is_null)
+    pub fn is_null_assignment_to(&self, var: &Expression) -> bool {
+        self.is_assignment_to(var, Expression::is_null)
     }
 
     fn non_comments(stmts: &[Self]) -> Vec<&Self> {
