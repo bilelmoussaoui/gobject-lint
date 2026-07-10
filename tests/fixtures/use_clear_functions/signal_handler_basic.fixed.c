@@ -64,13 +64,13 @@ clear_bare_member_freed (MyObj *self)
   g_free (self);
 }
 
-/* bare disconnect on struct member, but the source is g_clear_object'd — skip */
+/* bare disconnect on struct member, but the struct is g_clear_object'd — skip */
 
 static void
 clear_bare_member_source_cleared (MyObj *self)
 {
   g_signal_handler_disconnect (self->source, self->signal_id);
-  g_clear_object (&self->source);
+  g_clear_object (&self);
 }
 
 /* bare disconnect, but the struct is freed under a label — skip */
