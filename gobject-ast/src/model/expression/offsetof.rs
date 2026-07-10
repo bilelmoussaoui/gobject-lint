@@ -1,9 +1,11 @@
+use std::hash::{Hash, Hasher};
+
 use serde::Serialize;
 
 use crate::model::SourceLocation;
 
 /// A `(struct_type, field)` pair — used by `offsetof()` and `G_STRUCT_OFFSET`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct OffsetField {
     pub struct_type: String,
     pub field: String,
@@ -13,4 +15,10 @@ pub struct OffsetField {
 pub struct OffsetOfExpression {
     pub struct_field: OffsetField,
     pub location: SourceLocation,
+}
+
+impl Hash for OffsetOfExpression {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.struct_field.hash(state);
+    }
 }

@@ -3,7 +3,7 @@ use std::hash::Hash;
 use serde::Serialize;
 
 /// Binary operators in C
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BinaryOp {
     // Arithmetic
@@ -145,7 +145,7 @@ impl UnaryOp {
 }
 
 /// Update operators (increment/decrement)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateOp {
     Increment, // ++
@@ -172,7 +172,7 @@ impl UpdateOp {
 }
 
 /// Assignment operators in C
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssignmentOp {
     Assign,           // =

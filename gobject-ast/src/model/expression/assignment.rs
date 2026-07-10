@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use serde::Serialize;
 
 use crate::model::{AssignmentOp, Expression, SourceLocation};
@@ -8,6 +10,14 @@ pub struct Assignment {
     pub operator: AssignmentOp,
     pub rhs: Box<Expression>,
     pub location: SourceLocation,
+}
+
+impl Hash for Assignment {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.lhs.hash(state);
+        self.operator.hash(state);
+        self.rhs.hash(state);
+    }
 }
 
 impl Assignment {

@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use serde::Serialize;
 
 use crate::model::{SourceLocation, TypeInfo, expression::Expression};
@@ -10,7 +12,14 @@ pub struct SizeofExpression {
     pub location: SourceLocation,
 }
 
-#[derive(Debug, Clone, Serialize)]
+impl Hash for SizeofExpression {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.operand.hash(state);
+        self.text.hash(state);
+    }
+}
+
+#[derive(Debug, Clone, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SizeofOperand {
     Type(TypeInfo),              // sizeof(MyType) or sizeof(struct MyType *)
