@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use serde::Serialize;
 
 use crate::model::{BinaryOp, Expression, SourceLocation};
@@ -8,6 +10,14 @@ pub struct BinaryExpression {
     pub operator: BinaryOp,
     pub right: Box<Expression>,
     pub location: SourceLocation,
+}
+
+impl Hash for BinaryExpression {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.left.hash(state);
+        self.operator.hash(state);
+        self.right.hash(state);
+    }
 }
 
 impl BinaryExpression {

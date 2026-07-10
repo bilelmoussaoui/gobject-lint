@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use serde::Serialize;
 
 use crate::model::{Expression, SourceLocation, TypeInfo};
@@ -16,4 +18,12 @@ pub struct AllocCallExpression {
     pub arguments: Vec<Box<Expression>>,
 
     pub location: SourceLocation,
+}
+
+impl Hash for AllocCallExpression {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.function.hash(state);
+        self.allocated_type.hash(state);
+        self.arguments.hash(state);
+    }
 }

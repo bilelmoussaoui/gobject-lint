@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use serde::Serialize;
 
 use crate::model::{Expression, SourceLocation};
@@ -8,6 +10,13 @@ pub struct CallExpression {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub arguments: Vec<Box<Expression>>,
     pub location: SourceLocation,
+}
+
+impl Hash for CallExpression {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.function.hash(state);
+        self.arguments.hash(state);
+    }
 }
 
 impl CallExpression {

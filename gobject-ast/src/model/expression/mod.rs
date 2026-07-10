@@ -83,10 +83,27 @@ impl Eq for Expression {}
 impl Hash for Expression {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
-            Self::Identifier(e) => e.hash(state),
-            Self::FieldAccess(e) => e.hash(state),
-            Self::Unary(e) => e.hash(state),
-            _ => (),
+            Self::Call(c) => c.hash(state),
+            Self::AllocCall(a) => a.hash(state),
+            Self::Assignment(a) => a.hash(state),
+            Self::Binary(b) => b.hash(state),
+            Self::Unary(u) => u.hash(state),
+            Self::Identifier(i) => i.hash(state),
+            Self::FieldAccess(f) => f.hash(state),
+            Self::StringLiteral(s) => s.hash(state),
+            Self::NumberLiteral(n) => n.hash(state),
+            Self::Null(n) => n.hash(state),
+            Self::Boolean(b) => b.hash(state),
+            Self::Cast(c) => c.hash(state),
+            Self::Conditional(c) => c.hash(state),
+            Self::Sizeof(s) => s.hash(state),
+            Self::Subscript(s) => s.hash(state),
+            Self::InitializerList(i) => i.hash(state),
+            Self::CharLiteral(c) => c.hash(state),
+            Self::Update(u) => u.hash(state),
+            Self::Comment(c) => c.hash(state),
+            Self::OffsetOf(o) => o.hash(state),
+            Self::Generic(g) => g.hash(state),
         };
     }
 }

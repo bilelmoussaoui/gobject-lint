@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use serde::Serialize;
 
 fn is_zero(v: &usize) -> bool {
@@ -6,7 +8,7 @@ fn is_zero(v: &usize) -> bool {
 
 use crate::model::{SourceLocation, types::BasicType};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AutoCleanupMacro {
     /// g_autoptr(TypeName)
@@ -85,6 +87,19 @@ pub struct TypeInfo {
     pub location: SourceLocation,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_cleanup: Option<AutoCleanupMacro>,
+}
+
+impl Hash for TypeInfo {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.base_type.hash(state);
+        self.is_const.hash(state);
+        self.is_volatile.hash(state);
+        self.is_struct.hash(state);
+        self.is_union.hash(state);
+        self.is_enum.hash(state);
+        self.pointer_depth.hash(state);
+        self.auto_cleanup.hash(state);
+    }
 }
 
 impl TypeInfo {
