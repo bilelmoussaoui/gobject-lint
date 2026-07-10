@@ -55,7 +55,7 @@ impl UseGSetStr {
         violations: &mut Vec<Violation>,
     ) -> bool {
         // First statement: g_free(var) or g_clear_pointer(&var, g_free)
-        let Some(var_name) = self.extract_gfree_var(s1) else {
+        let Some(var) = self.extract_gfree_var(s1) else {
             return false;
         };
 
@@ -64,10 +64,11 @@ impl UseGSetStr {
             return false;
         };
 
-        if assign_var != var_name {
+        if assign_var != var {
             return false;
         }
 
+        let var_name = var.location().as_str().unwrap_or_default();
         let replacement = config
             .style
             .format_addr_call_stmt("g_set_str", var_name, &[new_val]);
@@ -86,7 +87,7 @@ impl UseGSetStr {
     }
 
     /// Extract variable from g_free(var) or g_clear_pointer(&var, g_free)
-    fn extract_gfree_var<'a>(&'a self, stmt: &'a Statement) -> Option<&'a str> {
+    fn extract_gfree_var<'a>(&'a self, stmt: &'a Statement) -> Option<&'a Expression> {
         let Statement::Expression(expr_stmt) = stmt else {
             return None;
         };
@@ -96,7 +97,7 @@ impl UseGSetStr {
         };
 
         if call.is_function("g_free") {
-            return call.get_arg(0)?.location().as_str();
+            return call.get_arg(0);
         } else if call.is_function("g_clear_pointer") {
             // g_clear_pointer(&var, g_free)
             if call.arguments.len() != 2 {
@@ -119,7 +120,7 @@ impl UseGSetStr {
             if let Expression::Unary(unary) = first_arg
                 && unary.operator == UnaryOp::AddressOf
             {
-                return unary.operand.location().as_str();
+                return Some(&unary.operand);
             }
         }
 
@@ -128,7 +129,10 @@ impl UseGSetStr {
 
     /// Extract (var, new_val) from var = g_strdup(new_val) or var = cond ?
     /// g_strdup(...) : NULL
-    fn extract_strdup_assignment<'a>(&self, stmt: &'a Statement) -> Option<(&'a str, &'a str)> {
+    fn extract_strdup_assignment<'a>(
+        &self,
+        stmt: &'a Statement,
+    ) -> Option<(&'a Expression, &'a str)> {
         let Statement::Expression(expr_stmt) = stmt else {
             return None;
         };
@@ -147,9 +151,9 @@ impl UseGSetStr {
             && !call.arguments.is_empty()
         {
             let new_val = call.get_arg(0)?.location().as_str()?;
-            let var_name = assign.lhs_as_text();
-            if !var_name.is_empty() {
-                return Some((var_name, new_val));
+            let var = assign.lhs.as_ref();
+            if !var.location().as_str().unwrap_or_default().is_empty() {
+                return Some((var, new_val));
             }
         }
 
@@ -159,9 +163,9 @@ impl UseGSetStr {
         {
             // Use the condition variable as the value
             let cond_text = cond.condition.location().as_str()?;
-            let var_name = assign.lhs_as_text();
-            if !var_name.is_empty() {
-                return Some((var_name, cond_text));
+            let var = assign.lhs.as_ref();
+            if !var.location().as_str().unwrap_or_default().is_empty() {
+                return Some((var, cond_text));
             }
         }
 
