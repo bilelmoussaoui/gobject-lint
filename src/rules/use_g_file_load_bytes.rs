@@ -64,7 +64,7 @@ impl UseGFileLoadBytes {
 
     /// Find all g_file_load_contents calls and return the set of variables they
     /// populate
-    fn find_load_contents_vars<'a>(&self, func: &'a FunctionDefItem) -> HashSet<&'a str> {
+    fn find_load_contents_vars<'a>(&self, func: &'a FunctionDefItem) -> HashSet<&'a Expression> {
         let mut result = HashSet::new();
 
         // Find all g_file_load_contents or g_file_load_contents_finish calls
@@ -86,7 +86,7 @@ impl UseGFileLoadBytes {
         &self,
         statements: &[Statement],
         file: &FileModel,
-        load_contents_vars: &HashSet<&str>,
+        load_contents_vars: &HashSet<&Expression>,
         violations: &mut Vec<Violation>,
     ) {
         for stmt in statements {
@@ -128,7 +128,7 @@ impl UseGFileLoadBytes {
         &self,
         expr: &Expression,
         file: &FileModel,
-        load_contents_vars: &HashSet<&str>,
+        load_contents_vars: &HashSet<&Expression>,
         violations: &mut Vec<Violation>,
     ) {
         if let Expression::Call(call) = expr
@@ -150,12 +150,12 @@ impl UseGFileLoadBytes {
     }
 
     /// Extract variable name from &var argument
-    fn extract_pointer_var<'a>(&self, arg: &'a Expression) -> Option<&'a str> {
+    fn extract_pointer_var<'a>(&self, arg: &'a Expression) -> Option<&'a Expression> {
         // Handle &var
         if let Expression::Unary(unary) = arg
             && unary.operator == UnaryOp::AddressOf
         {
-            return unary.operand.extract_variable_name();
+            return unary.operand.extract_variable();
         }
 
         None
@@ -163,11 +163,10 @@ impl UseGFileLoadBytes {
 
     /// Extract variable name from first argument of g_bytes_new_take
     /// Handles: contents, g_steal_pointer(&contents)
-    fn extract_contents_var<'a>(&self, arg: &'a Expression) -> Option<&'a str> {
+    fn extract_contents_var<'a>(&self, arg: &'a Expression) -> Option<&'a Expression> {
         match arg {
             // Direct variable: contents
-            Expression::Identifier(id) => Some(id.name.as_str()),
-            Expression::FieldAccess(f) => f.location.as_str(),
+            Expression::Identifier(_) | Expression::FieldAccess(_) => Some(arg),
             // g_steal_pointer(&contents)
             Expression::Call(call) => {
                 if call.is_function("g_steal_pointer") && !call.arguments.is_empty() {

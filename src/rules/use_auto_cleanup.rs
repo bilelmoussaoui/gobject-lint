@@ -257,17 +257,17 @@ impl UseAutoCleanup {
         let goto_labels = self.find_goto_labels(&func.body_statements);
         let cleanup_labels = self.find_cleanup_labels(&func.body_statements);
 
-        for (var_name, (type_info, location)) in &allocated_vars {
+        for (var, (type_info, location)) in &allocated_vars {
             for goto_label in &goto_labels {
                 if let Some(cleanup_vars) = cleanup_labels.get(goto_label)
-                    && cleanup_vars.contains(*var_name)
+                    && cleanup_vars.contains(var)
                 {
                     violations.push(self.violation_at(
                         &file.path,
                         location,
                         format!(
                             "Consider using g_autoptr({}) {} and g_steal_pointer to avoid goto cleanup",
-                            type_info.base_type, var_name
+                            type_info.base_type, var.location().as_str().unwrap_or_default()
                         ),
                     ));
                 }
@@ -278,10 +278,10 @@ impl UseAutoCleanup {
     fn find_allocated_variables<'a>(
         &self,
         statements: &'a [Statement],
-    ) -> HashMap<&'a str, (&'a TypeInfo, &'a SourceLocation)> {
+    ) -> HashMap<Expression, (&'a TypeInfo, &'a SourceLocation)> {
         let mut result = HashMap::new();
 
-        let local_vars: HashMap<&str, (&TypeInfo, &SourceLocation)> = statements
+        let local_vars: HashMap<Expression, (&TypeInfo, &SourceLocation)> = statements
             .iter()
             .flat_map(Statement::iter_declarations)
             .filter(|d| {
@@ -289,7 +289,7 @@ impl UseAutoCleanup {
                     && d.type_info.is_pointer()
                     && d.is_simple_identifier()
             })
-            .map(|d| (d.name.as_str(), (&d.type_info, &d.location)))
+            .map(|d| (d.as_expression(), (&d.type_info, &d.location)))
             .collect();
 
         self.collect_allocated_vars(statements, &local_vars, &mut result);
@@ -300,27 +300,29 @@ impl UseAutoCleanup {
     fn collect_allocated_vars<'a>(
         &self,
         statements: &'a [Statement],
-        local_vars: &HashMap<&str, (&'a TypeInfo, &'a SourceLocation)>,
-        result: &mut HashMap<&'a str, (&'a TypeInfo, &'a SourceLocation)>,
+        local_vars: &HashMap<Expression, (&'a TypeInfo, &'a SourceLocation)>,
+        result: &mut HashMap<Expression, (&'a TypeInfo, &'a SourceLocation)>,
     ) {
         for stmt in statements {
             stmt.walk(&mut |s| match s {
                 Statement::Declaration(decl) => {
                     if let Some(Expression::Call(call)) = &decl.initializer
                         && call.is_allocation_call()
-                        && let Some((type_info, location)) = local_vars.get(decl.name.as_str())
                     {
-                        result.insert(decl.name.as_str(), (*type_info, location));
+                        let var = decl.as_expression();
+                        if let Some((type_info, location)) = local_vars.get(&var) {
+                            result.insert(var, (*type_info, location));
+                        }
                     }
                 }
                 Statement::Expression(expr_stmt) => {
                     if let Expression::Assignment(assign) = expr_stmt.as_ref()
                         && let Expression::Call(call) = &*assign.rhs
                         && call.is_allocation_call()
-                        && let Expression::Identifier(id) = &*assign.lhs
-                        && let Some((type_info, location)) = local_vars.get(id.name.as_str())
+                        && matches!(assign.lhs.as_ref(), Expression::Identifier(_))
+                        && let Some((type_info, location)) = local_vars.get(assign.lhs.as_ref())
                     {
-                        result.insert(id.name.as_str(), (*type_info, location));
+                        result.insert(assign.lhs.as_ref().clone(), (*type_info, location));
                     }
                 }
                 _ => {}
@@ -346,7 +348,7 @@ impl UseAutoCleanup {
     fn find_cleanup_labels<'a>(
         &'a self,
         statements: &'a [Statement],
-    ) -> HashMap<&'a str, std::collections::HashSet<&'a str>> {
+    ) -> HashMap<&'a str, std::collections::HashSet<&'a Expression>> {
         let mut result = HashMap::new();
 
         for stmt in statements {
@@ -363,14 +365,17 @@ impl UseAutoCleanup {
         result
     }
 
-    fn find_cleanup_calls<'a>(&self, stmt: &'a Statement) -> std::collections::HashSet<&'a str> {
+    fn find_cleanup_calls<'a>(
+        &self,
+        stmt: &'a Statement,
+    ) -> std::collections::HashSet<&'a Expression> {
         let mut cleanup_vars = std::collections::HashSet::new();
         for call in stmt.iter_calls() {
             if call.is_cleanup_call()
                 && let Some(arg_expr) = call.get_arg(0)
-                && let Some(var_name) = arg_expr.extract_variable_name()
+                && let Some(var) = arg_expr.extract_variable()
             {
-                cleanup_vars.insert(var_name);
+                cleanup_vars.insert(var);
             }
         }
         cleanup_vars
