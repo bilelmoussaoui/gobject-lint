@@ -67,10 +67,9 @@ impl CallExpression {
     /// Check if the argument at the given index contains a reference to the
     /// specified variable Handles both plain identifiers and field access
     /// (e.g., obj->field)
-    pub fn arg_contains_variable(&self, index: usize, var_name: &str) -> bool {
+    pub fn arg_contains_variable(&self, index: usize, var: &Expression) -> bool {
         self.has_arg_matching(index, |expr| {
-            expr.extract_variable_name()
-                .is_some_and(|name| name == var_name)
+            expr.extract_variable().is_some_and(|v| v == var)
         })
     }
 

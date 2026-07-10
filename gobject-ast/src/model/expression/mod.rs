@@ -14,7 +14,10 @@ mod subscript;
 mod unary;
 mod update;
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    hash::{Hash, Hasher},
+};
 
 pub use alloc_call::AllocCallExpression;
 pub use assignment::Assignment;
@@ -72,6 +75,19 @@ impl PartialEq for Expression {
             Self::Unary(s) => matches!(other, Self::Unary(o) if s == o),
             _ => false,
         }
+    }
+}
+
+impl Eq for Expression {}
+
+impl Hash for Expression {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Self::Identifier(e) => e.hash(state),
+            Self::FieldAccess(e) => e.hash(state),
+            Self::Unary(e) => e.hash(state),
+            _ => (),
+        };
     }
 }
 
@@ -191,7 +207,7 @@ impl Expression {
         }
     }
 
-    /// Extract variable from simple expressions (Identifier or FieldAccess)
+    /// Extract variable from simple expressions (Identifier, FieldAccess or Unary)
     pub fn extract_variable(&self) -> Option<&Self> {
         match self {
             Self::Identifier(_) | Self::FieldAccess(_) => Some(self),
@@ -203,12 +219,6 @@ impl Expression {
             }
             _ => None,
         }
-    }
-
-    /// Extract variable name from simple expressions (Identifier or
-    /// FieldAccess)
-    pub fn extract_variable_name(&self) -> Option<&str> {
-        self.extract_variable().and_then(|v| v.location().as_str())
     }
 
     /// Extract the identifier name, unwrapping macro calls and casts.

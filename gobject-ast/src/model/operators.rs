@@ -1,3 +1,5 @@
+use std::hash::Hash;
+
 use serde::Serialize;
 
 /// Binary operators in C
@@ -96,7 +98,7 @@ impl BinaryOp {
 }
 
 /// Unary operators in C
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnaryOp {
     Not,           // !
@@ -224,7 +226,7 @@ impl AssignmentOp {
 }
 
 /// Field access operators in C
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FieldAccessOp {
     Arrow, // ->

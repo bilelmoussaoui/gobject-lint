@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use serde::Serialize;
 
 use crate::model::{Expression, SourceLocation, UnaryOp};
@@ -12,5 +14,12 @@ pub struct UnaryExpression {
 impl PartialEq for UnaryExpression {
     fn eq(&self, other: &Self) -> bool {
         self.operator == other.operator && self.operand == other.operand
+    }
+}
+
+impl Hash for UnaryExpression {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.operator.hash(state);
+        self.operand.hash(state);
     }
 }
