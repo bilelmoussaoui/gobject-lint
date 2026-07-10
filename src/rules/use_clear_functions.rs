@@ -865,7 +865,7 @@ impl UseClearFunctions {
             return false;
         }
 
-        if self.is_freed_in_stmts(all_stmts, base) || self.is_freed_in_stmts(all_stmts, obj) {
+        if self.is_freed_in_stmts(all_stmts, base) {
             return false;
         }
 
