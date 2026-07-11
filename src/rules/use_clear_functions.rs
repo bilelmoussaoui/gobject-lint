@@ -403,7 +403,7 @@ impl UseClearFunctions {
                 ClearReplacement::WeakPointer => {
                     self.extract_weak_pointer_var(call.arguments.get(1)?)?
                 }
-                _ => call.get_arg(0)?,
+                _ => call.get_arg(0)?.extract_casted_variable()?,
             };
 
             if !stmt2.is_assignment_to(var, |expr| mapping.null_check.matches(expr)) {
@@ -588,7 +588,9 @@ impl UseClearFunctions {
                     }
                     if call.is_function(mapping.source_func) {
                         for arg in &call.arguments {
-                            if arg.as_ref() == var {
+                            if let Some(arg_var) = arg.extract_casted_variable()
+                                && arg_var == var
+                            {
                                 let extra = call.get_arg(1).and_then(|a| a.location().as_str());
                                 return Some((*mapping, extra));
                             }
