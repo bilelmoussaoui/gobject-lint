@@ -6,6 +6,8 @@ my_func (GObject *obj, char *str)
 {
   g_clear_object (&obj);
 
+  g_clear_object (&obj);
+
   g_clear_pointer (&str, g_free);
 }
 
@@ -13,4 +15,6 @@ static void
 clear_string (gchar **arr_element)
 {
   g_clear_pointer (arr_element, g_free);
+
+  g_clear_pointer (&arr_element, g_free);
 }

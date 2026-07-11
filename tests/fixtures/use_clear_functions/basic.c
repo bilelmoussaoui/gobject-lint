@@ -9,6 +9,11 @@ my_func (GObject *obj, char *str)
     obj = NULL;
   }
 
+  if (obj) {
+    g_object_unref (G_OBJECT (obj));
+    obj = NULL;
+  }
+
   if (str) {
     g_free (str);
     str = NULL;
@@ -20,4 +25,7 @@ clear_string (gchar **arr_element)
 {
   g_free (*arr_element);
   *arr_element = NULL;
+
+  g_free ((gpointer) arr_element);
+  arr_element = NULL;
 }
