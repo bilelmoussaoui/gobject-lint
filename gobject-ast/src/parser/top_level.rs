@@ -356,23 +356,31 @@ impl Parser {
                         // Extract return type
                         let return_type = self.extract_return_type(node, source);
 
-                        // Extract parameters from the function_declarator node
-                        let parameters = {
+                        // Extract parameters and macro modifiers from the function_declarator node
+                        let (parameters, macro_modifiers) = {
                             let mut params = Vec::new();
+                            let mut modifiers = Vec::new();
                             let mut cursor = func_decl.walk();
-                            if let Some(child) = func_decl
-                                .children_by_field_name("parameters", &mut cursor)
-                                .next()
-                            {
-                                params = self.extract_parameters(child, source);
+                            for child in func_decl.children(&mut cursor) {
+                                if child.kind() == "parameter_list" && params.is_empty() {
+                                    params = self.extract_parameters(child, source);
+                                } else if child.kind() == "macro_modifier"
+                                    && let Ok(text) =
+                                        std::str::from_utf8(&source[child.byte_range()])
+                                {
+                                    modifiers.push(text.trim().to_owned());
+                                }
                             }
-                            if params.is_empty()
-                                && let Some(params_node) =
-                                    self.find_node_by_kind(func_decl, "parameter_list")
-                            {
-                                params = self.extract_parameters(params_node, source);
+                            if params.is_empty() {
+                                let mut cursor2 = func_decl.walk();
+                                if let Some(child) = func_decl
+                                    .children_by_field_name("parameters", &mut cursor2)
+                                    .next()
+                                {
+                                    params = self.extract_parameters(child, source);
+                                }
                             }
-                            params
+                            (params, modifiers)
                         };
 
                         return Some(TopLevelItem::FunctionDeclaration(FunctionDeclItem {
@@ -382,6 +390,7 @@ impl Parser {
                             is_inline,
                             parameters,
                             export_macros,
+                            macro_modifiers,
                             location: self.node_location(node),
                             doc: FunctionDoc::from_node_for(node, source, name),
                         }));
