@@ -136,6 +136,7 @@ macro_rules! for_each_rule {
             (use_auto_cleanup, UseAutoCleanup),
             (use_g_bytes_unref_to_data, UseGBytesUnrefToData),
             (use_g_file_load_bytes, UseGFileLoadBytes),
+            (get_type_not_const, GetTypeNotConst),
             (use_g_gnuc_flag_enum, UseGGnucFlagEnum),
             (use_g_object_new_with_properties, UseGObjectNewWithProperties),
             (use_g_object_notify_by_pspec, UseGObjectNotifyByPspec),

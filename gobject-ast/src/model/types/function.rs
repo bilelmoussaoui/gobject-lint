@@ -31,6 +31,8 @@ pub struct FunctionDeclItem {
     pub parameters: Vec<Parameter>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub export_macros: Vec<ExportMacro>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub macro_modifiers: Vec<String>,
     pub location: SourceLocation,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc: Option<FunctionDoc>,
