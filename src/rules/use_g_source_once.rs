@@ -242,9 +242,12 @@ impl UseGSourceOnce {
         for stmt in statements {
             let mut found = false;
             stmt.walk(&mut |s| {
-                if !self.is_source_add_statement(s, callback_name) {
-                    s.visit_expressions(&mut |e| {
-                        if e.contains_identifier(callback_name) {
+                if let Statement::Expression(expr_stmt) = s {
+                    expr_stmt.walk_with_parents(None, &mut |child, parents| {
+                        if let Some(parents) = parents
+                            && matches!(child, Expression::Identifier(id) if id.name == callback_name)
+                            && !parents.iter().any(|p| matches!(p, Expression::Call(c) if gsource_callback_arg_index(c.function_name()).is_some()))
+                        {
                             found = true;
                         }
                     });
@@ -255,17 +258,5 @@ impl UseGSourceOnce {
             }
         }
         false
-    }
-
-    fn is_source_add_statement(&self, stmt: &Statement, callback_name: &str) -> bool {
-        if let Statement::Expression(expr_stmt) = stmt
-            && let Expression::Call(call) = expr_stmt.as_ref()
-            && let Some(idx) = gsource_callback_arg_index(call.function_name_str().unwrap_or(""))
-            && let Some(name) = call.get_arg(idx).and_then(|a| a.extract_identifier_name())
-        {
-            name == callback_name
-        } else {
-            false
-        }
     }
 }

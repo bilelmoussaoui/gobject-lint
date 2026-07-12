@@ -224,6 +224,84 @@ impl Expression {
         }
     }
 
+    /// Recursively walk all nested expressions. The closure receives
+    /// `&'s Expression`s tied to `self`'s lifetime, so references extracted
+    /// inside the closure can be stored in an outer `Vec<&'s T>`.
+    pub fn walk_with_parents<'s, F>(&'s self, parents: Option<&mut Vec<&'s Self>>, f: &mut F)
+    where
+        F: FnMut(&'s Self, &Option<&mut Vec<&'s Self>>),
+    {
+        f(self, &parents);
+
+        let vec: &mut Vec<&Self> = match parents {
+            Some(vec) => vec,
+            _ => &mut Vec::new(),
+        };
+        vec.push(self);
+
+        match self {
+            Self::Call(call) => {
+                call.function.walk_with_parents(Some(vec), f);
+                for arg in &call.arguments {
+                    arg.walk_with_parents(Some(vec), f);
+                }
+            }
+            Self::AllocCall(alloc) => {
+                alloc.function.walk_with_parents(Some(vec), f);
+                for arg in &alloc.arguments {
+                    arg.walk_with_parents(Some(vec), f);
+                }
+            }
+            Self::Assignment(assign) => {
+                assign.lhs.walk_with_parents(Some(vec), f);
+                assign.rhs.walk_with_parents(Some(vec), f);
+            }
+            Self::Unary(unary) => {
+                unary.operand.walk_with_parents(Some(vec), f);
+            }
+            Self::Binary(binary) => {
+                binary.left.walk_with_parents(Some(vec), f);
+                binary.right.walk_with_parents(Some(vec), f);
+            }
+            Self::Cast(cast) => {
+                cast.operand.walk_with_parents(Some(vec), f);
+            }
+            Self::Conditional(cond) => {
+                cond.condition.walk_with_parents(Some(vec), f);
+                cond.then_expr.walk_with_parents(Some(vec), f);
+                cond.else_expr.walk_with_parents(Some(vec), f);
+            }
+            Self::Subscript(subscript) => {
+                subscript.array.walk_with_parents(Some(vec), f);
+                subscript.index.walk_with_parents(Some(vec), f);
+            }
+            Self::Update(update) => {
+                update.operand.walk_with_parents(Some(vec), f);
+            }
+            Self::FieldAccess(field) => {
+                field.base.walk_with_parents(Some(vec), f);
+            }
+            Self::InitializerList(init) => {
+                for item in &init.items {
+                    if let Some(Designator::Subscript(idx)) = &item.designator {
+                        idx.walk_with_parents(Some(vec), f);
+                    }
+                    item.value.walk_with_parents(Some(vec), f);
+                }
+            }
+            Self::Identifier(_)
+            | Self::StringLiteral(_)
+            | Self::NumberLiteral(_)
+            | Self::Null(_)
+            | Self::Boolean(_)
+            | Self::Sizeof(_)
+            | Self::CharLiteral(_)
+            | Self::Comment(_)
+            | Self::OffsetOf(_)
+            | Self::Generic(_) => {}
+        }
+    }
+
     /// Extract variable from simple expressions (Identifier, FieldAccess or Unary)
     pub fn extract_variable(&self) -> Option<&Self> {
         match self {
