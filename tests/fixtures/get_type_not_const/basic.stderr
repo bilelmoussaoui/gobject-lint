@@ -1,3 +1,6 @@
 basic.h:2:1: get_type_not_const: 'my_widget_get_type' is annotated with G_GNUC_CONST but _get_type functions have side effects on first call; remove the attribute
+basic.c:4:1: get_type_not_const: 'my_widget_get_type' is annotated with G_GNUC_CONST but _get_type functions have side effects on first call; remove the attribute
 basic.h:5:1: get_type_not_const: 'my_other_get_type' is annotated with G_GNUC_CONST but _get_type functions have side effects on first call; remove the attribute
+basic.c:7:1: get_type_not_const: 'my_other_get_type' is annotated with G_GNUC_CONST but _get_type functions have side effects on first call; remove the attribute
 basic.h:8:1: get_type_not_const: 'my_pure_get_type' is annotated with G_GNUC_PURE but _get_type functions have side effects on first call; remove the attribute
+basic.c:10:1: get_type_not_const: 'my_pure_get_type' is annotated with G_GNUC_PURE but _get_type functions have side effects on first call; remove the attribute

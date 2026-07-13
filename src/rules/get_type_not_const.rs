@@ -63,6 +63,22 @@ impl Rule for GetTypeNotConst {
             violations.push(self.violation_at(&file.path, &func.location, message));
         }
     }
+
+    fn check_all(
+        &self,
+        ast_context: &AstContext,
+        config: &Config,
+        violations: &mut Vec<Violation>,
+    ) {
+        for (path, file) in ast_context.iter_all_files() {
+            let ext = path.extension().and_then(|e| e.to_str());
+            if ext == Some("c") || ext == Some("h") {
+                for func in file.iter_function_declarations() {
+                    self.check_func_decl(ast_context, config, func, file, violations);
+                }
+            }
+        }
+    }
 }
 
 impl GetTypeNotConst {
