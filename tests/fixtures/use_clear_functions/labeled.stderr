@@ -1,5 +1,4 @@
 labeled.c:20:3: use_clear_functions: Use g_clear_pointer (&self->name, g_free) instead of g_free and NULL assignment
 labeled.c:35:3: use_clear_functions: Use g_clear_signal_handler (&self->signal_id, self->source) instead of g_signal_handler_disconnect and zeroing the ID
 labeled.c:50:3: use_clear_functions: Use g_clear_handle_id (&self->timeout_id, g_source_remove) instead of g_source_remove and zero assignment
-labeled.c:65:3: use_clear_functions: Use g_clear_signal_handler (&self->signal_id, self->source) instead of g_signal_handler_disconnect (also zeroes the stored ID)
-labeled.c:79:3: use_clear_functions: Use g_clear_pointer (&self->name, g_free) instead of g_free and NULL assignment
+labeled.c:65:3: use_clear_functions: Use g_clear_pointer (&self->name, g_free) instead of g_free and NULL assignment
