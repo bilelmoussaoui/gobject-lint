@@ -73,17 +73,6 @@ struct ClearMapping {
     min_version: (u32, u32),
 }
 
-macro_rules! PointerMapping {
-    ($name:literal) => {
-        ClearMapping {
-            source_func: $name,
-            replacement: ClearReplacement::Pointer,
-            null_check: NullCheck::Null,
-            min_version: (2, 28),
-        }
-    };
-}
-
 const CLEAR_MAPPINGS: &[ClearMapping] = &[
     ClearMapping {
         source_func: "close",
@@ -103,7 +92,6 @@ const CLEAR_MAPPINGS: &[ClearMapping] = &[
         null_check: NullCheck::Zero,
         min_version: (2, 56),
     },
-    PointerMapping!("g_source_destroy"),
     ClearMapping {
         source_func: "g_signal_handler_disconnect",
         replacement: ClearReplacement::SignalHandler,
@@ -160,44 +148,12 @@ const CLEAR_MAPPINGS: &[ClearMapping] = &[
         null_check: NullCheck::Null,
         min_version: (2, 28),
     },
-    PointerMapping!("g_free"),
-    PointerMapping!("g_hash_table_destroy"),
-    PointerMapping!("g_hash_table_unref"),
-    PointerMapping!("g_array_unref"),
-    PointerMapping!("g_async_queue_unref"),
-    PointerMapping!("g_byte_array_unref"),
-    PointerMapping!("g_bytes_unref"),
-    PointerMapping!("g_checksum_free"),
-    PointerMapping!("g_date_free"),
-    PointerMapping!("g_date_time_unref"),
-    PointerMapping!("g_io_channel_unref"),
-    PointerMapping!("g_key_file_free"),
-    PointerMapping!("g_option_context_free"),
-    PointerMapping!("g_ptr_array_unref"),
-    PointerMapping!("g_queue_free"),
-    PointerMapping!("g_sequence_free"),
-    PointerMapping!("g_strfreev"),
-    PointerMapping!("g_time_zone_unref"),
-    PointerMapping!("g_uri_unref"),
-    PointerMapping!("g_variant_unref"),
-    PointerMapping!("g_variant_dict_unref"),
-    PointerMapping!("g_variant_iter_unref"),
-    PointerMapping!("g_variant_type_unref"),
-    PointerMapping!("gdk_color_state_unref"),
-    PointerMapping!("gdk_event_unref"),
-    PointerMapping!("gdk_texture_downloader_free"),
-    PointerMapping!("gsk_path_unref"),
-    PointerMapping!("gsk_path_builder_unref"),
-    PointerMapping!("gsk_path_measure_unref"),
-    PointerMapping!("gsk_render_node_unref"),
-    PointerMapping!("gsk_render_replay_free"),
-    PointerMapping!("gsk_stroke_free"),
-    PointerMapping!("gsk_transform_unref"),
-    PointerMapping!("gtk_expression_unref"),
-    PointerMapping!("gtk_expression_watch_unref"),
-    PointerMapping!("gtk_tree_path_free"),
-    PointerMapping!("gtk_widget_destroy"),
-    PointerMapping!("gtk_window_destroy"),
+    ClearMapping {
+        source_func: "",
+        replacement: ClearReplacement::Pointer,
+        null_check: NullCheck::Null,
+        min_version: (2, 28),
+    },
 ];
 
 impl ClearMapping {
@@ -230,7 +186,7 @@ fn format_replacement(
     match mapping.replacement {
         ClearReplacement::Object => style.format_call_stmt("g_clear_object", &[&addr]),
         ClearReplacement::Pointer => {
-            style.format_call_stmt("g_clear_pointer", &[&addr, mapping.source_func])
+            style.format_call_stmt("g_clear_pointer", &[&addr, extra_arg.unwrap_or_default()])
         }
         ClearReplacement::HandleId => {
             style.format_call_stmt("g_clear_handle_id", &[&addr, mapping.source_func])
@@ -395,7 +351,10 @@ impl UseClearFunctions {
                 continue;
             }
 
-            if !call.is_function(mapping.source_func) {
+            if !call.is_function(mapping.source_func)
+                && !(matches!(mapping.replacement, ClearReplacement::Pointer)
+                    && call.arguments.len() == 1)
+            {
                 continue;
             }
 
@@ -411,12 +370,20 @@ impl UseClearFunctions {
             }
 
             let var_name = var.location().as_str().unwrap_or_default();
-            let extra_arg = call.get_arg_text(1);
+            let extra_arg = if matches!(mapping.replacement, ClearReplacement::Pointer) {
+                Some(call.function_name())
+            } else {
+                call.get_arg_text(1)
+            };
             let replacement = format_replacement(mapping, var_name, extra_arg, &config.style);
             let message = format!(
                 "Use {} instead of {} and {} assignment",
                 replacement.trim_end_matches(';'),
-                mapping.source_func,
+                if matches!(mapping.replacement, ClearReplacement::Pointer) {
+                    call.function_name()
+                } else {
+                    mapping.source_func
+                },
                 mapping.null_check.sentinel_desc()
             );
 
@@ -480,7 +447,11 @@ impl UseClearFunctions {
             "Use {} instead of manual {} check, {}, and {} assignment",
             replacement.trim_end_matches(';'),
             mapping.null_check.guard_desc(),
-            mapping.source_func,
+            if matches!(mapping.replacement, ClearReplacement::Pointer) {
+                extra_arg.unwrap_or_default()
+            } else {
+                mapping.source_func
+            },
             mapping.null_check.sentinel_desc()
         );
 
@@ -586,12 +557,20 @@ impl UseClearFunctions {
                     ) {
                         continue;
                     }
-                    if call.is_function(mapping.source_func) {
+                    if call.is_function(mapping.source_func)
+                        || (matches!(mapping.replacement, ClearReplacement::Pointer)
+                            && call.arguments.len() == 1)
+                    {
                         for arg in &call.arguments {
                             if let Some(arg_var) = arg.extract_casted_variable()
                                 && arg_var == var
                             {
-                                let extra = call.get_arg(1).and_then(|a| a.location().as_str());
+                                let extra =
+                                    if matches!(mapping.replacement, ClearReplacement::Pointer) {
+                                        Some(call.function_name())
+                                    } else {
+                                        call.get_arg(1).and_then(|a| a.location().as_str())
+                                    };
                                 return Some((*mapping, extra));
                             }
                         }
