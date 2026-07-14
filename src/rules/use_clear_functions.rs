@@ -297,18 +297,6 @@ impl UseClearFunctions {
                 }
             }
 
-            // Try signal_handler's bare member disconnect
-            if self.try_bare_disconnect_on_member(
-                &statements[i],
-                statements,
-                config,
-                file,
-                violations,
-            ) {
-                i += 1;
-                continue;
-            }
-
             // Recurse into nested blocks
             if let Statement::If(if_stmt) = &statements[i] {
                 self.check_statements(config, file, &if_stmt.then_body, violations);
@@ -830,49 +818,6 @@ impl UseClearFunctions {
         true
     }
 
-    fn try_bare_disconnect_on_member(
-        &self,
-        stmt: &Statement,
-        all_stmts: &[Statement],
-        config: &Config,
-        file: &FileModel,
-        violations: &mut Vec<Violation>,
-    ) -> bool {
-        let signal_mapping = match self.find_signal_mapping(config) {
-            Some(m) => m,
-            None => return false,
-        };
-
-        let Some((obj, handler_id)) = self.extract_disconnect_args(stmt) else {
-            return false;
-        };
-
-        let Some(base) = (match handler_id {
-            Expression::FieldAccess(f) => f.base.extract_variable(),
-            _ => None,
-        }) else {
-            return false;
-        };
-
-        if self.is_freed_in_stmts(all_stmts, base) {
-            return false;
-        }
-
-        let handler_id = handler_id.location().as_str().unwrap_or_default();
-        let obj = obj.location().as_str().unwrap_or_default();
-        let replacement = format_replacement(&signal_mapping, handler_id, Some(obj), &config.style);
-        let message = format!(
-            "Use {} instead of g_signal_handler_disconnect (also zeroes the stored ID)",
-            replacement.trim_end_matches(';')
-        );
-        let inner = stmt.inner_statement();
-        let stmt_end = inner.location().find_semicolon_end();
-        let fix = Fix::new(inner.location().start_byte, stmt_end, replacement);
-
-        violations.push(self.violation_with_fix_at(&file.path, inner.location(), message, fix));
-        true
-    }
-
     fn find_signal_mapping(&self, config: &Config) -> Option<ClearMapping> {
         CLEAR_MAPPINGS
             .iter()
@@ -910,38 +855,6 @@ impl UseClearFunctions {
         assign.lhs.as_ref() == expected_id
             && assign.operator == AssignmentOp::Assign
             && assign.rhs.is_zero()
-    }
-
-    fn is_freed_in_stmts(&self, stmts: &[Statement], target: &Expression) -> bool {
-        for stmt in stmts {
-            let Statement::Expression(expr_stmt) = stmt.inner_statement() else {
-                continue;
-            };
-
-            let Expression::Call(call) = expr_stmt.as_ref() else {
-                continue;
-            };
-
-            if !call.function_contains("free")
-                && !call.function_contains("unref")
-                && !call.function_contains("destroy")
-                && !call.function_contains("clear")
-            {
-                continue;
-            }
-
-            for arg in &call.arguments {
-                if call.function_name().starts_with("g_clear_") {
-                    if matches!(arg.as_ref(), Expression::Unary(u) if u.operator == UnaryOp::AddressOf && u.operand.as_ref() == target)
-                    {
-                        return true;
-                    }
-                } else if arg.as_ref() == target {
-                    return true;
-                }
-            }
-        }
-        false
     }
 
     fn extract_weak_pointer_var<'a>(&self, expr: &'a Expression) -> Option<&'a Expression> {

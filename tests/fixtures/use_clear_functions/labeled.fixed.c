@@ -49,20 +49,6 @@ out:
   return -1;
 }
 
-/* bare disconnect on member after a goto label */
-
-static int
-labeled_bare_disconnect (MyObj *self)
-{
-  self->signal_id = g_signal_connect (self->source, "notify", NULL, NULL);
-  if (!self->signal_id)
-    goto error;
-  return 0;
-error:
-  g_clear_signal_handler (&self->signal_id, self->source);
-  return -1;
-}
-
 /* stmt2 (NULL assignment) has its own label */
 
 static int
