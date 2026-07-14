@@ -78,7 +78,7 @@ macro_rules! PointerMapping {
         ClearMapping {
             source_func: $name,
             replacement: ClearReplacement::Pointer,
-            null_check: NullCheck::NullOrZero,
+            null_check: NullCheck::Null,
             min_version: (2, 28),
         }
     };
@@ -157,7 +157,7 @@ const CLEAR_MAPPINGS: &[ClearMapping] = &[
     ClearMapping {
         source_func: "g_object_unref",
         replacement: ClearReplacement::Object,
-        null_check: NullCheck::NullOrZero,
+        null_check: NullCheck::Null,
         min_version: (2, 28),
     },
     PointerMapping!("g_free"),
