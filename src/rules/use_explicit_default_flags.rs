@@ -8,62 +8,122 @@ use crate::{
 
 pub struct UseExplicitDefaultFlags;
 
-/// Mapping of (function_name, arg_position, replacement_constant)
+/// Mapping of (function_name, arg_position, replacement_constant, min glib version)
 /// arg_position is 0-indexed
-const FLAG_REPLACEMENTS: &[(&str, usize, &str)] = &[
+const FLAG_REPLACEMENTS: &[(&str, usize, &str, (u32, u32))] = &[
     // GApplication
-    ("g_application_new", 1, "G_APPLICATION_DEFAULT_FLAGS"),
+    (
+        "g_application_new",
+        1,
+        "G_APPLICATION_DEFAULT_FLAGS",
+        (2, 74),
+    ),
     // GTK bindings
-    ("gtk_widget_class_add_binding", 2, "GDK_NO_MODIFIER_MASK"),
+    (
+        "gtk_widget_class_add_binding",
+        2,
+        "GDK_NO_MODIFIER_MASK",
+        (2, 0),
+    ),
     (
         "gtk_widget_class_add_binding_signal",
         2,
         "GDK_NO_MODIFIER_MASK",
+        (2, 0),
     ),
     (
         "gtk_widget_class_add_binding_action",
         2,
         "GDK_NO_MODIFIER_MASK",
+        (2, 0),
     ),
     // GtkShortcut
-    ("gtk_shortcut_new", 1, "GDK_NO_MODIFIER_MASK"),
+    ("gtk_shortcut_new", 1, "GDK_NO_MODIFIER_MASK", (2, 0)),
     // GDBus
-    ("g_dbus_connection_new", 1, "G_DBUS_CONNECTION_FLAGS_NONE"),
+    (
+        "g_dbus_connection_new",
+        1,
+        "G_DBUS_CONNECTION_FLAGS_NONE",
+        (2, 26),
+    ),
     (
         "g_dbus_connection_new_for_address",
         1,
         "G_DBUS_CONNECTION_FLAGS_NONE",
+        (2, 26),
     ),
-    ("g_dbus_proxy_new", 2, "G_DBUS_PROXY_FLAGS_NONE"),
-    ("g_dbus_proxy_new_for_bus", 2, "G_DBUS_PROXY_FLAGS_NONE"),
+    ("g_dbus_proxy_new", 2, "G_DBUS_PROXY_FLAGS_NONE", (2, 26)),
+    (
+        "g_dbus_proxy_new_for_bus",
+        2,
+        "G_DBUS_PROXY_FLAGS_NONE",
+        (2, 26),
+    ),
     // GFile
-    ("g_file_query_info", 2, "G_FILE_QUERY_INFO_NONE"),
-    ("g_file_query_info_async", 2, "G_FILE_QUERY_INFO_NONE"),
-    ("g_file_enumerate_children", 1, "G_FILE_QUERY_INFO_NONE"),
+    ("g_file_query_info", 2, "G_FILE_QUERY_INFO_NONE", (2, 0)),
+    (
+        "g_file_query_info_async",
+        2,
+        "G_FILE_QUERY_INFO_NONE",
+        (2, 0),
+    ),
+    (
+        "g_file_enumerate_children",
+        1,
+        "G_FILE_QUERY_INFO_NONE",
+        (2, 0),
+    ),
     (
         "g_file_enumerate_children_async",
         1,
         "G_FILE_QUERY_INFO_NONE",
+        (2, 0),
     ),
     // GSubprocess
-    ("g_subprocess_new", 0, "G_SUBPROCESS_FLAGS_NONE"),
-    ("g_subprocess_launcher_new", 0, "G_SUBPROCESS_FLAGS_NONE"),
+    ("g_subprocess_new", 0, "G_SUBPROCESS_FLAGS_NONE", (2, 40)),
+    (
+        "g_subprocess_launcher_new",
+        0,
+        "G_SUBPROCESS_FLAGS_NONE",
+        (2, 40),
+    ),
     // GSettings
     (
         "g_settings_new_with_backend_and_path",
         3,
         "G_SETTINGS_BIND_DEFAULT",
+        (2, 0),
     ),
     // GtkApplication
-    ("gtk_application_new", 1, "G_APPLICATION_DEFAULT_FLAGS"),
+    (
+        "gtk_application_new",
+        1,
+        "G_APPLICATION_DEFAULT_FLAGS",
+        (2, 74),
+    ),
     // AdwApplication (libadwaita)
-    ("adw_application_new", 1, "G_APPLICATION_DEFAULT_FLAGS"),
+    (
+        "adw_application_new",
+        1,
+        "G_APPLICATION_DEFAULT_FLAGS",
+        (2, 74),
+    ),
     // GtkIconTheme (GTK 4.18+)
-    ("gtk_icon_theme_lookup_icon", 6, "GTK_ICON_LOOKUP_NONE"),
-    ("gtk_icon_theme_lookup_by_gicon", 5, "GTK_ICON_LOOKUP_NONE"),
+    (
+        "gtk_icon_theme_lookup_icon",
+        6,
+        "GTK_ICON_LOOKUP_NONE",
+        (2, 0),
+    ),
+    (
+        "gtk_icon_theme_lookup_by_gicon",
+        5,
+        "GTK_ICON_LOOKUP_NONE",
+        (2, 0),
+    ),
     // GtkDropTargetAsync (GTK 4.20+)
-    ("gtk_drop_target_async_new", 1, "GDK_ACTION_NONE"),
-    ("gtk_drop_target_new", 1, "GDK_ACTION_NONE"),
+    ("gtk_drop_target_async_new", 1, "GDK_ACTION_NONE", (2, 0)),
+    ("gtk_drop_target_new", 1, "GDK_ACTION_NONE", (2, 0)),
 ];
 
 impl Rule for UseExplicitDefaultFlags {
@@ -86,7 +146,7 @@ impl Rule for UseExplicitDefaultFlags {
     fn check_func_impl(
         &self,
         _ast_context: &AstContext,
-        _config: &Config,
+        config: &Config,
         func: &FunctionDefItem,
         file: &FileModel,
         violations: &mut Vec<Violation>,
@@ -95,16 +155,31 @@ impl Rule for UseExplicitDefaultFlags {
         let function_names: Vec<&str> = FLAG_REPLACEMENTS.iter().map(|(name, ..)| *name).collect();
 
         for call in func.find_calls(&function_names) {
-            self.check_call(file, call, violations);
+            self.check_call(config, file, call, violations);
         }
     }
 }
 
 impl UseExplicitDefaultFlags {
-    fn check_call(&self, file: &FileModel, call: &CallExpression, violations: &mut Vec<Violation>) {
+    fn is_enabled(&self, config: &Config, min_version: (u32, u32)) -> bool {
+        if let Some((major, minor)) = config.min_glib_version
+            && (major < min_version.0 || (major == min_version.0 && minor < min_version.1))
+        {
+            return false;
+        }
+        true
+    }
+
+    fn check_call(
+        &self,
+        config: &Config,
+        file: &FileModel,
+        call: &CallExpression,
+        violations: &mut Vec<Violation>,
+    ) {
         // Find the matching replacement rule
-        for &(target_func, arg_pos, replacement_const) in FLAG_REPLACEMENTS {
-            if call.is_function(target_func) {
+        for &(target_func, arg_pos, replacement_const, min_version) in FLAG_REPLACEMENTS {
+            if self.is_enabled(config, min_version) && call.is_function(target_func) {
                 if let Some(arg_expr) = call.get_arg(arg_pos)
                     && arg_expr.is_zero()
                 {
