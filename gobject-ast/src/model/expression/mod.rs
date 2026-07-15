@@ -320,7 +320,7 @@ impl Expression {
     /// `G_OBJECT(self)` → `"self"`, `(GSourceFunc) callback` → `"callback"`
     pub fn extract_casted_variable(&self) -> Option<&Self> {
         match self {
-            Self::Call(call) => call.get_arg(0)?.extract_variable(),
+            Self::Call(call) if call.is_likely_macro() => call.get_arg(0)?.extract_variable(),
             Self::Cast(cast) => cast.operand.extract_variable(),
             _ => self.extract_variable(),
         }
