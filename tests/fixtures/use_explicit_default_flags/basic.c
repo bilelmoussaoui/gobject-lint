@@ -1,4 +1,5 @@
 #include <gio/gio.h>
+#include <glib-object.h>
 
 static void
 my_func (void)
@@ -6,4 +7,5 @@ my_func (void)
   GApplication *app = g_application_new ("com.example.App", 0);
   GFile *file = g_file_new_for_path ("/tmp/foo");
   GFileInfo *info = g_file_query_info (file, "*", 0, NULL, NULL);
+  g_signal_connect_object (app, "activate", G_CALLBACK (g_application_quit), NULL, 0);
 }

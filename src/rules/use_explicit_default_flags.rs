@@ -124,6 +124,21 @@ const FLAG_REPLACEMENTS: &[(&str, usize, &str, (u32, u32))] = &[
     // GtkDropTargetAsync (GTK 4.20+)
     ("gtk_drop_target_async_new", 1, "GDK_ACTION_NONE", (2, 0)),
     ("gtk_drop_target_new", 1, "GDK_ACTION_NONE", (2, 0)),
+    // GObject
+    ("g_signal_connect_data", 5, "G_CONNECT_DEFAULT", (2, 74)),
+    ("g_signal_connect_object", 4, "G_CONNECT_DEFAULT", (2, 74)),
+    (
+        "g_signal_group_connect_data",
+        5,
+        "G_CONNECT_DEFAULT",
+        (2, 74),
+    ),
+    (
+        "g_signal_group_connect_object",
+        4,
+        "G_CONNECT_DEFAULT",
+        (2, 74),
+    ),
 ];
 
 impl Rule for UseExplicitDefaultFlags {
