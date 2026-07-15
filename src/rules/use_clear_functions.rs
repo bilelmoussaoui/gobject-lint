@@ -350,6 +350,7 @@ impl UseClearFunctions {
                 ClearReplacement::WeakPointer => {
                     self.extract_weak_pointer_var(call.arguments.get(1)?)?
                 }
+                ClearReplacement::Pointer => call.get_arg(0)?.extract_variable()?,
                 _ => call.get_arg(0)?.extract_casted_variable()?,
             };
 
@@ -545,23 +546,22 @@ impl UseClearFunctions {
                     ) {
                         continue;
                     }
-                    if call.is_function(mapping.source_func)
-                        || (matches!(mapping.replacement, ClearReplacement::Pointer)
-                            && call.arguments.len() == 1)
-                    {
+                    if call.is_function(mapping.source_func) {
                         for arg in &call.arguments {
                             if let Some(arg_var) = arg.extract_casted_variable()
                                 && arg_var == var
                             {
-                                let extra =
-                                    if matches!(mapping.replacement, ClearReplacement::Pointer) {
-                                        Some(call.function_name())
-                                    } else {
-                                        call.get_arg(1).and_then(|a| a.location().as_str())
-                                    };
+                                let extra = call.get_arg(1).and_then(|a| a.location().as_str());
                                 return Some((*mapping, extra));
                             }
                         }
+                    } else if matches!(mapping.replacement, ClearReplacement::Pointer)
+                        && call.arguments.len() == 1
+                        && let Some(arg_var) = call.get_arg(0)?.extract_variable()
+                        && arg_var == var
+                    {
+                        let extra = Some(call.function_name());
+                        return Some((*mapping, extra));
                     }
                 }
             }
