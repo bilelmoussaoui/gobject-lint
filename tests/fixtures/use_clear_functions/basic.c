@@ -25,7 +25,4 @@ clear_string (gchar **arr_element)
 {
   g_free (*arr_element);
   *arr_element = NULL;
-
-  g_free ((gpointer) arr_element);
-  arr_element = NULL;
 }

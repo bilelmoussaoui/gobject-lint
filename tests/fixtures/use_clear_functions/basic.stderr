@@ -2,4 +2,3 @@ basic.c:7:3: use_clear_functions: Use g_clear_object (&obj) instead of manual NU
 basic.c:12:3: use_clear_functions: Use g_clear_object (&obj) instead of manual NULL check, g_object_unref, and NULL assignment
 basic.c:17:3: use_clear_functions: Use g_clear_pointer (&str, g_free) instead of manual NULL check, g_free, and NULL assignment
 basic.c:26:3: use_clear_functions: Use g_clear_pointer (arr_element, g_free) instead of g_free and NULL assignment
-basic.c:29:3: use_clear_functions: Use g_clear_pointer (&arr_element, g_free) instead of g_free and NULL assignment

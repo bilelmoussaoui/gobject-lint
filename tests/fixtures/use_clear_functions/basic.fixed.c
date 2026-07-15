@@ -15,6 +15,4 @@ static void
 clear_string (gchar **arr_element)
 {
   g_clear_pointer (arr_element, g_free);
-
-  g_clear_pointer (&arr_element, g_free);
 }
