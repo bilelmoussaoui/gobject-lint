@@ -1,0 +1,4 @@
+clear_pointer.c:24:3: use_clear_functions: Use g_clear_pointer (&str, g_free) instead of g_free and NULL assignment
+clear_pointer.c:27:3: use_clear_functions: Use g_clear_pointer (&str, g_free) instead of manual NULL check, g_free, and NULL assignment
+clear_pointer.c:32:3: use_clear_functions: Use g_clear_pointer (&my_struct, my_free_func) instead of my_free_func and NULL assignment
+clear_pointer.c:35:3: use_clear_functions: Use g_clear_pointer (&my_struct, my_free_func) instead of manual NULL check, my_free_func, and NULL assignment

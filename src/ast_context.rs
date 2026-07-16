@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     path::Path,
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -7,7 +8,7 @@ use anyhow::Result;
 use globset::GlobSet;
 use gobject_ast::{
     Parser,
-    model::{FileModel, Project},
+    model::{FileModel, PreprocessorDirective, Project, TopLevelItem},
 };
 use ignore::WalkBuilder;
 use indicatif::ProgressBar;
@@ -23,6 +24,7 @@ pub struct AstContext {
     /// None means no meson info was available
     pub meson_introspection: Option<MesonIntrospection>,
     type_aliases: TypeAliasMap,
+    pub known_macros: HashSet<String>,
 }
 
 impl AstContext {
@@ -79,10 +81,22 @@ impl AstContext {
             .map(|(_, results)| results)
             .collect();
 
+        let mut known_macros = HashSet::new();
         let mut project = Project::new();
         project.files.reserve(total_files);
         for chunk in chunks {
             for (path, model) in chunk {
+                for item in &model.top_level_items {
+                    if let TopLevelItem::Preprocessor(directive) = item
+                        && let PreprocessorDirective::Define {
+                            name,
+                            value: _,
+                            location: _,
+                        } = directive
+                    {
+                        known_macros.insert(name.clone());
+                    }
+                }
                 project.files.insert(path, model);
             }
         }
@@ -94,6 +108,7 @@ impl AstContext {
             project,
             meson_introspection,
             type_aliases,
+            known_macros,
         })
     }
 

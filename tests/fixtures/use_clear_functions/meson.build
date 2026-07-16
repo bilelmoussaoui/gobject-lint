@@ -1,6 +1,8 @@
 sources = [
   'basic.c',
   'basic.fixed.c',
+  'clear_pointer.c',
+  'clear_pointer.fixed.c',
   'consecutive.c',
   'consecutive.fixed.c',
   'handle_id_basic.c',

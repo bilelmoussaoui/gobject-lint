@@ -1,6 +1,6 @@
 use gobject_ast::model::{
-    AssignmentOp, BinaryExpression, BinaryOp, Expression, FileModel, FunctionDefItem, IfStatement,
-    SourceLocation, Statement, UnaryExpression, UnaryOp,
+    AssignmentOp, BinaryExpression, BinaryOp, CallExpression, Expression, FileModel,
+    FunctionDefItem, IfStatement, SourceLocation, Statement, UnaryExpression, UnaryOp,
 };
 
 use crate::{
@@ -229,19 +229,20 @@ impl Rule for UseClearFunctions {
 
     fn check_func_impl(
         &self,
-        _ast_context: &AstContext,
+        ast_context: &AstContext,
         config: &Config,
         func: &FunctionDefItem,
         file: &FileModel,
         violations: &mut Vec<Violation>,
     ) {
-        self.check_statements(config, file, &func.body_statements, violations);
+        self.check_statements(ast_context, config, file, &func.body_statements, violations);
     }
 }
 
 impl UseClearFunctions {
     fn check_statements(
         &self,
+        ast_context: &AstContext,
         config: &Config,
         file: &FileModel,
         statements: &[Statement],
@@ -264,7 +265,7 @@ impl UseClearFunctions {
 
             // Try generic if-statement pattern (clear_functions style)
             if let Statement::If(if_stmt) = &statements[i]
-                && self.try_generic_if_pattern(if_stmt, config, file, violations)
+                && self.try_generic_if_pattern(if_stmt, ast_context, config, file, violations)
             {
                 i += 1;
                 continue;
@@ -275,6 +276,7 @@ impl UseClearFunctions {
                 if let Some(matched) = self.try_consecutive_pair(
                     &statements[i],
                     &statements[i + 1],
+                    ast_context,
                     config,
                     file,
                     violations,
@@ -299,13 +301,13 @@ impl UseClearFunctions {
 
             // Recurse into nested blocks
             if let Statement::If(if_stmt) = &statements[i] {
-                self.check_statements(config, file, &if_stmt.then_body, violations);
+                self.check_statements(ast_context, config, file, &if_stmt.then_body, violations);
                 if let Some(else_body) = &if_stmt.else_body {
-                    self.check_statements(config, file, else_body, violations);
+                    self.check_statements(ast_context, config, file, else_body, violations);
                 }
             } else {
                 statements[i].for_each_child_block(|body| {
-                    self.check_statements(config, file, body, violations);
+                    self.check_statements(ast_context, config, file, body, violations);
                 });
             }
 
@@ -324,6 +326,7 @@ impl UseClearFunctions {
         &self,
         stmt1: &Statement,
         stmt2: &Statement,
+        ast_context: &AstContext,
         config: &Config,
         file: &FileModel,
         violations: &mut Vec<Violation>,
@@ -341,7 +344,7 @@ impl UseClearFunctions {
 
             if !call.is_function(mapping.source_func)
                 && !(matches!(mapping.replacement, ClearReplacement::Pointer)
-                    && call.arguments.len() == 1)
+                    && self.is_likely_free_func(call, ast_context))
             {
                 continue;
             }
@@ -398,6 +401,7 @@ impl UseClearFunctions {
     fn try_generic_if_pattern(
         &self,
         if_stmt: &IfStatement,
+        ast_context: &AstContext,
         config: &Config,
         file: &FileModel,
         violations: &mut Vec<Violation>,
@@ -417,7 +421,7 @@ impl UseClearFunctions {
         }
 
         let Some((mapping, extra_arg)) =
-            self.find_unref_in_body(&if_stmt.then_body, checked_var, config)
+            self.find_unref_in_body(&if_stmt.then_body, checked_var, ast_context, config)
         else {
             return false;
         };
@@ -529,6 +533,7 @@ impl UseClearFunctions {
         &self,
         statements: &'a [Statement],
         var: &Expression,
+        ast_context: &AstContext,
         config: &Config,
     ) -> Option<(ClearMapping, Option<&'a str>)> {
         for stmt in statements {
@@ -556,7 +561,7 @@ impl UseClearFunctions {
                             }
                         }
                     } else if matches!(mapping.replacement, ClearReplacement::Pointer)
-                        && call.arguments.len() == 1
+                        && self.is_likely_free_func(call, ast_context)
                         && let Some(arg_var) = call.get_arg(0)?.extract_variable()
                         && arg_var == var
                     {
@@ -567,6 +572,14 @@ impl UseClearFunctions {
             }
         }
         None
+    }
+
+    fn is_likely_free_func(&self, call: &CallExpression, ast_context: &AstContext) -> bool {
+        call.arguments.len() == 1
+            && !ast_context.known_macros.contains(call.function_name())
+            && !call.is_likely_macro()
+            // Windows COM object, see https://github.com/bilelmoussaoui/gobject-linter/issues/180
+            && !call.function_ends_with("_Release")
     }
 
     fn has_null_assignment(
