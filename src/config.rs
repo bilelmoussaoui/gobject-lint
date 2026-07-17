@@ -470,7 +470,14 @@ impl Config {
                 {
                     $(
                         self.rules.$config_field.level = Some(if rule_names.iter().any(|r| r.as_str() == stringify!($config_field)) {
-                            RuleLevel::Error
+                            let default_level = match self.default_level {
+                                None | Some(RuleLevel::Ignore) => RuleLevel::Warn,
+                                Some(level) => level,
+                            };
+                            match self.rules.$config_field.level {
+                                None | Some(RuleLevel::Ignore) => default_level,
+                                Some(level) => level,
+                            }
                         } else {
                             RuleLevel::Ignore
                         });
