@@ -512,11 +512,9 @@ impl Config {
             ($(($config_field:ident, $rule_type:ident)),* $(,)?) => {
                 {
                     $(
-                        self.rules.$config_field.level = Some(if $rule_type.category() == category {
-                            RuleLevel::Error
-                        } else {
-                            RuleLevel::Ignore
-                        });
+                        if $rule_type.category() != category {
+                            self.rules.$config_field.level = Some(RuleLevel::Ignore);
+                        }
                     )*
                 }
             };
