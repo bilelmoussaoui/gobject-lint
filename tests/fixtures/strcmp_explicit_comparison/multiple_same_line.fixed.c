@@ -4,11 +4,11 @@ static void
 test_multiple_same_line (const char *a, const char *b, const char *c)
 {
   /* Multiple bare strcmp on same line */
-  if (strcmp (a, b) != 0 || strcmp (b, c) != 0)
+  if (G_LIKELY (strcmp (a, b) != 0 || strcmp (b, c) != 0))
     g_print ("different\n");
 
   /* Multiple negated strcmp on same line */
-  if (strcmp (a, b) == 0 && strcmp (b, c) == 0)
+  if (strcmp (a, b) == 0 && G_UNLIKELY (strcmp (b, c) == 0))
     g_print ("all equal\n");
 
   /* Mixed: bare and negated on same line */

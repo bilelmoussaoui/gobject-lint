@@ -49,7 +49,7 @@ impl StrcmpExplicitComparison {
 
         violations: &mut Vec<Violation>,
     ) {
-        match condition {
+        match condition.remove_g_likely_wrapper() {
             // Binary expression: check if it's a comparison with strcmp, or recurse for logical ops
             Expression::Binary(binary) => {
                 // If it's a comparison operator, don't flag strcmp calls on either side

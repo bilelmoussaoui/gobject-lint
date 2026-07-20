@@ -16,4 +16,6 @@ my_func (char *str, char *other, char *ptr, char **strv, GList *list)
   g_free (list->data);
 
   g_free (*strv);
+
+  g_free (ptr);
 }
