@@ -444,4 +444,16 @@ impl Expression {
     pub fn is_call_to_any(&self, function_names: &[&str]) -> bool {
         matches!(self, Self::Call(call) if call.function_name_str().is_some_and(|name| function_names.contains(&name)))
     }
+
+    /// Remove G_(UN)?LIKELY macro call around a condition
+    pub fn remove_g_likely_wrapper(&self) -> &Self {
+        if let Self::Call(call) = &self
+            && (call.is_function("G_LIKELY") || call.is_function("G_UNLIKELY"))
+            && let Some(arg) = call.get_arg(0)
+        {
+            arg
+        } else {
+            self
+        }
+    }
 }

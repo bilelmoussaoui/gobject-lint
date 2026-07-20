@@ -23,4 +23,7 @@ my_func (char *str, char *other, char *ptr, char **strv, GList *list)
 
   if (*strv != NULL)
     g_free (*strv);
+
+  if (G_UNLIKELY (ptr != NULL))
+    g_free (ptr);
 }

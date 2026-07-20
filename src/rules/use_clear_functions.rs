@@ -406,12 +406,12 @@ impl UseClearFunctions {
         file: &FileModel,
         violations: &mut Vec<Violation>,
     ) -> bool {
-        if self.has_logical_operators(&if_stmt.condition) {
+        let condition = &if_stmt.condition.remove_g_likely_wrapper();
+        if self.has_logical_operators(condition) {
             return false;
         }
 
-        let Some((checked_var, condition_sentinel)) =
-            self.find_variable_in_condition(&if_stmt.condition)
+        let Some((checked_var, condition_sentinel)) = self.find_variable_in_condition(condition)
         else {
             return false;
         };

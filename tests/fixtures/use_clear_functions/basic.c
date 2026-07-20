@@ -18,6 +18,11 @@ my_func (GObject *obj, char *str)
     g_free (str);
     str = NULL;
   }
+
+  if (G_LIKELY (str != NULL)) {
+    g_free (str);
+    str = NULL;
+  }
 }
 
 static void
