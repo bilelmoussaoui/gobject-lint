@@ -342,8 +342,8 @@ impl UseClearFunctions {
                 continue;
             }
 
-            if !call.is_function(mapping.source_func)
-                && !(matches!(mapping.replacement, ClearReplacement::Pointer)
+            if !(call.is_function(mapping.source_func)
+                || matches!(mapping.replacement, ClearReplacement::Pointer)
                     && self.is_likely_free_func(call, ast_context))
             {
                 continue;
