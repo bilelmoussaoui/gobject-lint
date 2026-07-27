@@ -15,3 +15,5 @@ seh = "seh"
 SEH = "SEH"
 # Compiler warning flag syntax (-Wwarning-name)
 Wwarning = "Wwarning"
+# Hyphenated prefix: "mis-parses"
+mis = "mis"

@@ -142,6 +142,7 @@ pub struct ConfigOption {
 
 pub mod dead_code;
 pub mod deprecated_add_private;
+pub mod g_auto_init;
 pub mod g_error_init;
 pub mod g_error_leak;
 pub mod g_object_virtual_methods_chain_up;
@@ -198,6 +199,7 @@ pub mod use_pragma_once;
 
 pub use dead_code::DeadCode;
 pub use deprecated_add_private::DeprecatedAddPrivate;
+pub use g_auto_init::GAutoInit;
 pub use g_error_init::GErrorInit;
 pub use g_error_leak::GErrorLeak;
 pub use g_object_virtual_methods_chain_up::GObjectVirtualMethodsChainUp;

@@ -16,6 +16,7 @@ fixture_c_args = [
 
 subdir('dead_code')
 subdir('deprecated_add_private')
+subdir('g_auto_init')
 subdir('g_error_init')
 subdir('g_error_leak')
 subdir('get_type_not_const')

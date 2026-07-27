@@ -20,6 +20,10 @@ impl Parser {
         // identifier inside the array_declarator. Capture it as a fallback.
         let mut macro_modifier_name: Option<&str> = None;
         let mut macro_modifier_location: Option<SourceLocation> = None;
+        // tree-sitter-c mis-parses `g_autofd int fd;` as
+        // type_identifier(g_autofd) + identifier(int) + ERROR(fd).
+        // Capture ERROR nodes so we can recover the variable name later.
+        let mut error_nodes: Vec<Node> = Vec::new();
 
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -71,11 +75,34 @@ impl Parser {
                 {
                     declarator = Some(child);
                 }
+                "ERROR" => {
+                    error_nodes.push(child);
+                }
                 _ => {}
             }
         }
 
-        let declarator = declarator?;
+        let mut declarator = declarator?;
+
+        // tree-sitter-c mis-parses `g_autofd int fd;` as
+        // type_identifier(g_autofd) + identifier(int) + ERROR(fd).
+        // When the "declarator" is a primitive type keyword and the type has an
+        // auto-cleanup macro, move the keyword to type_parts and recover the
+        // real variable name from ERROR nodes.
+        if declarator.kind() == "identifier"
+            && !error_nodes.is_empty()
+            && let Ok(text) = std::str::from_utf8(&source[declarator.byte_range()])
+            && TypeInfo::new(text, SourceLocation::default())
+                .as_basic()
+                .is_some()
+            && TypeInfo::parse_auto_cleanup(&type_parts.join(" ")).is_some()
+        {
+            type_parts.push(text);
+            last_type_node = Some(declarator);
+            if let Some(err_node) = error_nodes.first() {
+                declarator = *err_node;
+            }
+        }
 
         // Get variable name and its location from declarator
         let mut var_name = None;
@@ -142,14 +169,17 @@ impl Parser {
         //
         // Distinguish the two by checking for an auto-cleanup macro in type_parts.
         if var_name.is_none() && declarator.kind() == "identifier" {
-            if TypeInfo::parse_auto_cleanup(&type_parts.join(" ")).is_some() {
-                // Pattern (b): move identifier into type so base_type is correct.
-                // Use an empty placeholder for the variable name since it is
-                // unrecoverable from this node alone.
+            let auto = TypeInfo::parse_auto_cleanup(&type_parts.join(" "));
+            if auto.as_ref().is_some_and(|m| m.type_arg().is_none()) {
+                // Pattern (b): g_autofree splits into declaration(`g_autofree
+                // MyType`) + expression(`*var=NULL`). The identifier extends the
+                // type; use an empty placeholder for the variable name since it
+                // lives in the sibling expression node.
                 type_parts.push(declarator_text);
                 var_name = Some("");
             } else {
-                // Pattern (a): identifier is the variable name.
+                // Pattern (a): normal declaration, or a macro_type_specifier
+                // like g_autoptr(GList) that already carries its type argument.
                 var_name = Some(declarator_text);
                 var_name_location = Some(self.node_location(declarator));
             }
