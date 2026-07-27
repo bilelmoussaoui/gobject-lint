@@ -14,8 +14,11 @@ impl Parser {
         let condition_node = node.child_by_field_name("condition")?;
         let condition = self.parse_expression(condition_node, source)?;
 
-        let consequence_node = node.child_by_field_name("consequence")?;
-        let then_expr = self.parse_expression(consequence_node, source)?;
+        // GNU C extension: `a ?: b` omits the consequence (equivalent to `a ? a : b`)
+        let then_expr = node
+            .child_by_field_name("consequence")
+            .and_then(|n| self.parse_expression(n, source))
+            .unwrap_or_else(|| condition.clone());
 
         let alternative_node = node.child_by_field_name("alternative")?;
         let else_expr = self.parse_expression(alternative_node, source)?;
