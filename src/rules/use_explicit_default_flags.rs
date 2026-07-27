@@ -8,8 +8,8 @@ use crate::{
 
 pub struct UseExplicitDefaultFlags;
 
-/// Mapping of (function_name, arg_position, replacement_constant, min glib version)
-/// arg_position is 0-indexed
+/// Mapping of (function_name, arg_position, replacement_constant, min glib
+/// version) arg_position is 0-indexed
 const FLAG_REPLACEMENTS: &[(&str, usize, &str, (u32, u32))] = &[
     // GApplication
     (

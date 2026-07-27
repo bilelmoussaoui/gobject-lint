@@ -302,7 +302,8 @@ impl Expression {
         }
     }
 
-    /// Extract variable from simple expressions (Identifier, FieldAccess or Unary)
+    /// Extract variable from simple expressions (Identifier, FieldAccess or
+    /// Unary)
     pub fn extract_variable(&self) -> Option<&Self> {
         match self {
             Self::Identifier(_) | Self::FieldAccess(_) => Some(self),

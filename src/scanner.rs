@@ -120,6 +120,7 @@ macro_rules! for_each_rule {
             (g_param_spec_null_nick_blurb, GParamSpecNullNickBlurb),
             (g_param_spec_static_strings, GParamSpecStaticStrings),
             (property_canonical_name, PropertyCanonicalName),
+            (g_auto_init, GAutoInit),
             (g_error_init, GErrorInit),
             (g_error_leak, GErrorLeak),
             (g_source_id_not_stored, GSourceIdNotStored),

@@ -340,6 +340,7 @@ rule_test!(
     deprecated_add_private,
     gobject_linter::rules::DeprecatedAddPrivate
 );
+rule_test!(g_auto_init, gobject_linter::rules::GAutoInit);
 rule_test!(g_error_init, gobject_linter::rules::GErrorInit);
 rule_test!(g_error_leak, gobject_linter::rules::GErrorLeak);
 rule_test!(

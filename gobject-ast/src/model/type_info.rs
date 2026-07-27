@@ -17,6 +17,8 @@ pub enum AutoCleanupMacro {
     Auto(String),
     /// g_autofree
     Autofree,
+    /// g_autofd
+    Autofd,
     /// g_autolist(TypeName)
     Autolist(String),
     /// g_autoslist(TypeName)
@@ -32,6 +34,7 @@ impl AutoCleanupMacro {
             Self::Autoptr(_) => "g_autoptr",
             Self::Auto(_) => "g_auto",
             Self::Autofree => "g_autofree",
+            Self::Autofd => "g_autofd",
             Self::Autolist(_) => "g_autolist",
             Self::Autoslist(_) => "g_autoslist",
             Self::Autoqueue(_) => "g_autoqueue",
@@ -46,7 +49,7 @@ impl AutoCleanupMacro {
             | Self::Autolist(t)
             | Self::Autoslist(t)
             | Self::Autoqueue(t) => Some(t),
-            Self::Autofree => None,
+            Self::Autofree | Self::Autofd => None,
         }
     }
 }
@@ -57,6 +60,7 @@ impl std::fmt::Display for AutoCleanupMacro {
             Self::Autoptr(t) => f.write_fmt(format_args!("g_autoptr({t})")),
             Self::Auto(t) => f.write_fmt(format_args!("g_auto({t})")),
             Self::Autofree => f.write_str("g_autofree"),
+            Self::Autofd => f.write_str("g_autofd"),
             Self::Autolist(t) => f.write_fmt(format_args!("g_autolist({t})")),
             Self::Autoslist(t) => f.write_fmt(format_args!("g_autoslist({t})")),
             Self::Autoqueue(t) => f.write_fmt(format_args!("g_autoqueue({t})")),
@@ -197,6 +201,8 @@ impl TypeInfo {
 
         if type_str.contains("g_autofree") {
             Some(AutoCleanupMacro::Autofree)
+        } else if type_str.contains("g_autofd") {
+            Some(AutoCleanupMacro::Autofd)
         } else if let Some(t) = try_with_arg("g_autoptr") {
             Some(AutoCleanupMacro::Autoptr(t))
         } else if let Some(t) = try_with_arg("g_autolist") {

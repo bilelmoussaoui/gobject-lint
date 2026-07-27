@@ -1,0 +1,8 @@
+basic.c:7:3: g_auto_init: g_autofree variable 'str' must be initialized to NULL
+basic.c:15:3: g_auto_init: g_autoptr variable 'list' must be initialized to NULL
+basic.c:23:3: g_auto_init: g_autofd variable 'fd' must be initialized to -1
+basic.c:31:3: g_auto_init: g_auto variable 'queue' must be initialized to G_QUEUE_INIT
+basic.c:39:3: g_auto_init: g_auto variable 'value' must be initialized to G_VALUE_INIT
+basic.c:63:3: g_auto_init: g_autofree variable 'str' must be initialized to NULL
+basic.c:74:3: g_auto_init: g_autolist variable 'list' must be initialized to NULL
+basic.c:82:3: g_auto_init: g_autofree variable 'str' must be initialized to NULL
