@@ -26,6 +26,13 @@ test_bare_usage (const char *a, const char *b)
   /* Correct: explicit comparison */
   if (strcmp (a, b) != 0)
     g_print ("different\n");
+
+  /* Fix also while and for loops */
+  while (strcmp (a, b))
+    g_print ("different\n");
+
+  for (; !strcmp (a, b); )
+    g_print ("equal\n");
 }
 
 /* Correct: return value for comparison function */

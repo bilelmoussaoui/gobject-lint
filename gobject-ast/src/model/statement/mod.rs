@@ -257,6 +257,28 @@ impl Statement {
         results.into_iter()
     }
 
+    /// Iterator over all while statements in this statement tree (recursive)
+    pub fn iter_while_statements<'s>(&'s self) -> impl Iterator<Item = &'s WhileStatement> + 's {
+        let mut results: Vec<&'s WhileStatement> = Vec::new();
+        self.walk(&mut |s| {
+            if let Self::While(while_stmt) = s {
+                results.push(while_stmt);
+            }
+        });
+        results.into_iter()
+    }
+
+    /// Iterator over all for statements in this statement tree (recursive)
+    pub fn iter_for_statements<'s>(&'s self) -> impl Iterator<Item = &'s ForStatement> + 's {
+        let mut results: Vec<&'s ForStatement> = Vec::new();
+        self.walk(&mut |s| {
+            if let Self::For(for_stmt) = s {
+                results.push(for_stmt);
+            }
+        });
+        results.into_iter()
+    }
+
     /// Iterator over all variable declarations in this statement tree
     /// (recursive)
     pub fn iter_declarations<'s>(&'s self) -> impl Iterator<Item = &'s VariableDecl> + 's {

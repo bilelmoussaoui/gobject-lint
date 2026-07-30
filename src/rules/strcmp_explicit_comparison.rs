@@ -37,6 +37,14 @@ impl Rule for StrcmpExplicitComparison {
             for if_stmt in stmt.iter_if_statements() {
                 self.check_condition(&if_stmt.condition, file, violations);
             }
+            for while_stmt in stmt.iter_while_statements() {
+                self.check_condition(&while_stmt.condition, file, violations);
+            }
+            for for_stmt in stmt.iter_for_statements() {
+                if let Some(condition) = &for_stmt.condition {
+                    self.check_condition(condition, file, violations);
+                }
+            }
         }
     }
 }
