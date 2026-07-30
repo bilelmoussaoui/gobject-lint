@@ -111,8 +111,35 @@ impl CallExpression {
                     | "g_try_new0"
                     | "g_malloc"
                     | "g_malloc0"
+                    | "g_realloc"
+                    | "g_try_malloc"
+                    | "g_try_malloc0"
+                    | "g_memdup"
+                    | "g_memdup2"
                     | "g_strdup"
                     | "g_strndup"
+                    | "g_strdup_printf"
+                    | "g_strdup_vprintf"
+                    | "g_strconcat"
+                    | "g_strjoin"
+                    | "g_strjoinv"
+                    | "g_strnfill"
+                    | "g_strreverse"
+                    | "g_strchug"
+                    | "g_strchomp"
+                    | "g_strcompress"
+                    | "g_strescape"
+                    | "g_uri_unescape_string"
+                    | "g_uri_escape_string"
+                    | "g_path_get_dirname"
+                    | "g_path_get_basename"
+                    | "g_build_filename"
+                    | "g_build_path"
+                    | "g_canonicalize_filename"
+                    | "g_compute_checksum_for_data"
+                    | "g_compute_hmac_for_data"
+                    | "g_base64_encode"
+                    | "g_base64_decode"
                     | "g_file_new_for_path"
                     | "g_file_new_for_uri"
                     | "g_file_new_tmp"
@@ -126,10 +153,16 @@ impl CallExpression {
                     | "g_ptr_array_new"
                     | "g_error_new"
                     | "g_error_new_literal"
+                    | "g_error_copy"
+                    | "g_key_file_get_string"
+                    | "g_key_file_get_value"
             ) || name.ends_with("_new")
                 || name.ends_with("_get_instance")
+                || name.ends_with("_dup")
+                || name.ends_with("_to_string")
                 || name.contains("_new_")
                 || name.contains("_create")
+                || name.contains("_strdup")
         } else {
             false
         }

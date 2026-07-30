@@ -9,27 +9,28 @@ use crate::{
 
 impl Parser {
     pub(crate) fn parse_variable_decl(&self, node: Node, source: &[u8]) -> Option<VariableDecl> {
-        // declaration contains declarator and optionally type_specifier
+        self.parse_variable_decls(node, source).into_iter().next()
+    }
+
+    pub(crate) fn parse_variable_decls(&self, node: Node, source: &[u8]) -> Vec<VariableDecl> {
+        // declaration contains type specifiers (shared) and one or more declarators
         let mut type_parts = Vec::new();
-        let mut declarator = None;
+        let mut declarators = Vec::new();
         let mut first_type_node: Option<Node> = None;
         let mut last_type_node: Option<Node> = None;
         let mut is_static = false;
-        // tree-sitter-c parses ALL-CAPS identifiers (e.g. `MY_ARRAY`) as a
-        // `macro_modifier` sibling of the declarator rather than as an
-        // identifier inside the array_declarator. Capture it as a fallback.
         let mut macro_modifier_name: Option<&str> = None;
         let mut macro_modifier_location: Option<SourceLocation> = None;
-        // tree-sitter-c mis-parses `g_autofd int fd;` as
-        // type_identifier(g_autofd) + identifier(int) + ERROR(fd).
-        // Capture ERROR nodes so we can recover the variable name later.
         let mut error_nodes: Vec<Node> = Vec::new();
 
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             match child.kind() {
                 "type_qualifier" => {
-                    let qualifier = std::str::from_utf8(&source[child.byte_range()]).ok()?;
+                    let Some(qualifier) = std::str::from_utf8(&source[child.byte_range()]).ok()
+                    else {
+                        continue;
+                    };
                     type_parts.push(qualifier);
                     if first_type_node.is_none() {
                         first_type_node = Some(child);
@@ -37,7 +38,9 @@ impl Parser {
                     last_type_node = Some(child);
                 }
                 "storage_class_specifier" => {
-                    let text = std::str::from_utf8(&source[child.byte_range()]).ok()?;
+                    let Some(text) = std::str::from_utf8(&source[child.byte_range()]).ok() else {
+                        continue;
+                    };
                     if text == "static" {
                         is_static = true;
                     }
@@ -53,7 +56,10 @@ impl Parser {
                 | "sized_type_specifier"
                 | "struct_specifier"
                 | "macro_type_specifier" => {
-                    type_parts.push(std::str::from_utf8(&source[child.byte_range()]).ok()?);
+                    let Some(text) = std::str::from_utf8(&source[child.byte_range()]).ok() else {
+                        continue;
+                    };
+                    type_parts.push(text);
                     if first_type_node.is_none() {
                         first_type_node = Some(child);
                     }
@@ -65,15 +71,13 @@ impl Parser {
                         macro_modifier_location = Some(self.node_location(child));
                     }
                 }
-                // Declarations with initializer: int x = 5;
                 "init_declarator" => {
-                    declarator = Some(child);
+                    declarators.push(child);
                 }
-                // Declarations without initializer: int x;  or  int *x;
                 "pointer_declarator" | "identifier" | "array_declarator"
-                    if declarator.is_none() =>
+                    if declarators.is_empty() =>
                 {
-                    declarator = Some(child);
+                    declarators.push(child);
                 }
                 "ERROR" => {
                     error_nodes.push(child);
@@ -82,136 +86,136 @@ impl Parser {
             }
         }
 
-        let mut declarator = declarator?;
-
-        // tree-sitter-c mis-parses `g_autofd int fd;` as
-        // type_identifier(g_autofd) + identifier(int) + ERROR(fd).
-        // When the "declarator" is a primitive type keyword and the type has an
-        // auto-cleanup macro, move the keyword to type_parts and recover the
-        // real variable name from ERROR nodes.
-        if declarator.kind() == "identifier"
-            && !error_nodes.is_empty()
-            && let Ok(text) = std::str::from_utf8(&source[declarator.byte_range()])
-            && TypeInfo::new(text, SourceLocation::default())
-                .as_basic()
-                .is_some()
-            && TypeInfo::parse_auto_cleanup(&type_parts.join(" ")).is_some()
-        {
-            type_parts.push(text);
-            last_type_node = Some(declarator);
-            if let Some(err_node) = error_nodes.first() {
-                declarator = *err_node;
-            }
+        if declarators.is_empty() {
+            return Vec::new();
         }
 
-        // Get variable name and its location from declarator
-        let mut var_name = None;
-        let mut var_name_location: Option<SourceLocation> = None;
-        let mut initializer = None;
+        let first_type = match first_type_node {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+        let last_type = match last_type_node {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
 
-        // Count pointer depth from declarator
-        let declarator_text = std::str::from_utf8(&source[declarator.byte_range()]).ok()?;
-        let pointer_depth = declarator_text.chars().filter(|&c| c == '*').count();
+        let num_declarators = declarators.len();
+        let mut results = Vec::with_capacity(num_declarators);
 
-        // Extract array size from declarator (searches recursively for
-        // array_declarator)
-        let array_size = self.extract_array_size(declarator, source);
+        for (i, mut declarator) in declarators.into_iter().enumerate() {
+            let mut type_parts = type_parts.clone();
 
-        let mut dec_cursor = declarator.walk();
-        let mut has_equals = false;
-        for child in declarator.children(&mut dec_cursor) {
-            if child.kind() == "=" {
-                has_equals = true;
-                continue;
+            // g_autofd fixup only applies to the first (single) declarator
+            if i == 0
+                && declarator.kind() == "identifier"
+                && !error_nodes.is_empty()
+                && let Ok(text) = std::str::from_utf8(&source[declarator.byte_range()])
+                && TypeInfo::new(text, SourceLocation::default())
+                    .as_basic()
+                    .is_some()
+                && TypeInfo::parse_auto_cleanup(&type_parts.join(" ")).is_some()
+            {
+                type_parts.push(text);
+                if let Some(err_node) = error_nodes.first() {
+                    declarator = *err_node;
+                }
             }
 
-            if !has_equals {
-                // Before "=", extract variable name and location
-                match child.kind() {
-                    "pointer_declarator"
-                    | "identifier"
-                    | "array_declarator"
-                    | "parenthesized_declarator" => {
-                        if let Some((id, loc)) = self.find_identifier_with_location(child, source) {
-                            var_name = Some(id);
-                            var_name_location = Some(loc);
-                        }
-                    }
-                    _ => {}
+            let mut var_name = None;
+            let mut var_name_location: Option<SourceLocation> = None;
+            let mut initializer = None;
+
+            let Some(declarator_text) = std::str::from_utf8(&source[declarator.byte_range()]).ok()
+            else {
+                continue;
+            };
+            let pointer_depth = declarator_text.chars().filter(|&c| c == '*').count();
+
+            let array_size = self.extract_array_size(declarator, source);
+
+            let mut dec_cursor = declarator.walk();
+            let mut has_equals = false;
+            for child in declarator.children(&mut dec_cursor) {
+                if child.kind() == "=" {
+                    has_equals = true;
+                    continue;
                 }
-            } else {
-                // After "=", parse as initializer
-                if child.is_named() && Self::is_expression_node(&child) {
+
+                if !has_equals {
+                    match child.kind() {
+                        "pointer_declarator"
+                        | "identifier"
+                        | "array_declarator"
+                        | "parenthesized_declarator" => {
+                            if let Some((id, loc)) =
+                                self.find_identifier_with_location(child, source)
+                            {
+                                var_name = Some(id);
+                                var_name_location = Some(loc);
+                            }
+                        }
+                        _ => {}
+                    }
+                } else if child.is_named() && Self::is_expression_node(&child) {
                     initializer = self.parse_expression(child, source);
                 }
             }
-        }
 
-        // Fallback for ALL-CAPS names emitted as macro_modifier at the
-        // declaration level.
-        if var_name.is_none_or(str::is_empty)
-            && let Some(name) = macro_modifier_name
-        {
-            var_name = Some(name);
-            var_name_location = macro_modifier_location.take();
-        }
-
-        // When the declarator is a bare identifier leaf its .children() is
-        // empty so the loop above never ran. Two patterns:
-        //
-        // a) Normal non-pointer declaration (`int foo;`, `MyType foo;`):
-        //    the identifier is the variable name.
-        //
-        // b) tree-sitter-c splits `g_autofree MyType *var = NULL;` into two
-        //    nodes — declaration(`g_autofree MyType`) and expression(`*var=NULL`).
-        //    In this case the identifier is the actual type name and the real
-        //    variable name lives in the sibling expression statement.
-        //
-        // Distinguish the two by checking for an auto-cleanup macro in type_parts.
-        if var_name.is_none() && declarator.kind() == "identifier" {
-            let auto = TypeInfo::parse_auto_cleanup(&type_parts.join(" "));
-            if auto.as_ref().is_some_and(|m| m.type_arg().is_none()) {
-                // Pattern (b): g_autofree splits into declaration(`g_autofree
-                // MyType`) + expression(`*var=NULL`). The identifier extends the
-                // type; use an empty placeholder for the variable name since it
-                // lives in the sibling expression node.
-                type_parts.push(declarator_text);
-                var_name = Some("");
-            } else {
-                // Pattern (a): normal declaration, or a macro_type_specifier
-                // like g_autoptr(GList) that already carries its type argument.
-                var_name = Some(declarator_text);
-                var_name_location = Some(self.node_location(declarator));
+            if var_name.is_none_or(str::is_empty)
+                && let Some(name) = macro_modifier_name
+            {
+                var_name = Some(name);
+                var_name_location = macro_modifier_location.clone();
             }
+
+            // When the declarator is a bare identifier leaf its .children() is
+            // empty so the loop above never ran.
+            if var_name.is_none() && declarator.kind() == "identifier" {
+                let auto = TypeInfo::parse_auto_cleanup(&type_parts.join(" "));
+                if auto.as_ref().is_some_and(|m| m.type_arg().is_none()) {
+                    type_parts.push(declarator_text);
+                    var_name = Some("");
+                } else {
+                    var_name = Some(declarator_text);
+                    var_name_location = Some(self.node_location(declarator));
+                }
+            }
+
+            let mut full_text = type_parts.join(" ");
+            if pointer_depth > 0 {
+                full_text.push_str(&"*".repeat(pointer_depth));
+            }
+
+            let type_location = SourceLocation::new(
+                first_type.start_position().row + 1,
+                first_type.start_position().column + 1,
+                first_type.start_byte(),
+                last_type.end_byte(),
+                Arc::clone(&self.current_source),
+            );
+            let type_info = TypeInfo::new(&full_text, type_location);
+
+            let Some(name) = var_name else { continue };
+            let Some(name_location) = var_name_location else {
+                continue;
+            };
+
+            results.push(VariableDecl {
+                type_info,
+                name: name.to_owned(),
+                is_static,
+                name_location,
+                initializer,
+                array_size,
+                location: if num_declarators > 1 {
+                    self.node_location(declarator)
+                } else {
+                    self.node_location(node)
+                },
+            });
         }
 
-        // Build full type text
-        let mut full_text = type_parts.join(" ");
-        if pointer_depth > 0 {
-            full_text.push_str(&"*".repeat(pointer_depth));
-        }
-
-        // TypeInfo::new() will automatically filter out storage class specifiers
-        let first = first_type_node?;
-        let last = last_type_node?;
-        let type_location = SourceLocation::new(
-            first.start_position().row + 1,
-            first.start_position().column + 1,
-            first.start_byte(),
-            last.end_byte(),
-            Arc::clone(&self.current_source),
-        );
-        let type_info = TypeInfo::new(&full_text, type_location);
-
-        Some(VariableDecl {
-            type_info,
-            name: var_name?.to_owned(),
-            is_static,
-            name_location: var_name_location?,
-            initializer,
-            array_size,
-            location: self.node_location(node),
-        })
+        results
     }
 
     /// Find identifier and its location in the source

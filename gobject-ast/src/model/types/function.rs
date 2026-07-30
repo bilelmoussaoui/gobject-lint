@@ -298,6 +298,56 @@ impl FunctionDefItem {
         false
     }
 
+    /// Check if a specific named variable is allocated via an allocation call
+    pub fn is_named_var_allocated(&self, var_name: &str) -> bool {
+        for stmt in &self.body_statements {
+            let mut found = false;
+            stmt.walk(&mut |s| {
+                match s {
+                    Statement::Declaration(decl) if decl.name == var_name => {
+                        if matches!(&decl.initializer,
+                            Some(Expression::Call(call)) if call.is_allocation_call())
+                            || matches!(&decl.initializer, Some(Expression::AllocCall(_)))
+                        {
+                            found = true;
+                        }
+                    }
+                    Statement::Expression(expr_stmt) => {
+                        if let Expression::Assignment(assign) = expr_stmt.as_ref()
+                            && let Expression::Identifier(id) = &*assign.lhs
+                            && id.name == var_name
+                            && (matches!(&*assign.rhs, Expression::Call(call) if call.is_allocation_call())
+                                || matches!(&*assign.rhs, Expression::AllocCall(_)))
+                        {
+                            found = true;
+                        }
+                    }
+                    _ => {}
+                }
+            });
+            if found {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a specific named variable is passed to a cleanup call
+    pub fn is_named_var_passed_to_cleanup(&self, var_name: &str) -> bool {
+        for stmt in &self.body_statements {
+            for call in stmt.iter_calls() {
+                if call.is_cleanup_call()
+                    && let Some(arg) = call.get_arg(0)
+                    && let Expression::Identifier(id) = arg
+                    && id.name == var_name
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Find all g_object_class_install_properties calls in the function body
     pub fn find_install_properties_calls(&self) -> Vec<&CallExpression> {
         self.find_calls(&["g_object_class_install_properties"])

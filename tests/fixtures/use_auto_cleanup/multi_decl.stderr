@@ -1,0 +1,6 @@
+multi_decl.c:6:9: use_auto_cleanup: Consider using g_autofree aaa to avoid manual g_free
+multi_decl.c:6:22: use_auto_cleanup: Consider using g_autofree bbb to avoid manual g_free
+multi_decl.c:6:35: use_auto_cleanup: Consider using g_autofree ccc to avoid manual g_free
+multi_decl.c:21:11: use_auto_cleanup: Consider using g_autoptr(GObject) obj1 to avoid manual cleanup
+multi_decl.c:21:25: use_auto_cleanup: Consider using g_autoptr(GObject) obj2 to avoid manual cleanup
+multi_decl.c:33:9: use_auto_cleanup: Consider using g_autofree allocated to avoid manual g_free
