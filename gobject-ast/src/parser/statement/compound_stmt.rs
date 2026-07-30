@@ -35,22 +35,28 @@ impl Parser {
 
         let mut cursor = body_node.walk();
         for child in body_node.children(&mut cursor) {
-            if let Some(mut stmt) = self.parse_statement(child, source) {
-                if let Statement::Declaration(decl) = &mut stmt {
-                    if let Some((tag, auto_cleanup)) = pending_struct_fixup.take() {
-                        match tag {
-                            TagKeyword::Struct => decl.type_info.is_struct = true,
-                            TagKeyword::Union => decl.type_info.is_union = true,
-                            TagKeyword::Enum => decl.type_info.is_enum = true,
-                        }
-                        decl.type_info.auto_cleanup = Some(auto_cleanup);
-                    }
+            if child.kind() == "declaration" {
+                let decls = self.parse_variable_decls(child, source);
+                if decls.is_empty() {
+                    pending_struct_fixup = Self::detect_autofree_struct_stub(child, source);
                 } else {
-                    pending_struct_fixup = None;
+                    for (i, mut decl) in decls.into_iter().enumerate() {
+                        if i == 0
+                            && let Some((tag, auto_cleanup)) = pending_struct_fixup.take()
+                        {
+                            match tag {
+                                TagKeyword::Struct => decl.type_info.is_struct = true,
+                                TagKeyword::Union => decl.type_info.is_union = true,
+                                TagKeyword::Enum => decl.type_info.is_enum = true,
+                            }
+                            decl.type_info.auto_cleanup = Some(auto_cleanup);
+                        }
+                        statements.push(Statement::Declaration(Box::new(decl)));
+                    }
                 }
+            } else if let Some(stmt) = self.parse_statement(child, source) {
+                pending_struct_fixup = None;
                 statements.push(stmt);
-            } else if child.kind() == "declaration" {
-                pending_struct_fixup = Self::detect_autofree_struct_stub(child, source);
             }
         }
 

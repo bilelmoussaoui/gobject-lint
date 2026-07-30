@@ -11,21 +11,6 @@ use crate::{
     rules::{ConfigOption, Rule, Violation},
 };
 
-const AUTOFREE_ALLOCATIONS: &[&str] = &[
-    "g_strdup",
-    "g_strndup",
-    "g_strdup_printf",
-    "g_strdup_vprintf",
-    "g_malloc",
-    "g_malloc0",
-    "g_realloc",
-    "g_try_malloc",
-    "g_try_malloc0",
-    "g_memdup",
-    "g_new",
-    "g_new0",
-];
-
 pub struct UseAutoCleanup;
 
 impl Rule for UseAutoCleanup {
@@ -165,15 +150,10 @@ impl UseAutoCleanup {
             return None;
         }
 
-        // g_free'd with autofree-suitable allocation → g_autofree
+        // g_free'd with a recognized allocation → g_autofree
         let is_freed_with_g_free = func.is_var_passed_to_function(var_name, "g_free", 0);
         if is_freed_with_g_free {
-            let is_autofree_allocated = func.is_var_allocated_with(type_info, |call| {
-                call.function_name_str()
-                    .is_some_and(|name| AUTOFREE_ALLOCATIONS.contains(&name))
-            });
-
-            if is_autofree_allocated && !is_returned {
+            if func.is_named_var_allocated(var_name) && !is_returned {
                 return Some(format!(
                     "Consider using g_autofree {} to avoid manual g_free",
                     var_name
@@ -189,8 +169,8 @@ impl UseAutoCleanup {
         }
 
         // General case: allocated + manually freed + not returned → g_autoptr(Type)
-        let is_allocated = func.is_var_allocated(type_info);
-        let is_manually_freed = func.is_var_passed_to_cleanup(type_info);
+        let is_allocated = func.is_named_var_allocated(var_name);
+        let is_manually_freed = func.is_named_var_passed_to_cleanup(var_name);
 
         if is_allocated && is_manually_freed && !is_returned {
             return Some(format!(
