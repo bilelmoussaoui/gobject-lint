@@ -1,1 +1,2 @@
 autofree_basic.c:6:3: use_auto_cleanup: Consider using g_autofree copy to avoid manual g_free
+autofree_basic.c:11:3: use_auto_cleanup: Consider using g_auto(GStrv) tokens to avoid manual g_strfreev
