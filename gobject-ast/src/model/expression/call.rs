@@ -156,6 +156,14 @@ impl CallExpression {
                     | "g_error_copy"
                     | "g_key_file_get_string"
                     | "g_key_file_get_value"
+                    | "g_strsplit"
+                    | "g_strsplit_set"
+                    | "g_strdupv"
+                    | "g_key_file_get_string_list"
+                    | "g_key_file_get_locale_string_list"
+                    | "g_key_file_get_groups"
+                    | "g_key_file_get_keys"
+                    | "g_uri_list_extract_uris"
             ) || name.ends_with("_new")
                 || name.ends_with("_get_instance")
                 || name.ends_with("_dup")
@@ -194,6 +202,7 @@ impl CallExpression {
                     | "g_array_free"
                     | "g_ptr_array_unref"
                     | "g_ptr_array_free"
+                    | "g_strfreev"
             ) || name.ends_with("_unref")
                 || name.ends_with("_free")
                 || name.ends_with("_destroy")

@@ -92,7 +92,7 @@ impl UseAutoCleanup {
             .iter_local_declarations()
             .filter(|d| {
                 !d.type_info.uses_auto_cleanup()
-                    && d.type_info.pointer_depth == 1
+                    && (d.type_info.pointer_depth == 1 || Self::is_strv_type(&d.type_info))
                     && d.is_simple_identifier()
             })
             .map(|d| (d.name.as_str(), (&d.type_info, &d.location)))
@@ -150,6 +150,18 @@ impl UseAutoCleanup {
             return None;
         }
 
+        // GStrv / gchar** → g_auto(GStrv)
+        if Self::is_strv_type(type_info)
+            && func.is_var_passed_to_function(var_name, "g_strfreev", 0)
+            && func.is_named_var_allocated(var_name)
+            && !is_returned
+        {
+            return Some(format!(
+                "Consider using g_auto(GStrv) {} to avoid manual g_strfreev",
+                var_name
+            ));
+        }
+
         // g_free'd with a recognized allocation → g_autofree
         let is_freed_with_g_free = func.is_var_passed_to_function(var_name, "g_free", 0);
         if is_freed_with_g_free {
@@ -180,6 +192,11 @@ impl UseAutoCleanup {
         }
 
         None
+    }
+
+    fn is_strv_type(type_info: &TypeInfo) -> bool {
+        (matches!(type_info.base_type.as_str(), "gchar" | "char") && type_info.pointer_depth == 2)
+            || (type_info.base_type == "GStrv" && type_info.pointer_depth == 0)
     }
 
     fn frees_array_keeping_data(
