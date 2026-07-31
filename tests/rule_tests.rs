@@ -212,7 +212,12 @@ fn run_fixture_tests(rule_name: &str, rule: &dyn Rule) {
             .then_some(public_headers_file.as_path());
 
         let (ctx, temp_dir) = build_context_for_file(test_file, public_headers_arg);
-        let config = Config::default();
+        let config_file = fixtures_dir.join(format!("{stem}.toml"));
+        let config = if config_file.exists() {
+            Config::load(&config_file).expect("failed to load fixture config")
+        } else {
+            Config::default()
+        };
 
         let mut violations = Vec::new();
         rule.check_all(&ctx, &config, &mut violations);

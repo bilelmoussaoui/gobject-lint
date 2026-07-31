@@ -1,0 +1,2 @@
+[rules.use_auto_cleanup]
+allocation_proof = false

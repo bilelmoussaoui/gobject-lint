@@ -32,13 +32,22 @@ impl Rule for UseAutoCleanup {
 
     fn config_options(&self) -> &'static [ConfigOption] {
         static OPTIONS: LazyLock<Vec<ConfigOption>> = LazyLock::new(|| {
-            vec![ConfigOption {
-                name: "ignore_types",
-                option_type: "array<string>",
-                default_value: "[]",
-                example_value: "[\"cairo_*\", \"Pango*\", \"RsvgHandle\"]",
-                description: "List of glob patterns for types to ignore",
-            }]
+            vec![
+                ConfigOption {
+                    name: "ignore_types",
+                    option_type: "array<string>",
+                    default_value: "[]",
+                    example_value: "[\"cairo_*\", \"Pango*\", \"RsvgHandle\"]",
+                    description: "List of glob patterns for types to ignore",
+                },
+                ConfigOption {
+                    name: "allocation_proof",
+                    option_type: "bool",
+                    default_value: "true",
+                    example_value: "false",
+                    description: "Only suggest auto-cleanup when the variable is provably allocated in the current function. When false, any manually freed variable is flagged.",
+                },
+            ]
         });
 
         &OPTIONS
@@ -59,9 +68,14 @@ impl Rule for UseAutoCleanup {
         violations: &mut Vec<Violation>,
     ) {
         let ignore_types = self.build_ignore_types_matcher(config);
+        let allocation_proof = config
+            .get_rule_config(self.name())
+            .and_then(|rc| rc.options.get("allocation_proof"))
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(true);
         for (path, file) in ast_context.iter_c_files() {
             for func in file.iter_function_definitions() {
-                self.check_function(func, path, violations, &ignore_types);
+                self.check_function(func, path, violations, &ignore_types, allocation_proof);
                 self.check_goto_cleanup(func, file, violations);
             }
         }
@@ -87,6 +101,7 @@ impl UseAutoCleanup {
         file_path: &std::path::Path,
         violations: &mut Vec<Violation>,
         ignore_types: &GlobSet,
+        allocation_proof: bool,
     ) {
         let local_vars: HashMap<&str, (&TypeInfo, &SourceLocation)> = func
             .iter_local_declarations()
@@ -99,7 +114,9 @@ impl UseAutoCleanup {
             .collect();
 
         for (var_name, (type_info, location)) in &local_vars {
-            if let Some(suggestion) = self.suggest_auto_cleanup(func, var_name, type_info) {
+            if let Some(suggestion) =
+                self.suggest_auto_cleanup(func, var_name, type_info, allocation_proof)
+            {
                 if ignore_types.is_match(&type_info.base_type) {
                     continue;
                 }
@@ -114,6 +131,7 @@ impl UseAutoCleanup {
         func: &FunctionDefItem,
         var_name: &str,
         type_info: &TypeInfo,
+        allocation_proof: bool,
     ) -> Option<String> {
         let is_returned = func.is_var_returned(type_info);
 
@@ -153,7 +171,7 @@ impl UseAutoCleanup {
         // GStrv / gchar** → g_auto(GStrv)
         if Self::is_strv_type(type_info)
             && func.is_var_passed_to_function(var_name, "g_strfreev", 0)
-            && func.is_named_var_allocated(var_name)
+            && (!allocation_proof || func.is_named_var_allocated(var_name))
             && !is_returned
         {
             return Some(format!(
@@ -165,7 +183,7 @@ impl UseAutoCleanup {
         // g_free'd with a recognized allocation → g_autofree
         let is_freed_with_g_free = func.is_var_passed_to_function(var_name, "g_free", 0);
         if is_freed_with_g_free {
-            if func.is_named_var_allocated(var_name) && !is_returned {
+            if (!allocation_proof || func.is_named_var_allocated(var_name)) && !is_returned {
                 return Some(format!(
                     "Consider using g_autofree {} to avoid manual g_free",
                     var_name
@@ -181,7 +199,7 @@ impl UseAutoCleanup {
         }
 
         // General case: allocated + manually freed + not returned → g_autoptr(Type)
-        let is_allocated = func.is_named_var_allocated(var_name);
+        let is_allocated = !allocation_proof || func.is_named_var_allocated(var_name);
         let is_manually_freed = func.is_named_var_passed_to_cleanup(var_name);
 
         if is_allocated && is_manually_freed && !is_returned {

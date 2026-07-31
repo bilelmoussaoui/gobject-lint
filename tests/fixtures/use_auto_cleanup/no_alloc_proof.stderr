@@ -1,0 +1,3 @@
+no_alloc_proof.c:12:3: use_auto_cleanup: Consider using g_auto(GStrv) tokens to avoid manual g_strfreev
+no_alloc_proof.c:23:3: use_auto_cleanup: Consider using g_autofree name to avoid manual g_free
+no_alloc_proof.c:34:3: use_auto_cleanup: Consider using g_autoptr(GObject) obj to avoid manual cleanup
