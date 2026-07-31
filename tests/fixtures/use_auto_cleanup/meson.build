@@ -10,6 +10,7 @@ sources = [
   'error_basic.c',
   'goto_basic.c',
   'multi_decl.c',
+  'no_alloc_proof.c',
   'plain_struct.c',
   'ptr_array_free_false.c',
   'strv_basic.c',

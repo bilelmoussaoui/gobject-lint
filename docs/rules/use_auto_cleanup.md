@@ -32,3 +32,20 @@ my_function (void)
   // Automatic cleanup when function returns!
 }
 ```
+
+## Options
+
+### `allocation_proof` (default: `true`)
+
+When `true`, the rule only suggests auto-cleanup when the variable is provably
+allocated in the current function (e.g. via `g_object_new`, `g_strdup`,
+`g_new0`, etc.). This avoids false positives for variables that are freed but
+not locally allocated (borrowed pointers, out-parameters, etc.).
+
+Set to `false` to flag any manually freed variable, regardless of whether the
+allocation is visible:
+
+```toml
+[rules.use_auto_cleanup]
+allocation_proof = false
+```
