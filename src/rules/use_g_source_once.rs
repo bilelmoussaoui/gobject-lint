@@ -47,8 +47,14 @@ impl Rule for UseGSourceOnce {
         file: &FileModel,
         violations: &mut Vec<Violation>,
     ) {
+        let mut g_add_funcs = vec!["g_idle_add", "g_timeout_add"];
+        let (major, minor) = config.min_glib_version.unwrap_or((2, 78));
+        if major > 2 || (major == 2 && minor >= 78) {
+            g_add_funcs.push("g_timeout_add_seconds");
+        }
+
         // Find g_idle_add, g_timeout_add, and g_timeout_add_seconds calls
-        for call in func.find_calls(&["g_idle_add", "g_timeout_add", "g_timeout_add_seconds"]) {
+        for call in func.find_calls(&g_add_funcs) {
             let Some(idx) = gsource_callback_arg_index(call.function_name_str().unwrap_or(""))
             else {
                 continue;
