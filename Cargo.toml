@@ -20,6 +20,7 @@ needless_pass_by_value = "warn"
 [package]
 name = "gobject-linter"
 description = "A fast tree-sitter-based linter for GObject/C code"
+default-run = "gobject-linter"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
