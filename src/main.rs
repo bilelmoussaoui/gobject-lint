@@ -102,12 +102,26 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     if let Some(shell) = args.completions {
-        clap_complete::generate(
-            shell,
-            &mut Args::command(),
-            env!("CARGO_PKG_NAME"),
-            &mut std::io::stdout(),
-        );
+        if shell == Shell::Zsh {
+            // clap_complete doesn't escape colons in zsh value lists,
+            // but zsh uses `:` as a delimiter in completion specs.
+            let mut buf = Vec::new();
+            clap_complete::generate(
+                shell,
+                &mut Args::command(),
+                env!("CARGO_PKG_NAME"),
+                &mut buf,
+            );
+            let script = String::from_utf8(buf).expect("completion script is valid UTF-8");
+            print!("{}", script.replace("qemu:", "qemu\\:"));
+        } else {
+            clap_complete::generate(
+                shell,
+                &mut Args::command(),
+                env!("CARGO_PKG_NAME"),
+                &mut std::io::stdout(),
+            );
+        }
         return Ok(());
     }
 

@@ -26,6 +26,7 @@ repository.workspace = true
 license.workspace = true
 
 [features]
+qemu = ["gobject-ast/qemu"]
 lsp = ["dep:tower-lsp", "dep:tokio"]
 
 [[bin]]

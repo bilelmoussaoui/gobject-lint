@@ -50,6 +50,28 @@ strcpy(dst, src);
 
 See [CONFIG.md](CONFIG.md) for complete configuration documentation.
 
+## QEMU flavour
+
+QEMU syntax and rules are compile-time opt-ins. A normal build remains the
+GObject-only linter; build with the `qemu` feature to include QEMU's coroutine,
+wrapper, `GRAPH_*`, and `TSA_*` annotations:
+
+```bash
+cargo build --release --features qemu
+gobject-linter --only qemu:coroutine_fn /path/to/qemu
+```
+
+The `qemu:coroutine_fn` rule checks direct calls and statically resolvable
+callback calls against QEMU coroutine contexts. It follows annotated callback
+typedefs, owner-qualified struct fields, and simple local assignments. When an
+indirect target becomes ambiguous, the rule leaves it unresolved instead of
+guessing. The rule is still opt-in within a QEMU-enabled binary; enable it with
+`--only` or in the configuration file.
+
+Run `QEMU_SRC=/path/to/qemu scripts/check-qemu-corpus.sh` to test an existing
+checkout. With no `QEMU_SRC`, the script fetches the revision pinned by the
+repository.
+
 ## CI/CD Integration
 
 ### Container Image

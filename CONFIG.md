@@ -40,6 +40,20 @@ level = "warn"
 ignore = ["tests/**"]  # Ignore this rule for files matching these globs
 ```
 
+### QEMU rules
+
+QEMU rules exist only in binaries built with `--features qemu`. Their public
+names are namespaced and must be quoted as TOML keys:
+
+```toml
+[rules]
+"qemu:coroutine_fn" = "error"
+```
+
+The QEMU coroutine rule is opt-in, so a QEMU-enabled binary does not run it
+unless the rule has a configured level or is selected with
+`--only qemu:coroutine_fn`.
+
 ### Rule Levels
 
 - `error` - Fails the linter (exit code 1)
