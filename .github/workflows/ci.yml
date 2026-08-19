@@ -83,6 +83,30 @@ jobs:
       - name: Run tests
         run: cargo test --all
 
+  qemu:
+    name: QEMU flavour
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-qemu-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run QEMU feature tests
+        run: cargo test --workspace --features qemu
+
+      - name: Check pinned QEMU corpus
+        run: scripts/check-qemu-corpus.sh
+
   fixtures:
     name: Test Fixtures Build
     runs-on: ubuntu-latest
