@@ -6,6 +6,9 @@ repository.workspace = true
 license.workspace = true
 description = "AST representation of GObject C code"
 
+[features]
+qemu = ["tree-sitter-c-gobject/qemu"]
+
 [[bin]]
 name = "gobject-ast"
 path = "src/main.rs"
