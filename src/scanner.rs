@@ -99,6 +99,7 @@ macro_rules! for_each_rule {
         $crate::for_each_rule_impl! {
             $callback,
             (qemu_coroutine_fn, QemuCoroutineFn, "qemu:coroutine_fn"),
+            (qemu_coroutine_fn_position, QemuCoroutineFnPosition, "qemu:coroutine_fn_position"),
         }
     };
 }
