@@ -1,6 +1,10 @@
 #include "tree_sitter/parser.h"
 #include <string.h>
 
+#ifdef TREE_SITTER_C_GOBJECT_QEMU
+#include "../qemu/modifiers.h"
+#endif
+
 typedef enum {
     GOBJECT_MACRO_NAME,            /* G_DECLARE_* / G_DEFINE_* (not _WITH_CODE) */
     GOBJECT_MACRO_NAME_WITH_CODE,  /* G_DEFINE_*_WITH_CODE                      */
@@ -15,6 +19,9 @@ typedef enum {
     OBJC_SELECTOR_EXPR,            /* @selector(name:)                          */
     OBJC_STRING_LITERAL,           /* @"string"                                 */
     OBJC_MESSAGE_EXPR,             /* [obj message:arg]                         */
+#ifdef TREE_SITTER_C_GOBJECT_QEMU
+    QEMU_FUNCTION_LIKE_MODIFIER,   /* TSA_* modifier followed by arguments      */
+#endif
 } TokenType;
 
 void *tree_sitter_c_gobject_external_scanner_create(void) { return NULL; }
@@ -215,7 +222,11 @@ bool tree_sitter_c_gobject_external_scanner_scan(
                      valid_symbols[OBJC_CLASS_FORWARD]            ||
                      valid_symbols[OBJC_SELECTOR_EXPR]            ||
                      valid_symbols[OBJC_STRING_LITERAL]           ||
-                     valid_symbols[OBJC_MESSAGE_EXPR];
+                     valid_symbols[OBJC_MESSAGE_EXPR]
+#ifdef TREE_SITTER_C_GOBJECT_QEMU
+                     || valid_symbols[QEMU_FUNCTION_LIKE_MODIFIER]
+#endif
+                     ;
     if (!any_valid) return false;
 
     skip_whitespace(lexer);
@@ -271,6 +282,28 @@ bool tree_sitter_c_gobject_external_scanner_scan(
         lexer->result_symbol = OBJC_MESSAGE_EXPR;
         return true;
     }
+
+#ifdef TREE_SITTER_C_GOBJECT_QEMU
+    if (valid_symbols[MACRO_MODIFIER_NAME] &&
+        lexer->lookahead >= 'a' && lexer->lookahead <= 'z') {
+        char buf[64];
+        int len = 0;
+        while (len < 63 &&
+               (lexer->lookahead == '_' ||
+                (lexer->lookahead >= 'a' && lexer->lookahead <= 'z') ||
+                (lexer->lookahead >= '0' && lexer->lookahead <= '9'))) {
+            buf[len++] = (char)lexer->lookahead;
+            lexer->advance(lexer, false);
+        }
+        buf[len] = '\0';
+        if (qemu_is_lowercase_modifier(buf)) {
+            lexer->mark_end(lexer);
+            lexer->result_symbol = MACRO_MODIFIER_NAME;
+            return true;
+        }
+        return false;
+    }
+#endif
 
     /* Must start with an uppercase letter or underscore */
     if (!((lexer->lookahead >= 'A' && lexer->lookahead <= 'Z') ||
@@ -365,6 +398,17 @@ bool tree_sitter_c_gobject_external_scanner_scan(
      * subsequent advances are look-ahead only. */
     lexer->mark_end(lexer);
 
+#ifdef TREE_SITTER_C_GOBJECT_QEMU
+    if (valid_symbols[QEMU_FUNCTION_LIKE_MODIFIER] &&
+        len >= 4 && strncmp(buf, "TSA_", 4) == 0) {
+        lookahead_skip_whitespace(lexer);
+        if (lexer->lookahead == '(') {
+            lexer->result_symbol = QEMU_FUNCTION_LIKE_MODIFIER;
+            return true;
+        }
+    }
+#endif
+
     /* GOBJECT_EXPORT_MACRO: identifier immediately before G_DECLARE_* or G_DEFINE_* */
     if (valid_symbols[GOBJECT_EXPORT_MACRO] && len >= 1) {
         if (followed_by_gobject_macro(lexer)) {
@@ -388,7 +432,11 @@ bool tree_sitter_c_gobject_external_scanner_scan(
             strstr(buf, "_UNAVAILABLE") != NULL ||
             strstr(buf, "_ENUMERATOR_") != NULL ||
             (len >= 7 && strncmp(buf, "G_GNUC_", 7) == 0) ||
-            strstr(buf, "_INLINE") != NULL;
+            strstr(buf, "_INLINE") != NULL
+#ifdef TREE_SITTER_C_GOBJECT_QEMU
+            || qemu_is_uppercase_modifier(buf, len)
+#endif
+            ;
         if (!is_modifier) {
             /* An ALL_CAPS identifier followed by struct/union/enum is an
              * attribute macro (e.g. SECTION, PACKED) — never a type name. */
